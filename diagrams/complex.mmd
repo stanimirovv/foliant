@@ -1,0 +1,111 @@
+sequenceDiagram
+    %% Core Participants (always visible)
+    actor C as Client
+    participant GW as API Gateway
+
+    %% @region-start: flow=user-registration
+    %% Actors specific to user-registration
+    participant Auth as Auth Service
+    participant DB as User Database
+    participant ES as Email Service
+
+    rect rgb(255, 255, 255)
+        Note over C, ES: Flow: User Registration
+        
+        C->>GW: POST /api/register (email, password)
+        GW->>Auth: Hash Password & Validate
+        
+        %% @region-start: edge-case=weak-password
+        Auth-->>GW: Error 400: Weak Password
+        GW-->>C: Display "Password does not meet requirements"
+        %% @region-end
+        
+        Auth->>DB: Save New User
+        
+        %% @region-start: edge-case=duplicate-email
+        DB-->>Auth: Error: Conflict
+        Auth-->>GW: Error 409: Email in use
+        GW-->>C: Display "Email already registered"
+        %% @region-end
+        
+        DB-->>Auth: User Created (ID)
+        Auth->>ES: Queue Welcome Email
+        ES-->>Auth: Queued
+        Auth-->>GW: 201 Created (Token)
+        GW-->>C: Redirect to Dashboard
+        
+        %% @region-start: note
+        Note over ES: Email is processed asynchronously by a worker
+        %% @region-end
+    end
+    %% @region-end
+
+    %% @region-start: flow=order-processing
+    %% Actors specific to order processing
+    participant Order as Order Service
+    participant Inv as Inventory Service
+    participant Pay as Payment Gateway
+    participant Ware as Warehouse API
+
+    rect rgb(255, 255, 255)
+        Note over C, Ware: Flow: Order Processing
+        
+        C->>GW: POST /api/orders (cart_items)
+        GW->>Order: Create Order
+        Order->>Inv: Check Stock
+        
+        %% @region-start: edge-case=out-of-stock
+        Inv-->>Order: Insufficient Stock
+        Order-->>GW: Error 422: Items unavailable
+        GW-->>C: Display "Cart updated: Item removed"
+        %% @region-end
+        
+        Inv-->>Order: Stock Reserved
+        Order->>Pay: Process Credit Card
+        
+        %% @region-start: edge-case=payment-failed
+        Pay-->>Order: Declined (Insufficient Funds)
+        Order->>Inv: Release Reserved Stock
+        Order-->>GW: Error 402: Payment Required
+        GW-->>C: Display "Card declined. Please try another method."
+        %% @region-end
+        
+        Pay-->>Order: Payment Captured (TxID)
+        Order->>Ware: Dispatch to Fulfillment
+        Ware-->>Order: Tracking Generated
+        Order-->>GW: 200 OK (Order Confirmed)
+        GW-->>C: Display Order Success Page
+    end
+    %% @region-end
+
+    %% @region-start: flow=password-reset
+    %% Re-uses Email Service, introduces new Notification specific actor
+    participant Auth as Auth Service
+    participant ES as Email Service
+    participant SMS as SMS Service
+
+    rect rgb(255, 255, 255)
+        Note over C, SMS: Flow: Password Reset
+        
+        C->>GW: POST /api/reset-password (email)
+        GW->>Auth: Generate Reset Token
+        
+        %% @region-start: edge-case=unregistered-email
+        Auth-->>GW: Not Found
+        %% @region-start: note
+        Note over GW, C: For security, we still return 200 OK to prevent email enumeration
+        %% @region-end
+        GW-->>C: Display "If email exists, a link was sent"
+        %% @region-end
+        
+        Auth->>ES: Send Reset Link (Token)
+        
+        opt User has 2FA enabled
+            Auth->>SMS: Send Security Alert
+        end
+        
+        ES-->>Auth: Sent
+        Auth-->>GW: 200 OK
+        GW-->>C: Display "Check your inbox"
+    end
+    %% @region-end

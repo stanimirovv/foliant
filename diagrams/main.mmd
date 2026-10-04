@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant C as Client
+    participant API as API Gateway
+    participant Auth as Auth Service
+    participant DB as Database
+
+    %% @region-start: flow=login
+    C->>API: POST /login
+    API->>Auth: Validate Credentials
+    
+    %% @region-start: note
+    Note over API,Auth: Passwords must be hashed via bcrypt
+    %% @region-end
+    
+    %% @region-start: edge-case=invalid-password
+    Auth-->>API: 401 Unauthorized
+    API-->>C: Error: Invalid Credentials
+    %% @region-end
+    
+    Auth->>DB: Fetch User Data
+    DB-->>Auth: User Record
+    Auth-->>API: JWT Token
+    API-->>C: 200 OK + Token
+    %% @region-end
