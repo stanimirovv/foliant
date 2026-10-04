@@ -14,4 +14,16 @@ export async function GET(request: Request, { params }: { params: { filename: st
   }
 }
 
+export async function POST(request: Request, { params }: { params: { filename: string } }) {
+  const diagramsDir = getDiagramsDir(request);
+  try {
+    const { content } = await request.json();
+    const filePath = path.join(diagramsDir, params.filename);
+    await fs.writeFile(filePath, content, 'utf-8');
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ error: 'Failed to write file' }, { status: 500 });
+  }
+}
+
 export const dynamic = 'force-dynamic';

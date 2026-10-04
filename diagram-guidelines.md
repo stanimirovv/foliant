@@ -64,3 +64,11 @@ When the user asks you to "add a flow" or "update an edge case":
 1. Locate the correct place in the existing sequence diagram.
 2. Ensure you add the correct `%% @region-start` and `%% @region-end` boundaries.
 3. Output the fully updated `.mmd` code so it can be saved and live-reloaded by the app.
+
+## 5. Configuration & Views (%% CONFIG)
+The first line of the `.mmd` file can contain a `%% CONFIG: { ... }` JSON string to persist app state, including saved views and actor metadata.
+
+**Example:**
+`%% CONFIG: {"version":1,"views":[{"name":"Happy Path","hiddenPaths":["flow=login/edge-case"]}],"actors":{"Auth":{"color":"red","keys":["backend"]}}}`
+
+- When defining actors, you can assign them a `color` and an array of `keys`. This allows the viewer to provide dynamic toggles to hide these actors by key/color or merge all actors of the same color into a single block. 

@@ -40,3 +40,20 @@ In the sidebar, use the **Directory** section to paste an absolute path to a fol
 
 This project includes a bundled `diagram-guidelines.md` context file. 
 This file acts as the instruction manual you feed to LLMs (like Claude, Gemini, or Codex) so they understand how to generate code compatible with this web app. It explains the custom `%% @region-start` syntax, demonstrates how to correctly nest flows and edge cases, and establishes visual styling rules.
+
+## Advanced Configuration (Views & Actors)
+
+You can add a `%% CONFIG: { ... }` JSON comment to the first line of your Mermaid diagrams to define **Saved Views** and **Actor Metadata**.
+
+### Saved Views
+Saved views allow you to quickly switch between different visible regions (e.g., hiding all edge cases).
+You can save views directly from the UI, and they will be persisted to the `.mmd` file automatically.
+
+### Actor Grouping & Filtering
+You can attach metadata (like `color` or custom `keys`) to your actors within the `%% CONFIG:` JSON block.
+```json
+%% CONFIG: {"version": 1, "actors": {"Auth": {"color": "red", "keys": ["internal"]}, "DB": {"color": "red", "keys": ["internal", "storage"]}}}
+```
+This enables the UI to automatically provide toggles to:
+- **Hide by Key or Color:** Toggle visibility of all actors that share a specific key or color.
+- **Merge by Color:** Dynamically collapse and merge all actors of a specific color into a single participant box on the fly (e.g., turning all "red" microservices into one block) without altering the source code!

@@ -3,9 +3,10 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import DiagramViewer from './DiagramViewer';
-import { processMermaid } from '@/lib/preprocessor';
+import { processMermaid, transformActors } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play } from 'lucide-react';
+import { parseViewsData, updateViewsData, ViewsData, SavedView } from '@/lib/views';
 
 export default function ClientPage() {
   const router = useRouter();
@@ -53,21 +54,35 @@ export default function ClientPage() {
   const hiddenPathsParam = searchParams.get('hidden') || '';
   const hiddenPaths = useMemo(() => new Set(hiddenPathsParam.split(',').filter(Boolean)), [hiddenPathsParam]);
 
-  const toggleHiddenPath = (path: string) => {
-    const newHidden = new Set(hiddenPaths);
-    if (newHidden.has(path)) {
-      newHidden.delete(path);
+  const mergeColorParam = searchParams.get('merge_color') || '';
+  const mergeColors = useMemo(() => new Set(mergeColorParam.split(',').filter(Boolean)), [mergeColorParam]);
+
+  const hideColorParam = searchParams.get('hide_color') || '';
+  const hideColors = useMemo(() => new Set(hideColorParam.split(',').filter(Boolean)), [hideColorParam]);
+
+  const hideKeyParam = searchParams.get('hide_key') || '';
+  const hideKeys = useMemo(() => new Set(hideKeyParam.split(',').filter(Boolean)), [hideKeyParam]);
+
+  const toggleSetParam = (paramName: string, value: string, currentSet: Set<string>) => {
+    const newSet = new Set(currentSet);
+    if (newSet.has(value)) {
+      newSet.delete(value);
     } else {
-      newHidden.add(path);
+      newSet.add(value);
     }
     const params = new URLSearchParams(searchParams.toString());
-    if (newHidden.size > 0) {
-      params.set('hidden', Array.from(newHidden).join(','));
+    if (newSet.size > 0) {
+      params.set(paramName, Array.from(newSet).join(','));
     } else {
-      params.delete('hidden');
+      params.delete(paramName);
     }
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
+
+  const toggleHiddenPath = (path: string) => toggleSetParam('hidden', path, hiddenPaths);
+  const toggleMergeColor = (color: string) => toggleSetParam('merge_color', color, mergeColors);
+  const toggleHideColor = (color: string) => toggleSetParam('hide_color', color, hideColors);
+  const toggleHideKey = (key: string) => toggleSetParam('hide_key', key, hideKeys);
 
   useEffect(() => {
     fetch(`/api/files${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`)
@@ -119,15 +134,117 @@ export default function ClientPage() {
 
   const regionRoots = useMemo(() => extractRegions(debouncedCode), [debouncedCode]);
 
+  const viewsData = useMemo<ViewsData | null>(() => {
+    return parseViewsData(rawCode);
+  }, [rawCode]);
+
+  const availableColors = useMemo(() => {
+    if (!viewsData?.actors) return [];
+    const colors = new Set<string>();
+    Object.values(viewsData.actors).forEach(a => { if (a.color) colors.add(a.color); });
+    return Array.from(colors);
+  }, [viewsData]);
+
+  const availableKeys = useMemo(() => {
+    if (!viewsData?.actors) return [];
+    const keys = new Set<string>();
+    Object.values(viewsData.actors).forEach(a => { if (a.keys) a.keys.forEach(k => keys.add(k)); });
+    return Array.from(keys);
+  }, [viewsData]);
+
   const { code: processedCode, warnings: procWarnings } = useMemo(() => {
-    return processMermaid(debouncedCode, {
+    const actorTransformed = transformActors(debouncedCode, viewsData, {
+      mergeByColor: Array.from(mergeColors),
+      hideColors: Array.from(hideColors),
+      hideKeys: Array.from(hideKeys)
+    });
+
+    return processMermaid(actorTransformed, {
       isRegionVisible: (region) => !hiddenPaths.has(region.path)
     });
-  }, [debouncedCode, hiddenPaths]);
+  }, [debouncedCode, hiddenPaths, viewsData, mergeColors, hideColors, hideKeys]);
 
   useEffect(() => {
     setWarnings(procWarnings);
   }, [procWarnings]);
+
+  const saveCurrentView = async () => {
+    if (!currentFile) return;
+    const name = window.prompt('Enter view name:');
+    if (!name) return;
+
+    const currentViews = viewsData ? [...viewsData.views] : [];
+    const existingIndex = currentViews.findIndex(v => v.name === name);
+
+    const newView: SavedView = {
+      name,
+      hiddenPaths: Array.from(hiddenPaths)
+    };
+
+    if (existingIndex >= 0) {
+      currentViews[existingIndex] = newView;
+    } else {
+      currentViews.push(newView);
+    }
+
+    const newData: ViewsData = {
+      ...(viewsData || {}),
+      version: 1,
+      views: currentViews
+    };
+
+    const newCode = updateViewsData(rawCode, newData);
+
+    try {
+      await fetch(`/api/file/${currentFile}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ content: newCode })
+      });
+      setRawCode(newCode);
+    } catch (e) {
+      console.error('Failed to save view', e);
+    }
+  };
+
+  const deleteView = async (name: string) => {
+    if (!currentFile || !viewsData) return;
+    if (!window.confirm(`Delete view "${name}"?`)) return;
+
+    const currentViews = viewsData.views.filter(v => v.name !== name);
+    const newData: ViewsData | null = (currentViews.length > 0 || (viewsData && viewsData.actors && Object.keys(viewsData.actors).length > 0)) ? {
+      ...(viewsData || {}),
+      version: 1,
+      views: currentViews
+    } : null;
+
+    const newCode = updateViewsData(rawCode, newData);
+
+    try {
+      await fetch(`/api/file/${currentFile}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ content: newCode })
+      });
+      setRawCode(newCode);
+    } catch (e) {
+      console.error('Failed to delete view', e);
+    }
+  };
+
+  const loadView = (view: SavedView) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (view.hiddenPaths.length > 0) {
+      params.set('hidden', view.hiddenPaths.join(','));
+    } else {
+      params.delete('hidden');
+    }
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
 
   const renderRegionTree = (nodes: RegionNode[]) => {
     return (
@@ -241,12 +358,97 @@ export default function ClientPage() {
             </ul>
           </div>
 
-          <div>
+          <div className="mb-6">
             <h2 className="text-xs font-bold uppercase text-gray-500 mb-2">Filters</h2>
             {regionRoots.length === 0 ? (
               <p className="text-xs text-gray-500 italic">No regions found</p>
             ) : (
               <div className="-ml-4">{renderRegionTree(regionRoots)}</div>
+            )}
+          </div>
+
+          {(availableColors.length > 0 || availableKeys.length > 0) && (
+            <div className="mb-6">
+              <h2 className="text-xs font-bold uppercase text-gray-500 mb-2">Actors</h2>
+              
+              {availableColors.length > 0 && (
+                <div className="mb-3">
+                  <span className="text-xs font-semibold text-gray-400 block mb-1">By Color</span>
+                  <ul className="space-y-1">
+                    {availableColors.map(c => (
+                      <li key={c} className="text-sm flex flex-col space-y-1 pl-2 border-l-2 border-gray-200 ml-1">
+                        <span className="font-medium text-gray-700">{c}</span>
+                        <label className="flex items-center space-x-2 cursor-pointer text-xs">
+                          <input type="checkbox" checked={!hideColors.has(c)} onChange={() => toggleHideColor(c)} className="rounded" />
+                          <span>Visible</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer text-xs">
+                          <input type="checkbox" checked={mergeColors.has(c)} onChange={() => toggleMergeColor(c)} className="rounded" />
+                          <span>Merge into single</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {availableKeys.length > 0 && (
+                <div>
+                  <span className="text-xs font-semibold text-gray-400 block mb-1">By Key</span>
+                  <ul className="space-y-1">
+                    {availableKeys.map(k => (
+                      <li key={k} className="text-sm">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input type="checkbox" checked={!hideKeys.has(k)} onChange={() => toggleHideKey(k)} className="rounded" />
+                          <span>{k}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-xs font-bold uppercase text-gray-500">Saved Views</h2>
+              <button 
+                onClick={saveCurrentView}
+                className="text-blue-500 hover:text-blue-600 p-1 rounded hover:bg-blue-50"
+                title="Save Current View"
+              >
+                <Save size={14} />
+              </button>
+            </div>
+            {(!viewsData || viewsData.views.length === 0) ? (
+              <p className="text-xs text-gray-500 italic">No saved views</p>
+            ) : (
+              <ul className="space-y-2">
+                {viewsData.views.map(view => (
+                  <li key={view.name} className="flex items-center justify-between bg-gray-50 p-2 rounded border text-sm group">
+                    <span className="truncate font-medium flex-1 mr-2" title={view.name}>
+                      {view.name}
+                    </span>
+                    <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => loadView(view)} 
+                        className="text-green-600 hover:text-green-700 p-1 hover:bg-green-100 rounded"
+                        title="Load View"
+                      >
+                        <Play size={14} />
+                      </button>
+                      <button 
+                        onClick={() => deleteView(view.name)} 
+                        className="text-red-500 hover:text-red-600 p-1 hover:bg-red-100 rounded"
+                        title="Delete View"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </div>
