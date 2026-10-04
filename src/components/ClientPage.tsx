@@ -160,7 +160,10 @@ export default function ClientPage() {
     <div className="flex h-screen bg-gray-50  text-gray-900 ">
       <div className="w-64 border-r border-gray-200  bg-white  flex flex-col">
         <div className="p-4 border-b border-gray-200  flex justify-between items-center">
-          <h1 className="font-bold">Mermaid Viewer</h1>
+          <div className="flex items-center space-x-2">
+            <img src="/logo.png" alt="Logo" className="w-6 h-6 rounded-md object-cover" />
+            <h1 className="font-bold">Mermaid Viewer</h1>
+          </div>
           <button 
             onClick={() => {
               const params = new URLSearchParams(searchParams.toString());
