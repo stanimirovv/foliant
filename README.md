@@ -2,6 +2,8 @@
 
 A full-stack Next.js application designed to manage, visualize, and filter massive Mermaid diagrams (2000+ lines, 50+ flows). The tool acts as a local viewer that allows users to seamlessly switch between `.mmd` files in a directory, selectively hide/show regions (flows, edge cases, notes), and perform custom searches within the rendered diagram.
 
+![Mermaid Viewer Screenshot](./public/screenshot.png)
+
 ## Features
 
 - **File Watching & Live Reload**: Automatically updates the diagram within 1 second of saving the file, WITHOUT a full page refresh, retaining the current UI filter state.
