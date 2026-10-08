@@ -17,6 +17,9 @@ export interface ProcessResult {
 
 export interface ActorTransformOptions {
   mergeByColor?: string[];
+  mergeCleanByColor?: string[];
+  mergeByKeys?: string[];
+  mergeCleanByKeys?: string[];
   hideKeys?: string[];
   hideColors?: string[];
 }
@@ -31,8 +34,10 @@ interface ParticipantInfo {
 export function transformActors(code: string, config: DiagramConfig | null, options: ActorTransformOptions): string {
   if (!config || !config.actors) return code;
   
-  const actorsToHide = new Set<string>();
+  const actorsToHide: string[] = [];
   const colorToActors = new Map<string, string[]>();
+  const keyToActors = new Map<string, string[]>();
+  const cleanMergedNames = new Set<string>();
 
   for (const [actor, meta] of Object.entries(config.actors)) {
     let shouldHide = false;
@@ -44,13 +49,34 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     }
     
     if (shouldHide) {
-      actorsToHide.add(actor);
+      actorsToHide.push(actor);
     } else {
-      if (meta.color && options.mergeByColor?.includes(meta.color)) {
-        if (!colorToActors.has(meta.color)) {
-          colorToActors.set(meta.color, []);
+      let merged = false;
+      if (meta.color) {
+        if (options.mergeByColor?.includes(meta.color) || options.mergeCleanByColor?.includes(meta.color)) {
+          if (!colorToActors.has(meta.color)) {
+            colorToActors.set(meta.color, []);
+          }
+          colorToActors.get(meta.color)!.push(actor);
+          merged = true;
+          if (options.mergeCleanByColor?.includes(meta.color)) {
+            cleanMergedNames.add(`MergedColor_${meta.color.replace(/[^A-Za-z0-9]/g, '')}`);
+          }
         }
-        colorToActors.get(meta.color)!.push(actor);
+      }
+      
+      if (!merged && meta.keys) {
+        for (const k of meta.keys) {
+          if (options.mergeByKeys?.includes(k) || options.mergeCleanByKeys?.includes(k)) {
+            if (!keyToActors.has(k)) keyToActors.set(k, []);
+            keyToActors.get(k)!.push(actor);
+            merged = true;
+            if (options.mergeCleanByKeys?.includes(k)) {
+              cleanMergedNames.add(`MergedKey_${k.replace(/[^A-Za-z0-9]/g, '')}`);
+            }
+            break;
+          }
+        }
       }
     }
   }
@@ -73,14 +99,38 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     if (skipLine) continue;
 
     // Apply merging
-    for (const [color, actors] of colorToActors.entries()) {
+    colorToActors.forEach((actors, color) => {
       if (actors.length > 0) {
-        const mergedName = `Merged_${color}`;
+        const mergedName = `MergedColor_${color.replace(/[^A-Za-z0-9]/g, '')}`;
         for (const actor of actors) {
           const regex = new RegExp(`\\b${actor}\\b`, 'g');
           line = line.replace(regex, mergedName);
         }
       }
+    });
+    keyToActors.forEach((actors, key) => {
+      if (actors.length > 0) {
+        const mergedName = `MergedKey_${key.replace(/[^A-Za-z0-9]/g, '')}`;
+        for (const actor of actors) {
+          const regex = new RegExp(`\\b${actor}\\b`, 'g');
+          line = line.replace(regex, mergedName);
+        }
+      }
+    });
+
+    // Matches A->B:, A-->>B:, etc.
+    const arrowMatch = line.match(/^\s*([A-Za-z0-9_-]+?)\s*(-->>|->>|--x|-x|--\)|-\)|-->|->|--|-)\s*([A-Za-z0-9_-]+)(?:\s*:|\s*$)/);
+    if (arrowMatch && arrowMatch[1] === arrowMatch[3]) {
+      if (cleanMergedNames.has(arrowMatch[1])) {
+        continue;
+      }
+    }
+
+    // Fix Notes over the same actor
+    const noteMatch = line.match(/^(\s*Note\s+(?:over|left of|right of)\s+)([A-Za-z0-9_-]+),([A-Za-z0-9_-]+)(\s*:.*)$/);
+    if (noteMatch && noteMatch[2] === noteMatch[3]) {
+      // Rewrite "Note over A,A:" to "Note over A:"
+      line = `${noteMatch[1]}${noteMatch[2]}${noteMatch[4]}`;
     }
 
     result.push(line);
@@ -98,13 +148,24 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
       continue;
     }
 
-    const match = line.match(/^\s*(participant|actor)\s+([A-Za-z0-9_-]+)(?:\s+as\s+(.*))?$/);
+    const match = line.match(/^(\s*)(participant|actor)\s+([A-Za-z0-9_-]+)(?:\s+as\s+(.*))?$/);
     if (match) {
+      const indent = match[1];
+      const type = match[2];
+      const id = match[3];
+      let alias = match[4];
+
+      if (id.startsWith('MergedColor_')) {
+        alias = `Merged ${id.replace('MergedColor_', '')}`;
+      } else if (id.startsWith('MergedKey_')) {
+        alias = `Merged ${id.replace('MergedKey_', '')}`;
+      }
+
       participants.push({
-        type: match[1],
-        id: match[2],
-        alias: match[3],
-        line: line
+        type,
+        id,
+        alias,
+        line: alias ? `${indent}${type} ${id} as ${alias}` : `${indent}${type} ${id}`
       });
     } else {
       restOfCode.push(line);
@@ -116,7 +177,7 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   }
 
   // Now group participants by box/color
-  const colorGroups = new Map<string, ParticipantInfo[]>();
+  const boxGroups = new Map<string, { color: string, title: string, parts: ParticipantInfo[] }>();
   const uncoloredParticipants: ParticipantInfo[] = [];
 
   const seenIds = new Set<string>();
@@ -125,21 +186,32 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     if (seenIds.has(p.id)) continue;
     seenIds.add(p.id);
 
-    // Determine the color of this participant
-    let color = '';
-    
-    // Check if it's a merged actor
-    if (p.id.startsWith('Merged_')) {
-      color = p.id.replace('Merged_', '');
-    } else {
-      if (config.actors[p.id] && config.actors[p.id].color) {
-        color = config.actors[p.id].color as string;
-      }
+    let boxId = '';
+    let boxColor = '';
+    let boxTitle = '';
+
+    if (p.id.startsWith('MergedColor_')) {
+      const c = p.id.replace('MergedColor_', '');
+      boxId = `color_${c}`;
+      boxColor = c;
+      boxTitle = c.toUpperCase();
+    } else if (p.id.startsWith('MergedKey_')) {
+      const k = p.id.replace('MergedKey_', '');
+      boxId = `key_${k}`;
+      boxColor = '#ccc';
+      boxTitle = k.toUpperCase();
+    } else if (config.actors[p.id] && config.actors[p.id].color) {
+      const c = config.actors[p.id].color as string;
+      boxId = `color_${c}`;
+      boxColor = c;
+      boxTitle = c.toUpperCase();
     }
 
-    if (color) {
-      if (!colorGroups.has(color)) colorGroups.set(color, []);
-      colorGroups.get(color)!.push(p);
+    if (boxId) {
+      if (!boxGroups.has(boxId)) {
+        boxGroups.set(boxId, { color: boxColor, title: boxTitle, parts: [] });
+      }
+      boxGroups.get(boxId)!.parts.push(p);
     } else {
       uncoloredParticipants.push(p);
     }
@@ -154,24 +226,17 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     if (line.trim().startsWith('sequenceDiagram') && !injectedParticipants) {
       injectedParticipants = true;
       
-      // Output uncolored
       for (const p of uncoloredParticipants) {
         finalLines.push(p.line);
       }
 
-      // Output colored in boxes
-      for (const [color, parts] of colorGroups.entries()) {
-        // Lighten the color slightly for the box background or just use the color name
-        // Mermaid supports basic css colors or rgba. We'll pass the exact string the user provided.
-        // E.g., `box rgb(...) GroupName` or `box rgba(...) GroupName`
-        let boxColorStr = color;
-        // if user just wrote "red", mermaid parses `box red Title`.
-        finalLines.push(`    box ${boxColorStr} ${color.toUpperCase()} Zone`);
-        for (const p of parts) {
+      boxGroups.forEach((group) => {
+        finalLines.push(`    box ${group.color} ${group.title} Zone`);
+        for (const p of group.parts) {
           finalLines.push(`    ${p.line.trim()}`);
         }
         finalLines.push(`    end`);
-      }
+      });
     }
   }
 

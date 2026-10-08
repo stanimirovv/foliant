@@ -6,7 +6,7 @@ import DiagramViewer from './DiagramViewer';
 import { processMermaid, transformActors } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play } from 'lucide-react';
-import { parseViewsData, updateViewsData, ViewsData, SavedView } from '@/lib/views';
+import { parseViewsData, updateViewsData, DiagramConfig, SavedView } from '@/lib/views';
 
 export default function ClientPage() {
   const router = useRouter();
@@ -47,7 +47,11 @@ export default function ClientPage() {
       params.delete('dir');
     }
     params.delete('file');
-    router.replace(`${pathname}?${params.toString()}`);
+    
+    // If the URL is exactly the same, Next.js won't trigger a navigation.
+    // We increment refreshKey to force a re-fetch of the directory anyway.
+    setRefreshKey(k => k + 1);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
   
   // Hidden paths
@@ -60,8 +64,17 @@ export default function ClientPage() {
   const hideColorParam = searchParams.get('hide_color') || '';
   const hideColors = useMemo(() => new Set(hideColorParam.split(',').filter(Boolean)), [hideColorParam]);
 
+  const mergeCleanColorParam = searchParams.get('merge_clean_color') || '';
+  const mergeCleanColors = useMemo(() => new Set(mergeCleanColorParam.split(',').filter(Boolean)), [mergeCleanColorParam]);
+
+  const mergeKeyParam = searchParams.get('merge_key') || '';
+  const mergeKeys = useMemo(() => new Set(mergeKeyParam.split(',').filter(Boolean)), [mergeKeyParam]);
+
   const hideKeyParam = searchParams.get('hide_key') || '';
   const hideKeys = useMemo(() => new Set(hideKeyParam.split(',').filter(Boolean)), [hideKeyParam]);
+
+  const mergeCleanKeyParam = searchParams.get('merge_clean_key') || '';
+  const mergeCleanKeys = useMemo(() => new Set(mergeCleanKeyParam.split(',').filter(Boolean)), [mergeCleanKeyParam]);
 
   const toggleSetParam = (paramName: string, value: string, currentSet: Set<string>) => {
     const newSet = new Set(currentSet);
@@ -80,9 +93,48 @@ export default function ClientPage() {
   };
 
   const toggleHiddenPath = (path: string) => toggleSetParam('hidden', path, hiddenPaths);
-  const toggleMergeColor = (color: string) => toggleSetParam('merge_color', color, mergeColors);
-  const toggleHideColor = (color: string) => toggleSetParam('hide_color', color, hideColors);
-  const toggleHideKey = (key: string) => toggleSetParam('hide_key', key, hideKeys);
+
+  const setActorState = (type: 'color' | 'key', id: string, state: 'on' | 'off' | 'merged' | 'merged_clean') => {
+    const params = new URLSearchParams(searchParams.toString());
+    const mergeParamName = type === 'color' ? 'merge_color' : 'merge_key';
+    const mergeCleanParamName = type === 'color' ? 'merge_clean_color' : 'merge_clean_key';
+    const hideParamName = type === 'color' ? 'hide_color' : 'hide_key';
+    
+    const currentMerge = new Set(type === 'color' ? mergeColors : mergeKeys);
+    const currentMergeClean = new Set(type === 'color' ? mergeCleanColors : mergeCleanKeys);
+    const currentHide = new Set(type === 'color' ? hideColors : hideKeys);
+
+    if (state === 'on') {
+      currentMerge.delete(id);
+      currentMergeClean.delete(id);
+      currentHide.delete(id);
+    } else if (state === 'off') {
+      currentMerge.delete(id);
+      currentMergeClean.delete(id);
+      currentHide.add(id);
+    } else if (state === 'merged') {
+      currentHide.delete(id);
+      currentMergeClean.delete(id);
+      currentMerge.add(id);
+    } else if (state === 'merged_clean') {
+      currentHide.delete(id);
+      currentMerge.delete(id);
+      currentMergeClean.add(id);
+    }
+
+    if (currentMerge.size > 0) params.set(mergeParamName, Array.from(currentMerge).join(','));
+    else params.delete(mergeParamName);
+
+    if (currentMergeClean.size > 0) params.set(mergeCleanParamName, Array.from(currentMergeClean).join(','));
+    else params.delete(mergeCleanParamName);
+
+    if (currentHide.size > 0) params.set(hideParamName, Array.from(currentHide).join(','));
+    else params.delete(hideParamName);
+
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     fetch(`/api/files${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`)
@@ -92,10 +144,10 @@ export default function ClientPage() {
         if (!currentFile && data.files && data.files.length > 0) {
           const params = new URLSearchParams(searchParams.toString());
           params.set('file', data.files[0]);
-          router.replace(`${pathname}?${params.toString()}`);
+          router.replace(`${pathname}?${params.toString()}`, { scroll: false });
         }
       });
-  }, [currentFile, pathname, router, searchParams, dirParam]);
+  }, [currentFile, pathname, router, searchParams, dirParam, refreshKey]);
 
   const loadFile = useCallback(async (filename: string) => {
     try {
@@ -110,6 +162,8 @@ export default function ClientPage() {
   useEffect(() => {
     if (currentFile) {
       loadFile(currentFile);
+    } else {
+      setRawCode('');
     }
   }, [currentFile, loadFile]);
 
@@ -134,7 +188,7 @@ export default function ClientPage() {
 
   const regionRoots = useMemo(() => extractRegions(debouncedCode), [debouncedCode]);
 
-  const viewsData = useMemo<ViewsData | null>(() => {
+  const viewsData = useMemo<DiagramConfig | null>(() => {
     return parseViewsData(rawCode);
   }, [rawCode]);
 
@@ -155,6 +209,9 @@ export default function ClientPage() {
   const { code: processedCode, warnings: procWarnings } = useMemo(() => {
     const actorTransformed = transformActors(debouncedCode, viewsData, {
       mergeByColor: Array.from(mergeColors),
+      mergeCleanByColor: Array.from(mergeCleanColors),
+      mergeByKeys: Array.from(mergeKeys),
+      mergeCleanByKeys: Array.from(mergeCleanKeys),
       hideColors: Array.from(hideColors),
       hideKeys: Array.from(hideKeys)
     });
@@ -162,7 +219,7 @@ export default function ClientPage() {
     return processMermaid(actorTransformed, {
       isRegionVisible: (region) => !hiddenPaths.has(region.path)
     });
-  }, [debouncedCode, hiddenPaths, viewsData, mergeColors, hideColors, hideKeys]);
+  }, [debouncedCode, hiddenPaths, viewsData, mergeColors, mergeCleanColors, mergeKeys, mergeCleanKeys, hideColors, hideKeys]);
 
   useEffect(() => {
     setWarnings(procWarnings);
@@ -173,7 +230,7 @@ export default function ClientPage() {
     const name = window.prompt('Enter view name:');
     if (!name) return;
 
-    const currentViews = viewsData ? [...viewsData.views] : [];
+    const currentViews = viewsData?.views ? [...viewsData.views] : [];
     const existingIndex = currentViews.findIndex(v => v.name === name);
 
     const newView: SavedView = {
@@ -187,7 +244,7 @@ export default function ClientPage() {
       currentViews.push(newView);
     }
 
-    const newData: ViewsData = {
+    const newData: DiagramConfig = {
       ...(viewsData || {}),
       version: 1,
       views: currentViews
@@ -210,11 +267,11 @@ export default function ClientPage() {
   };
 
   const deleteView = async (name: string) => {
-    if (!currentFile || !viewsData) return;
+    if (!currentFile || !viewsData?.views) return;
     if (!window.confirm(`Delete view "${name}"?`)) return;
 
     const currentViews = viewsData.views.filter(v => v.name !== name);
-    const newData: ViewsData | null = (currentViews.length > 0 || (viewsData && viewsData.actors && Object.keys(viewsData.actors).length > 0)) ? {
+    const newData: DiagramConfig | null = (currentViews.length > 0 || (viewsData && viewsData.actors && Object.keys(viewsData.actors).length > 0)) ? {
       ...(viewsData || {}),
       version: 1,
       views: currentViews
@@ -323,7 +380,8 @@ export default function ClientPage() {
                           const params = new URLSearchParams(searchParams.toString());
                           params.set('dir', d);
                           params.delete('file');
-                          router.replace(`${pathname}?${params.toString()}`);
+                          setRefreshKey(k => k + 1);
+                          router.replace(`${pathname}?${params.toString()}`, { scroll: false });
                         }}
                         title={d}
                       >
@@ -374,36 +432,85 @@ export default function ClientPage() {
               {availableColors.length > 0 && (
                 <div className="mb-3">
                   <span className="text-xs font-semibold text-gray-400 block mb-1">By Color</span>
-                  <ul className="space-y-1">
-                    {availableColors.map(c => (
-                      <li key={c} className="text-sm flex flex-col space-y-1 pl-2 border-l-2 border-gray-200 ml-1">
-                        <span className="font-medium text-gray-700">{c}</span>
-                        <label className="flex items-center space-x-2 cursor-pointer text-xs">
-                          <input type="checkbox" checked={!hideColors.has(c)} onChange={() => toggleHideColor(c)} className="rounded" />
-                          <span>Visible</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer text-xs">
-                          <input type="checkbox" checked={mergeColors.has(c)} onChange={() => toggleMergeColor(c)} className="rounded" />
-                          <span>Merge into single</span>
-                        </label>
-                      </li>
-                    ))}
+                  <ul className="space-y-2">
+                    {availableColors.map(c => {
+                      const currentState = hideColors.has(c) ? 'off' : mergeCleanColors.has(c) ? 'merged_clean' : mergeColors.has(c) ? 'merged' : 'on';
+                      return (
+                        <li key={c} className="text-sm flex flex-col pl-2 border-l-2 border-gray-200 ml-1">
+                          <span className="font-medium text-gray-700">{c}</span>
+                          <div className="flex border border-gray-200 rounded overflow-hidden text-[10px] mt-1 w-full bg-gray-50">
+                            <button 
+                              onClick={() => setActorState('color', c, 'on')} 
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                            >
+                              On
+                            </button>
+                            <button 
+                              onClick={() => setActorState('color', c, 'off')} 
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'off' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                            >
+                              Off
+                            </button>
+                            <button 
+                              onClick={() => setActorState('color', c, 'merged')} 
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'merged' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                            >
+                              Merged
+                            </button>
+                            <button 
+                              onClick={() => setActorState('color', c, 'merged_clean')} 
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'merged_clean' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              title="Merge actors and hide their internal self-calls"
+                            >
+                              Clean
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
 
               {availableKeys.length > 0 && (
-                <div>
+                <div className="mb-3">
                   <span className="text-xs font-semibold text-gray-400 block mb-1">By Key</span>
-                  <ul className="space-y-1">
-                    {availableKeys.map(k => (
-                      <li key={k} className="text-sm">
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input type="checkbox" checked={!hideKeys.has(k)} onChange={() => toggleHideKey(k)} className="rounded" />
-                          <span>{k}</span>
-                        </label>
-                      </li>
-                    ))}
+                  <ul className="space-y-2">
+                    {availableKeys.map(k => {
+                      const currentState = hideKeys.has(k) ? 'off' : mergeCleanKeys.has(k) ? 'merged_clean' : mergeKeys.has(k) ? 'merged' : 'on';
+                      return (
+                        <li key={k} className="text-sm flex flex-col pl-2 border-l-2 border-gray-200 ml-1">
+                          <span className="font-medium text-gray-700">{k}</span>
+                          <div className="flex border border-gray-200 rounded overflow-hidden text-[10px] mt-1 w-full bg-gray-50">
+                            <button 
+                              onClick={() => setActorState('key', k, 'on')} 
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                            >
+                              On
+                            </button>
+                            <button 
+                              onClick={() => setActorState('key', k, 'off')} 
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'off' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                            >
+                              Off
+                            </button>
+                            <button 
+                              onClick={() => setActorState('key', k, 'merged')} 
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'merged' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                            >
+                              Merged
+                            </button>
+                            <button 
+                              onClick={() => setActorState('key', k, 'merged_clean')} 
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'merged_clean' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              title="Merge actors and hide their internal self-calls"
+                            >
+                              Clean
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -421,7 +528,7 @@ export default function ClientPage() {
                 <Save size={14} />
               </button>
             </div>
-            {(!viewsData || viewsData.views.length === 0) ? (
+            {(!viewsData || !viewsData.views || viewsData.views.length === 0) ? (
               <p className="text-xs text-gray-500 italic">No saved views</p>
             ) : (
               <ul className="space-y-2">
