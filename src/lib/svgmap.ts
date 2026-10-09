@@ -350,6 +350,25 @@ export function elementKeyAtTarget(target: Element | null, svg: Element, model: 
   return null;
 }
 
+// The SVG element zipped to the given model element key (for highlight), or
+// null when the key is unknown or has no SVG counterpart.
+export function svgElementForKey(svg: Element, model: DiagramModel, key: string): Element | null {
+  const zip = zipModelToSvg(svg, model);
+  const kinds: [string, (Element | null)[]][] = [
+    ['participant', zip.participants],
+    ['message', zip.messages],
+    ['note', zip.notes],
+    ['node', zip.nodes],
+    ['edge', zip.edges],
+  ];
+  for (const [kind, zipped] of kinds) {
+    const list = ofKind(model, kind);
+    const i = list.findIndex(el => el.key === key);
+    if (i >= 0) return zipped[i] ?? null;
+  }
+  return null;
+}
+
 // Selection map (processed -> raw), plan 4.7: parses both models, rewrites
 // the raw model's ids through buildActorRewriteMap, and joins on
 // (kind, from, to, label, occurrence). Elements stripped by the transform

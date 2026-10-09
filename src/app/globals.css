@@ -18,3 +18,9 @@ body {
     text-wrap: balance;
   }
 }
+
+/* Editor selection highlight (EDITING_PLAN.md 4.7): a glow that works on
+   shapes and bare lines alike, without overriding stroke/fill styles. */
+.editor-selected {
+  filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.9));
+}
