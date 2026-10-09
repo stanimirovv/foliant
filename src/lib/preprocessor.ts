@@ -31,13 +31,31 @@ interface ParticipantInfo {
   line: string;
 }
 
-export function transformActors(code: string, config: DiagramConfig | null, options: ActorTransformOptions): string {
-  if (!config || !config.actors) return code;
-  
-  const actorsToHide: string[] = [];
+export interface ActorMergeGroup {
+  name: string;    // MergedColor_<c> | MergedKey_<k>
+  alias: string;   // Merged <c> | Merged <k> (raw value)
+  actors: string[];
+}
+
+export interface ActorRewriteMap {
+  rename: Map<string, string>;   // actor id -> merged participant name
+  hide: Set<string>;             // actor ids whose lines are dropped
+  clean: Set<string>;            // merged names whose self-calls are dropped
+  groups: ActorMergeGroup[];     // merge groups, colors first then keys
+}
+
+// Shared hide/merge computation (EDITING_PLAN.md 4.9). transformActors and
+// rewriteArrowStyles both consume it; MergedColor_/MergedKey_ name derivation
+// is unchanged.
+export function buildActorRewriteMap(config: DiagramConfig | null, options: ActorTransformOptions): ActorRewriteMap {
+  const rename = new Map<string, string>();
+  const hide = new Set<string>();
+  const clean = new Set<string>();
+  const groups: ActorMergeGroup[] = [];
+  if (!config || !config.actors) return { rename, hide, clean, groups };
+
   const colorToActors = new Map<string, string[]>();
   const keyToActors = new Map<string, string[]>();
-  const cleanMergedNames = new Set<string>();
 
   for (const [actor, meta] of Object.entries(config.actors)) {
     let shouldHide = false;
@@ -47,39 +65,56 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     if (meta.keys && options.hideKeys?.some(k => meta.keys?.includes(k))) {
       shouldHide = true;
     }
-    
+
     if (shouldHide) {
-      actorsToHide.push(actor);
-    } else {
-      let merged = false;
-      if (meta.color) {
-        if (options.mergeByColor?.includes(meta.color) || options.mergeCleanByColor?.includes(meta.color)) {
-          if (!colorToActors.has(meta.color)) {
-            colorToActors.set(meta.color, []);
-          }
-          colorToActors.get(meta.color)!.push(actor);
-          merged = true;
-          if (options.mergeCleanByColor?.includes(meta.color)) {
-            cleanMergedNames.add(`MergedColor_${meta.color.replace(/[^A-Za-z0-9]/g, '')}`);
-          }
+      hide.add(actor);
+      continue;
+    }
+
+    let merged = false;
+    if (meta.color) {
+      if (options.mergeByColor?.includes(meta.color) || options.mergeCleanByColor?.includes(meta.color)) {
+        if (!colorToActors.has(meta.color)) {
+          colorToActors.set(meta.color, []);
         }
+        colorToActors.get(meta.color)!.push(actor);
+        merged = true;
       }
-      
-      if (!merged && meta.keys) {
-        for (const k of meta.keys) {
-          if (options.mergeByKeys?.includes(k) || options.mergeCleanByKeys?.includes(k)) {
-            if (!keyToActors.has(k)) keyToActors.set(k, []);
-            keyToActors.get(k)!.push(actor);
-            merged = true;
-            if (options.mergeCleanByKeys?.includes(k)) {
-              cleanMergedNames.add(`MergedKey_${k.replace(/[^A-Za-z0-9]/g, '')}`);
-            }
-            break;
-          }
+    }
+
+    if (!merged && meta.keys) {
+      for (const k of meta.keys) {
+        if (options.mergeByKeys?.includes(k) || options.mergeCleanByKeys?.includes(k)) {
+          if (!keyToActors.has(k)) keyToActors.set(k, []);
+          keyToActors.get(k)!.push(actor);
+          merged = true;
+          break;
         }
       }
     }
   }
+
+  colorToActors.forEach((actors, color) => {
+    const name = `MergedColor_${color.replace(/[^A-Za-z0-9]/g, '')}`;
+    groups.push({ name, alias: `Merged ${color}`, actors });
+    for (const actor of actors) rename.set(actor, name);
+    if (options.mergeCleanByColor?.includes(color)) clean.add(name);
+  });
+  keyToActors.forEach((actors, key) => {
+    const name = `MergedKey_${key.replace(/[^A-Za-z0-9]/g, '')}`;
+    groups.push({ name, alias: `Merged ${key}`, actors });
+    for (const actor of actors) rename.set(actor, name);
+    if (options.mergeCleanByKeys?.includes(key)) clean.add(name);
+  });
+
+  return { rename, hide, clean, groups };
+}
+
+export function transformActors(code: string, config: DiagramConfig | null, options: ActorTransformOptions): string {
+  if (!config || !config.actors) return code;
+
+  const { hide, clean, groups } = buildActorRewriteMap(config, options);
+  const actorsToHide = Array.from(hide);
 
   const isSequenceDiagram = /^\s*sequenceDiagram/m.test(code);
   const lines = code.split('\n');
@@ -105,48 +140,29 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     }
 
     // Apply merging
-    colorToActors.forEach((actors, color) => {
-      if (actors.length > 0) {
-        const mergedName = `MergedColor_${color.replace(/[^A-Za-z0-9]/g, '')}`;
-        const mergedAlias = `Merged ${color}`;
-        for (const actor of actors) {
-          if (isSequenceDiagram) {
-            const regex = new RegExp(`\\b${actor}\\b`, 'g');
-            line = line.replace(regex, mergedName);
-          } else {
-            const shapeRegex = new RegExp(`\\b${actor}\\b(?:\\s*(?:\\[.*?\\]|\\(\\(.*?\\)\\)|\\(.*?\\)|\\{.*?\\}|>.*?\\]))?`, 'g');
-            line = line.replace(shapeRegex, `${mergedName}[${mergedAlias}]`);
-          }
+    for (const group of groups) {
+      for (const actor of group.actors) {
+        if (isSequenceDiagram) {
+          const regex = new RegExp(`\\b${actor}\\b`, 'g');
+          line = line.replace(regex, group.name);
+        } else {
+          const shapeRegex = new RegExp(`\\b${actor}\\b(?:\\s*(?:\\[.*?\\]|\\(\\(.*?\\)\\)|\\(.*?\\)|\\{.*?\\}|>.*?\\]))?`, 'g');
+          line = line.replace(shapeRegex, `${group.name}[${group.alias}]`);
         }
       }
-    });
-    keyToActors.forEach((actors, key) => {
-      if (actors.length > 0) {
-        const mergedName = `MergedKey_${key.replace(/[^A-Za-z0-9]/g, '')}`;
-        const mergedAlias = `Merged ${key}`;
-        for (const actor of actors) {
-          if (isSequenceDiagram) {
-            const regex = new RegExp(`\\b${actor}\\b`, 'g');
-            line = line.replace(regex, mergedName);
-          } else {
-            const shapeRegex = new RegExp(`\\b${actor}\\b(?:\\s*(?:\\[.*?\\]|\\(\\(.*?\\)\\)|\\(.*?\\)|\\{.*?\\}|>.*?\\]))?`, 'g');
-            line = line.replace(shapeRegex, `${mergedName}[${mergedAlias}]`);
-          }
-        }
-      }
-    });
+    }
 
     // Matches A->B:, A-->>B:, etc. (Sequence diagrams)
     const arrowMatch = line.match(/^\s*([A-Za-z0-9_-]+?)\s*(-->>|->>|--x|-x|--\)|-\)|-->|->|--|-)\s*([A-Za-z0-9_-]+)(?:\s*:|\s*$)/);
     if (arrowMatch && arrowMatch[1] === arrowMatch[3]) {
-      if (cleanMergedNames.has(arrowMatch[1])) {
+      if (clean.has(arrowMatch[1])) {
         continue;
       }
     }
 
     // Matches flowchart self-calls
     let isFlowchartSelfCall = false;
-    for (const mergedName of cleanMergedNames) {
+    for (const mergedName of Array.from(clean)) {
       const nodePattern = `${mergedName}(?:\\s*\\[.*?\\]|\\s*\\(.*?\\)|\\s*\\{.*?\\}|\\s*>.*?\\])?`;
       const edgePattern = `(?:---|-->|==>|==|-.->|-.-|<-->|<==>|x--x|o--o)(?:\\s*\\|.*?\\|)?`;
       const selfCallRegex = new RegExp(`^\\s*${nodePattern}\\s*${edgePattern}\\s*${nodePattern}\\s*$`);
