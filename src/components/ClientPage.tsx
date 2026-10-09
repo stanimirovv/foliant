@@ -3,10 +3,15 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import DiagramViewer from './DiagramViewer';
-import { processMermaid, transformActors } from '@/lib/preprocessor';
+import EditorPanel from './EditorPanel';
+import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView } from '@/lib/views';
+import { parseModel } from '@/lib/model';
+import { editMessageLabel } from '@/lib/editor';
+import { buildSelectionMap } from '@/lib/svgmap';
+import { rewriteArrowStyles } from '@/lib/styling';
 
 export default function ClientPage() {
   const router = useRouter();
@@ -16,6 +21,12 @@ export default function ClientPage() {
   const [files, setFiles] = useState<string[]>([]);
   const [rawCode, setRawCode] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
+
+  // Editing state (EDITING_PLAN.md Steps 7+): `selection` is a PROCESSED
+  // element key (as reported by DiagramViewer); it resolves to the raw
+  // element through the selection map.
+  const [selection, setSelection] = useState<string | null>(null);
+  const [editWarning, setEditWarning] = useState<string | null>(null);
   
   const currentFile = searchParams.get('file');
   const searchQuery = searchParams.get('q') || '';
@@ -167,8 +178,10 @@ export default function ClientPage() {
   useEffect(() => {
     if (currentFile) {
       loadFile(currentFile);
+      setSelection(null);
     } else {
       setRawCode('');
+      setSelection(null);
     }
   }, [currentFile, loadFile]);
 
@@ -211,24 +224,66 @@ export default function ClientPage() {
     return Array.from(keys);
   }, [viewsData]);
 
+  const actorOptions = useMemo<ActorTransformOptions>(() => ({
+    mergeByColor: Array.from(mergeColors),
+    mergeCleanByColor: Array.from(mergeCleanColors),
+    mergeByKeys: Array.from(mergeKeys),
+    mergeCleanByKeys: Array.from(mergeCleanKeys),
+    hideColors: Array.from(hideColors),
+    hideKeys: Array.from(hideKeys)
+  }), [mergeColors, mergeCleanColors, mergeKeys, mergeCleanKeys, hideColors, hideKeys]);
+
   const { code: processedCode, warnings: procWarnings } = useMemo(() => {
-    const actorTransformed = transformActors(debouncedCode, viewsData, {
-      mergeByColor: Array.from(mergeColors),
-      mergeCleanByColor: Array.from(mergeCleanColors),
-      mergeByKeys: Array.from(mergeKeys),
-      mergeCleanByKeys: Array.from(mergeCleanKeys),
-      hideColors: Array.from(hideColors),
-      hideKeys: Array.from(hideKeys)
-    });
+    const actorTransformed = transformActors(debouncedCode, viewsData, actorOptions);
 
     return processMermaid(actorTransformed, {
       isRegionVisible: (region) => !hiddenPaths.has(region.path)
     });
-  }, [debouncedCode, hiddenPaths, viewsData, mergeColors, mergeCleanColors, mergeKeys, mergeCleanKeys, hideColors, hideKeys]);
+  }, [debouncedCode, hiddenPaths, viewsData, actorOptions]);
 
   useEffect(() => {
     setWarnings(procWarnings);
   }, [procWarnings]);
+
+  // --- Edit mode (EDITING_PLAN.md Step 7 walking skeleton) ---
+  const editParam = searchParams.get('edit') === '1';
+  const rawModel = useMemo(() => parseModel(rawCode), [rawCode]);
+  const editSupported = rawModel.type !== 'unknown';  // R-01: sequence + flowchart only
+  const editMode = editParam && editSupported;
+
+  const selectionMap = useMemo(
+    () => buildSelectionMap(rawCode, processedCode, viewsData, actorOptions),
+    [rawCode, processedCode, viewsData, actorOptions]
+  );
+  const selectedRawElement = useMemo(
+    () => (selection ? selectionMap.get(selection) ?? null : null),
+    [selection, selectionMap]
+  );
+  const resolvedArrowStyles = useMemo(
+    () => rewriteArrowStyles(viewsData, actorOptions),
+    [viewsData, actorOptions]
+  );
+
+  const toggleEditMode = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (editMode) {
+      params.delete('edit');
+    } else {
+      params.set('edit', '1');
+    }
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const handleEditMessageLabel = (newLabel: string) => {
+    if (!selectedRawElement) return;
+    const result = editMessageLabel(rawCode, viewsData, selectedRawElement.key, newLabel);
+    if (result.warning) {
+      setEditWarning(result.warning);
+      return;
+    }
+    setEditWarning(null);
+    setRawCode(result.code);
+  };
 
   const saveCurrentView = async () => {
     if (!currentFile) return;
@@ -572,23 +627,39 @@ export default function ClientPage() {
 
       <div className="flex-1 flex flex-col min-w-0">
         <div className="p-4 border-b border-gray-200  bg-white  flex items-center justify-between">
-          <div className="relative w-64">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-            <input
-              type="text"
-              placeholder="Search diagram..."
-              value={searchQuery}
-              onChange={(e) => {
-                const params = new URLSearchParams(searchParams.toString());
-                if (e.target.value) {
-                  params.set('q', e.target.value);
-                } else {
-                  params.delete('q');
-                }
-                router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-              }}
-              className="w-full pl-8 pr-3 py-1 text-sm border rounded bg-gray-50   focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          <div className="flex items-center space-x-2">
+            <div className="relative w-64">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <input
+                type="text"
+                placeholder="Search diagram..."
+                value={searchQuery}
+                onChange={(e) => {
+                  const params = new URLSearchParams(searchParams.toString());
+                  if (e.target.value) {
+                    params.set('q', e.target.value);
+                  } else {
+                    params.delete('q');
+                  }
+                  router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                }}
+                className="w-full pl-8 pr-3 py-1 text-sm border rounded bg-gray-50   focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={toggleEditMode}
+              disabled={!editSupported}
+              title={editSupported
+                ? (editMode ? 'Exit edit mode' : 'Edit diagram')
+                : 'Editing is only available for sequence and flowchart diagrams'}
+              className={`p-1.5 rounded border ${
+                editMode
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : 'border-gray-200  hover:bg-gray-100 '
+              } ${!editSupported ? 'opacity-40 cursor-not-allowed' : ''}`}
+            >
+              <Pencil size={16} />
+            </button>
           </div>
           {warnings.length > 0 && (
             <div className="text-yellow-600 text-sm font-medium">
@@ -596,9 +667,29 @@ export default function ClientPage() {
             </div>
           )}
         </div>
-        
-        <div className="flex-1 p-4 overflow-hidden relative">
-          <DiagramViewer code={processedCode} searchQuery={searchQuery} theme={theme} />
+
+        <div className="flex-1 flex min-h-0">
+          <div className="flex-1 p-4 overflow-hidden relative min-w-0">
+            <DiagramViewer
+              code={processedCode}
+              searchQuery={searchQuery}
+              theme={theme}
+              editMode={editMode}
+              arrowStyles={resolvedArrowStyles}
+              nodeColors={viewsData}
+              selection={selection}
+              onSelect={setSelection}
+            />
+          </div>
+          {editMode && (
+            <div className="w-72 flex-shrink-0 border-l border-gray-200  bg-white  overflow-y-auto">
+              <EditorPanel
+                element={selectedRawElement}
+                warning={editWarning}
+                onEditLabel={handleEditMessageLabel}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

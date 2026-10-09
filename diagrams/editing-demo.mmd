@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant C as Client
+    participant API as API Gateway
+    participant Auth as Auth Service
+    participant DB as Database
+
+    C->>API: POST /login
+    API->>Auth: Validate Credentials
+    Auth->>DB: Fetch User Data
+    DB-->>Auth: User Record
+    Auth-->>API: JWT Token
+    API-->>C: 200 OK + Token
+
+    Note over C,API: Demo diagram for visual editing
