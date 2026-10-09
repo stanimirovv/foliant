@@ -40,10 +40,10 @@ vi.mock('./DiagramViewer', () => ({
 global.fetch = vi.fn();
 
 class MockEventSource {
-  onmessage: any = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
   close() {}
 }
-(global as any).EventSource = MockEventSource;
+(global as unknown as { EventSource: typeof MockEventSource }).EventSource = MockEventSource;
 
 describe('ClientPage', () => {
   beforeEach(() => {
@@ -56,7 +56,7 @@ describe('ClientPage', () => {
       return null;
     });
 
-    const mockFetch = global.fetch as any;
+    const mockFetch = global.fetch as import('vitest').Mock;
     mockFetch.mockResolvedValue({
       json: async () => ({ files: ['a.mmd'] })
     });

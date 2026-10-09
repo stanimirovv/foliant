@@ -81,6 +81,7 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     }
   }
 
+  const isSequenceDiagram = /^\s*sequenceDiagram/m.test(code);
   const lines = code.split('\n');
   const result: string[] = [];
 
@@ -98,33 +99,63 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
 
     if (skipLine) continue;
 
+    if (line.trim().startsWith('%% CONFIG:')) {
+      result.push(line);
+      continue;
+    }
+
     // Apply merging
     colorToActors.forEach((actors, color) => {
       if (actors.length > 0) {
         const mergedName = `MergedColor_${color.replace(/[^A-Za-z0-9]/g, '')}`;
+        const mergedAlias = `Merged ${color}`;
         for (const actor of actors) {
-          const regex = new RegExp(`\\b${actor}\\b`, 'g');
-          line = line.replace(regex, mergedName);
+          if (isSequenceDiagram) {
+            const regex = new RegExp(`\\b${actor}\\b`, 'g');
+            line = line.replace(regex, mergedName);
+          } else {
+            const shapeRegex = new RegExp(`\\b${actor}\\b(?:\\s*(?:\\[.*?\\]|\\(\\(.*?\\)\\)|\\(.*?\\)|\\{.*?\\}|>.*?\\]))?`, 'g');
+            line = line.replace(shapeRegex, `${mergedName}[${mergedAlias}]`);
+          }
         }
       }
     });
     keyToActors.forEach((actors, key) => {
       if (actors.length > 0) {
         const mergedName = `MergedKey_${key.replace(/[^A-Za-z0-9]/g, '')}`;
+        const mergedAlias = `Merged ${key}`;
         for (const actor of actors) {
-          const regex = new RegExp(`\\b${actor}\\b`, 'g');
-          line = line.replace(regex, mergedName);
+          if (isSequenceDiagram) {
+            const regex = new RegExp(`\\b${actor}\\b`, 'g');
+            line = line.replace(regex, mergedName);
+          } else {
+            const shapeRegex = new RegExp(`\\b${actor}\\b(?:\\s*(?:\\[.*?\\]|\\(\\(.*?\\)\\)|\\(.*?\\)|\\{.*?\\}|>.*?\\]))?`, 'g');
+            line = line.replace(shapeRegex, `${mergedName}[${mergedAlias}]`);
+          }
         }
       }
     });
 
-    // Matches A->B:, A-->>B:, etc.
+    // Matches A->B:, A-->>B:, etc. (Sequence diagrams)
     const arrowMatch = line.match(/^\s*([A-Za-z0-9_-]+?)\s*(-->>|->>|--x|-x|--\)|-\)|-->|->|--|-)\s*([A-Za-z0-9_-]+)(?:\s*:|\s*$)/);
     if (arrowMatch && arrowMatch[1] === arrowMatch[3]) {
       if (cleanMergedNames.has(arrowMatch[1])) {
         continue;
       }
     }
+
+    // Matches flowchart self-calls
+    let isFlowchartSelfCall = false;
+    for (const mergedName of cleanMergedNames) {
+      const nodePattern = `${mergedName}(?:\\s*\\[.*?\\]|\\s*\\(.*?\\)|\\s*\\{.*?\\}|\\s*>.*?\\])?`;
+      const edgePattern = `(?:---|-->|==>|==|-.->|-.-|<-->|<==>|x--x|o--o)(?:\\s*\\|.*?\\|)?`;
+      const selfCallRegex = new RegExp(`^\\s*${nodePattern}\\s*${edgePattern}\\s*${nodePattern}\\s*$`);
+      if (selfCallRegex.test(line)) {
+        isFlowchartSelfCall = true;
+        break;
+      }
+    }
+    if (isFlowchartSelfCall) continue;
 
     // Fix Notes over the same actor
     const noteMatch = line.match(/^(\s*Note\s+(?:over|left of|right of)\s+)([A-Za-z0-9_-]+),([A-Za-z0-9_-]+)(\s*:.*)$/);
@@ -139,11 +170,9 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   // Extract participants and group by color
   const participants: ParticipantInfo[] = [];
   const restOfCode: string[] = [];
-  let isSequenceDiagram = false;
   
   for (const line of result) {
     if (line.trim().startsWith('sequenceDiagram')) {
-      isSequenceDiagram = true;
       restOfCode.push(line);
       continue;
     }

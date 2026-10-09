@@ -1,0 +1,25 @@
+%% CONFIG: {"version":1,"views":[{"name":"Hide Tags","hiddenPaths":["tag=beta","tag=experimental"]}],"actors":{"Auth":{"color":"red","keys":["backend"]},"DB":{"color":"red","keys":["backend","database"]},"API":{"color":"blue","keys":["backend","gateway"]}}}
+flowchart TD
+    U[User] --> API[API Gateway]
+    
+    %% @region-start: flow=login
+    subgraph Login Flow
+        API --> Auth[Auth Service]
+        
+        %% @region-start: tag=beta
+        Auth --> Bio[Biometrics Service]
+        Bio --> Auth
+        %% @region-end
+
+        %% @region-start: tag=experimental
+        Auth --> Quant[Quantum Crypto]
+        Quant --> Auth
+        %% @region-end
+        
+        Auth --> DB[(Database)]
+        DB --> Auth
+    end
+    %% @region-end
+    
+    Auth --> |200 OK| API
+    API --> |Success| U

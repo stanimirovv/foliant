@@ -63,7 +63,11 @@ When generating the diagrams, maintain these specific visual conventions:
 When the user asks you to "add a flow" or "update an edge case":
 1. Locate the correct place in the existing sequence diagram.
 2. Ensure you add the correct `%% @region-start` and `%% @region-end` boundaries.
-3. Output the fully updated `.mmd` code so it can be saved and live-reloaded by the app.
+3. **Validate Annotations**: Before outputting the final diagram, double-check your tags:
+   - Ensure every `%% @region-start` has a matching `%% @region-end` (no unclosed or unmatched tags).
+   - Ensure tags use the correct syntax (`%% @region-start: type=value`).
+   - Ensure that Mermaid blocks (`rect`, `alt`, `opt`, `loop`, `subgraph`) are properly closed and strictly contained *inside* the region boundaries without overlapping/interleaving with the region tags.
+4. Output the fully updated `.mmd` code so it can be saved and live-reloaded by the app.
 
 ## 5. Configuration & Views (%% CONFIG)
 The first line of the `.mmd` file can contain a `%% CONFIG: { ... }` JSON string to persist app state, including saved views and actor metadata.

@@ -43,6 +43,56 @@ describe('processMermaid', () => {
     expect(result.code).toBe(code);
     expect(result.warnings.length).toBeGreaterThan(0);
   });
+
+  it('filters based on custom tag regions', () => {
+    const code = `sequenceDiagram
+  A->>B: Baseline
+  %% @region-start: tag=beta
+  A->>B: Beta Feature
+  %% @region-end
+  %% @region-start: tag=experimental
+  A->>B: Experimental Feature
+  %% @region-end
+  A->>B: End`;
+    const result = processMermaid(code, { 
+      isRegionVisible: (r) => r.type !== 'tag' || r.value !== 'beta'
+    });
+    expect(result.code).toBe(`sequenceDiagram
+  A->>B: Baseline
+  A->>B: Experimental Feature
+  A->>B: End`);
+  });
+
+  it('soft fails on unmatched end tags', () => {
+    const code = `sequenceDiagram\n  A->>B: Hello\n  %% @region-end`;
+    const result = processMermaid(code, { isRegionVisible: () => false });
+    expect(result.code).toBe(code);
+    expect(result.warnings).toContain('Unmatched region end tag at line 3');
+  });
+
+  it('soft fails on malformed start tags', () => {
+    const code = `sequenceDiagram\n  %% @region-start: \n  A->>B: Hello\n  %% @region-end`;
+    const result = processMermaid(code, { isRegionVisible: () => false });
+    expect(result.code).toBe(code);
+    expect(result.warnings).toContain('Invalid region start tag at line 2');
+  });
+
+  it('filters regions in a flowchart', () => {
+    const code = `flowchart TD
+  A --> B
+  %% @region-start: tag=experimental
+  subgraph Experimental
+    B --> C
+  end
+  %% @region-end
+  B --> D`;
+    const result = processMermaid(code, { 
+      isRegionVisible: (r) => r.type !== 'tag' || r.value !== 'experimental'
+    });
+    expect(result.code).toBe(`flowchart TD
+  A --> B
+  B --> D`);
+  });
 });
 
 describe('transformActors', () => {
@@ -175,5 +225,23 @@ describe('transformActors', () => {
     end
   Note over MergedColor_red: Internal computation
   MergedColor_red->>C: Output`);
+  });
+
+  it('merges actors by key and hides self calls in a flowchart (Clean)', () => {
+    const code = `flowchart TD
+  A[API] --> B
+  B --> C[Client]
+  B -->|message| B
+  B --> B[Database]`;
+    const config = {
+      version: 1,
+      actors: {
+        A: { keys: ['backend'] },
+        B: { keys: ['backend'] }
+      }
+    };
+    const result = transformActors(code, config, { mergeCleanByKeys: ['backend'] });
+    expect(result).toBe(`flowchart TD
+  MergedKey_backend[Merged backend] --> C[Client]`);
   });
 });

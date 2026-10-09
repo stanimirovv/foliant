@@ -48,10 +48,12 @@ export default function ClientPage() {
     }
     params.delete('file');
     
-    // If the URL is exactly the same, Next.js won't trigger a navigation.
-    // We increment refreshKey to force a re-fetch of the directory anyway.
-    setRefreshKey(k => k + 1);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    const newQueryString = params.toString();
+    if (newQueryString === searchParams.toString()) {
+      setRefreshKey(k => k + 1);
+    } else {
+      router.replace(`${pathname}?${newQueryString}`, { scroll: false });
+    }
   };
   
   // Hidden paths
@@ -137,9 +139,11 @@ export default function ClientPage() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
+    let ignore = false;
     fetch(`/api/files${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`)
       .then(r => r.json())
       .then(data => {
+        if (ignore) return;
         setFiles(data.files || []);
         if (!currentFile && data.files && data.files.length > 0) {
           const params = new URLSearchParams(searchParams.toString());
@@ -147,6 +151,7 @@ export default function ClientPage() {
           router.replace(`${pathname}?${params.toString()}`, { scroll: false });
         }
       });
+    return () => { ignore = true; };
   }, [currentFile, pathname, router, searchParams, dirParam, refreshKey]);
 
   const loadFile = useCallback(async (filename: string) => {
@@ -380,8 +385,12 @@ export default function ClientPage() {
                           const params = new URLSearchParams(searchParams.toString());
                           params.set('dir', d);
                           params.delete('file');
-                          setRefreshKey(k => k + 1);
-                          router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                          const newQueryString = params.toString();
+                          if (newQueryString === searchParams.toString()) {
+                            setRefreshKey(k => k + 1);
+                          } else {
+                            router.replace(`${pathname}?${newQueryString}`, { scroll: false });
+                          }
                         }}
                         title={d}
                       >
