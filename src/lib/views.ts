@@ -8,10 +8,21 @@ export interface ActorMetadata {
   keys?: string[];
 }
 
+export interface ArrowStyle {
+  from: string;                 // participant/node id in the RAW file
+  to: string;                   // participant/node id in the RAW file
+  label?: string;               // message/edge label; disambiguates same-endpoint arrows
+  occurrence?: number;          // optional: nth arrow with the same (from,to,label), 0-based
+  color?: string;               // stroke color, any CSS color
+  width?: number;               // stroke width, 1–10
+  dash?: 'solid' | 'dashed' | 'dotted';
+}
+
 export interface DiagramConfig {
   version: number;
   views?: SavedView[];
   actors?: Record<string, ActorMetadata>;
+  arrows?: ArrowStyle[];
 }
 
 export const VIEWS_PREFIX = '%% VIEWS: ';
@@ -42,7 +53,10 @@ export function updateViewsData(code: string, config: DiagramConfig | null): str
   const lines = code.split('\n');
   const hasConfig = lines[0] && (lines[0].startsWith(VIEWS_PREFIX) || lines[0].startsWith(CONFIG_PREFIX));
   
-  if (!config || ((!config.views || config.views.length === 0) && (!config.actors || Object.keys(config.actors).length === 0))) {
+  const emptyViews = !config?.views || config.views.length === 0;
+  const emptyActors = !config?.actors || Object.keys(config.actors).length === 0;
+  const emptyArrows = !config?.arrows || config.arrows.length === 0;
+  if (!config || (emptyViews && emptyActors && emptyArrows)) {
     if (hasConfig) {
       lines.shift();
     }
