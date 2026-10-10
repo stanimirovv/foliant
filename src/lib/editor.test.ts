@@ -404,6 +404,79 @@ sequenceDiagram
     expect(deleteElement(SEQ, SEQ_CFG, 'p:99').warning).toBeTruthy();
     expect(deleteElement('classDiagram\n    A --> B', null, 'n:0').warning).toBeTruthy();
   });
+
+  it('cascades a flowchart node delete without eating lines shared with its edges', () => {
+    const flow = `flowchart TD
+    A[Alice] --> B[Bob]
+    B -->|Reply| A
+    New1[New Participant]
+    A --> B`;
+    const res = deleteElement(flow, null, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.cascaded).toEqual(['e:0', 'e:1', 'e:2']);
+    expect(res.code).toBe(`flowchart TD
+    B[Bob]
+    New1[New Participant]`);
+  });
+
+  it('keeps the surviving endpoint when the defining line uses the open-text edge form', () => {
+    const flow = `flowchart TD
+    A[Alice] -- hello --> B[Bob]
+    A --> B`;
+    const res = deleteElement(flow, null, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.cascaded).toEqual(['e:0', 'e:1']);
+    expect(res.code).toBe(`flowchart TD
+    B[Bob]`);
+  });
+
+  it('removes a shared edge line outright when the other endpoint is declared earlier', () => {
+    const flow = `flowchart TD
+    B[Bob]
+    A[Alice] --> B
+    A --> B`;
+    const res = deleteElement(flow, null, 'n:1');
+    expect(res.warning).toBeUndefined();
+    expect(res.cascaded).toEqual(['e:0', 'e:1']);
+    expect(res.code).toBe(`flowchart TD
+    B[Bob]`);
+  });
+
+  it('keeps endpoint declarations when deleting the edge line that first declares them', () => {
+    const flow = `flowchart TD
+    A[Alice] --> B[Bob]
+    B --> C`;
+    const res = deleteElement(flow, null, 'e:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.cascaded).toEqual([]);
+    expect(res.code).toBe(`flowchart TD
+    A[Alice]
+    B[Bob]
+    B --> C`);
+  });
+
+  it('removes an edge line outright when its endpoints are declared earlier', () => {
+    const flow = `flowchart TD
+    A[Alice]
+    B[Bob]
+    A --> B`;
+    const res = deleteElement(flow, null, 'e:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD
+    A[Alice]
+    B[Bob]`);
+  });
+
+  it('removes a self-loop line once when deleting its node', () => {
+    const flow = `flowchart TD
+    A[Alice] --> A
+    B[Bob]`;
+    const res = deleteElement(flow, null, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.cascaded).toEqual(['e:0']);
+    expect(res.code).toBe(`flowchart TD
+    B[Bob]`);
+  });
 });
 
 describe('setActorColor / addTag / removeTag', () => {

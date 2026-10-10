@@ -236,6 +236,33 @@ function rewriteFlowchartEdgeOperator(line: string, operator: string): string | 
   return undefined;
 }
 
+// Endpoints of a flowchart edge line (pipe form or open-text form): the
+// indent plus each endpoint's id and full declaration (id + shape token).
+// Undefined for standalone node lines and other non-edge lines.
+function flowchartEdgeEndpoints(line: string): { indent: string; fromId: string; fromDecl: string; toId: string; toDecl: string } | undefined {
+  const pipe = line.match(FC_EDGE_PIPE_V);
+  if (pipe) {
+    return {
+      indent: pipe[1],
+      fromId: pipe[2],
+      fromDecl: `${pipe[2]}${pipe[3]}${pipe[4] ?? ''}`.trimEnd(),
+      toId: pipe[11],
+      toDecl: `${pipe[11]}${pipe[12]}${pipe[13] ?? ''}`.trimEnd(),
+    };
+  }
+  const text = line.match(FC_EDGE_TEXT_V);
+  if (text) {
+    return {
+      indent: text[1],
+      fromId: text[2],
+      fromDecl: `${text[2]}${text[3]}${text[4] ?? ''}`.trimEnd(),
+      toId: text[12],
+      toDecl: `${text[12]}${text[13]}${text[14] ?? ''}`.trimEnd(),
+    };
+  }
+  return undefined;
+}
+
 // Rewrite the text after `:` on a sequence message line. An empty label
 // drops the `: text` part (bare message).
 function rewriteSequenceMessageLabel(line: string, newLabel: string): string | null {
@@ -402,11 +429,62 @@ export function deleteElement(code: string, config: DiagramConfig | null, key: s
   }
 
   const lines = code.split('\n');
-  const toRemove = [el, ...cascaded].sort((a, b) => b.lineStart - a.lineStart);
-  for (const r of toRemove) {
-    lines.splice(r.lineStart, r.lineEnd - r.lineStart + 1);
+
+  // A flowchart edge line can also be the first declaration of its endpoints
+  // (`A[Alice] --> B[Bob]`). Dropping such a line outright would silently
+  // delete nodes that outlive the removed element, so the line is rewritten
+  // to keep the surviving declaration(s) instead of being spliced out.
+  const removed = new Set<ModelElement>([el, ...cascaded]);
+  const rewriteAt = new Map<number, string[]>();
+  if (model.type === 'flowchart') {
+    const firstDeclaredHere = (id: string, lineNo: number) =>
+      model.elements.some(e => e.kind === 'node' && e.id === id && e.lineStart === lineNo);
+    // A deleted node's own declaration must never survive on a rewritten line.
+    const deletedNodeId = el.kind === 'node' ? el.id : undefined;
+    for (const r of [el, ...cascaded]) {
+      if (!removed.has(r)) continue; // already rewritten away by a sibling element
+      if (r.lineStart !== r.lineEnd) continue;
+      const endpoints = flowchartEdgeEndpoints(lines[r.lineStart]);
+      if (!endpoints) continue;
+      if (r.kind === 'node') {
+        if (endpoints.fromId !== r.id && endpoints.toId !== r.id) continue;
+        if (endpoints.fromId === endpoints.toId) continue; // self-loop: nothing survives
+        const keptId = endpoints.fromId === r.id ? endpoints.toId : endpoints.fromId;
+        const keptDecl = endpoints.fromId === r.id ? endpoints.toDecl : endpoints.fromDecl;
+        // Declared on an earlier line: plain removal loses nothing.
+        if (!firstDeclaredHere(keptId, r.lineStart)) continue;
+        rewriteAt.set(r.lineStart, [`${endpoints.indent}${keptDecl}`]);
+        removed.delete(r);
+        const shared = cascaded.find(c => isArrow(c) && c.lineStart === r.lineStart &&
+          c.lineEnd === r.lineEnd && (c.from === r.id || c.to === r.id));
+        if (shared) removed.delete(shared);
+      } else if (r.kind === 'edge') {
+        const keepFrom = endpoints.fromId !== deletedNodeId && firstDeclaredHere(r.from, r.lineStart);
+        const keepTo = endpoints.fromId !== endpoints.toId && endpoints.toId !== deletedNodeId && firstDeclaredHere(r.to, r.lineStart);
+        if (!keepFrom && !keepTo) continue;
+        const decls: string[] = [];
+        if (keepFrom) decls.push(`${endpoints.indent}${endpoints.fromDecl}`);
+        if (keepTo) decls.push(`${endpoints.indent}${endpoints.toDecl}`);
+        rewriteAt.set(r.lineStart, decls);
+        removed.delete(r);
+      }
+    }
   }
-  const newCode = lines.join('\n');
+
+  // One pass: rewrite the shared lines, drop the removed spans. The drop set
+  // deduplicates spans that share a line (e.g. a node and its self-loop edge).
+  const drop = new Set<number>();
+  for (const r of removed) {
+    for (let i = r.lineStart; i <= r.lineEnd; i++) drop.add(i);
+  }
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const rewrite = rewriteAt.get(i);
+    if (rewrite) { kept.push(...rewrite); continue; }
+    if (drop.has(i)) continue;
+    kept.push(lines[i]);
+  }
+  const newCode = kept.join('\n');
 
   // Config cleanup: drop the component's actor entry and the arrow styles of
   // every removed element.
