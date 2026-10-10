@@ -10,6 +10,19 @@ A full-stack Next.js application designed to manage, visualize, and filter massi
 - **Agnostic Pre-processor**: Uses custom tagging like `%% @region-start: type=value` to filter regions and smart cleanup to prevent Mermaid from throwing parse errors.
 - **Dynamic UI & Filtering**: Sidebar file explorer, URL state persistence for filters, custom search highlighting, and theming.
 - **Directory Selection**: You can easily switch between directories via the UI sidebar, or provide a default directory path when starting the app. Recent directories are remembered for quick access.
+- **Visual Editing**: Edit sequence and flowchart diagrams in the browser — click to select elements and change their labels, types, colors, widths and dash patterns, add/delete participants, messages, nodes and edges, and create new diagrams by name and type. All edits auto-save to the `.mmd` file.
+
+## Editing
+
+Sequence and flowchart diagrams can be edited directly in the app:
+
+- Toggle **Edit** in the toolbar (adds `edit=1` to the URL), then click a participant/node or a message/edge on the canvas. The side panel shows the fields for the selected element (Label, Type, Color, Width, Dash, Tags, Delete).
+- Use the toolbar to **Add Participant** / **Add Message**, or click **New** in the Files list to create a new diagram — you choose the file name and the diagram type (sequence or flowchart).
+- Every edit **auto-saves** to the `.mmd` file; the toolbar shows a Saving… / Saved indicator. External file changes are adopted live (SSE) with a "Reloaded from disk" notice.
+- **Undo** (`Ctrl+Z`) and **redo** (`Ctrl+Y`) step through edits; the history is capped at 15 entries.
+- Colors, tags and arrow styles persist in the `%% CONFIG:` header of the file (see `diagram-guidelines.md`, section 6).
+
+To verify the feature by hand, follow the incremental checklist in [MANUAL_TEST_PLAN.md](./MANUAL_TEST_PLAN.md) — run one increment at a time and confirm the behavior before continuing. The automated suites (`npx vitest run`, `npx cypress run`) cover the same behaviors headlessly.
 
 ## How to Run Locally
 
