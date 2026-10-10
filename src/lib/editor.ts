@@ -532,3 +532,19 @@ export function setArrowStyle(code: string, config: DiagramConfig | null, key: s
   pruneConfig(newConfig);
   return { code: updateViewsData(code, newConfig), config: newConfig };
 }
+
+// The style currently stored for an arrow element, or null when it has none.
+// Used to populate the panel fields; dash is normalized (absent means 'solid').
+export function getArrowStyle(code: string, config: DiagramConfig | null, key: string): ArrowStylePatch | null {
+  const model = parseModel(code);
+  const el = findElement(model, key);
+  if (!el || !isArrow(el) || !config?.arrows) return null;
+  const occurrence = elementOccurrence(model, el);
+  const entry = config.arrows.find(a => arrowsMatchEntry(a, el.from, el.to, el.label, occurrence));
+  if (!entry) return null;
+  return {
+    color: entry.color,
+    width: entry.width,
+    dash: entry.dash ?? 'solid',
+  };
+}

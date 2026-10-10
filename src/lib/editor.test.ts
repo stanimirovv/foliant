@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
-  deleteElement, setActorColor, addTag, removeTag, setArrowStyle,
+  deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
 } from './editor';
 import { parseModel } from './model';
 import { updateViewsData, DiagramConfig } from './views';
@@ -696,5 +696,32 @@ describe('create -> change -> verify (harness)', () => {
     expect(parseConfig(flowColored.code)?.actors?.A.color).toBe('blue');
     const flowStyled = setArrowStyle(flowColored.code, flowColored.config, 'e:0', { width: 2, dash: 'dotted' });
     expect(parseConfig(flowStyled.code)?.arrows).toEqual([{ from: 'A', to: 'B', width: 2, dash: 'dotted' }]);
+  });
+});
+
+describe('getArrowStyle', () => {
+  it('returns null for unstyled arrows, components and unknown keys', () => {
+    const seq = createSequenceDiagram();
+    expect(getArrowStyle(seq, null, 'm:0')).toBeNull();
+    expect(getArrowStyle(seq, null, 'p:0')).toBeNull();
+    expect(getArrowStyle(seq, null, 'nope')).toBeNull();
+  });
+
+  it('reads back the stored style, normalizing a missing dash to solid', () => {
+    const seq = createSequenceDiagram();
+    const styled = setArrowStyle(seq, null, 'm:0', { color: '#e11d48', width: 3, dash: 'dashed' });
+    expect(getArrowStyle(styled.code, styled.config, 'm:0')).toEqual({ color: '#e11d48', width: 3, dash: 'dashed' });
+  });
+
+  it('disambiguates same-(from,to,label) arrows by occurrence', () => {
+    const seq = createSequenceDiagram();
+    // two identical A->>B: New message arrows after m:0
+    const twice = addMessage(seq, null, 'p:0', 'p:1', 'm:0');
+    const thrice = addMessage(twice.code, twice.config, 'p:0', 'p:1', 'm:0');
+    expect(getArrowStyle(thrice.code, thrice.config, 'm:1')).toBeNull();
+    // style the SECOND of the identical arrows (occurrence 1)
+    const styled = setArrowStyle(thrice.code, thrice.config, 'm:2', { color: 'blue' });
+    expect(getArrowStyle(styled.code, styled.config, 'm:1')).toBeNull();
+    expect(getArrowStyle(styled.code, styled.config, 'm:2')).toEqual({ color: 'blue', dash: 'solid' });
   });
 });

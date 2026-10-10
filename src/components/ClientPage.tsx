@@ -6,12 +6,17 @@ import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView } from '@/lib/views';
-import { parseModel } from '@/lib/model';
-import { editMessageLabel } from '@/lib/editor';
+import { parseModel, ModelElement } from '@/lib/model';
+import {
+  editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
+  setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
+  EditResult, ArrowStylePatch,
+} from '@/lib/editor';
 import { buildSelectionMap } from '@/lib/svgmap';
 import { rewriteArrowStyles } from '@/lib/styling';
+import { PendingDelete } from './EditorPanel';
 
 export default function ClientPage() {
   const router = useRouter();
@@ -22,11 +27,17 @@ export default function ClientPage() {
   const [rawCode, setRawCode] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
 
-  // Editing state (EDITING_PLAN.md Steps 7+): `selection` is a PROCESSED
-  // element key (as reported by DiagramViewer); it resolves to the raw
-  // element through the selection map.
+  // Editing state (EDITING_PLAN.md Steps 7+): `selection` is a RAW element
+  // key. DiagramViewer reports the PROCESSED key on click; it is resolved to
+  // the raw element through the selection map and the RAW key is stored, so
+  // the selection survives transforms that reorder the processed diagram
+  // (e.g. colored participants regrouped into box blocks).
   const [selection, setSelection] = useState<string | null>(null);
   const [editWarning, setEditWarning] = useState<string | null>(null);
+  // Two-phase delete (EDITING_PLAN.md Step 8): the transform runs on request
+  // so the confirm dialog can list the cascaded elements; the new code is
+  // applied only on confirm.
+  const [pendingDelete, setPendingDelete] = useState<(PendingDelete & { code: string }) | null>(null);
   
   const currentFile = searchParams.get('file');
   const searchQuery = searchParams.get('q') || '';
@@ -179,9 +190,11 @@ export default function ClientPage() {
     if (currentFile) {
       loadFile(currentFile);
       setSelection(null);
+      setPendingDelete(null);
     } else {
       setRawCode('');
       setSelection(null);
+      setPendingDelete(null);
     }
   }, [currentFile, loadFile]);
 
@@ -255,10 +268,28 @@ export default function ClientPage() {
     () => buildSelectionMap(rawCode, processedCode, viewsData, actorOptions),
     [rawCode, processedCode, viewsData, actorOptions]
   );
+  // Inverse of the selection map (raw key -> processed key) for the highlight.
+  const rawToProcessed = useMemo(() => {
+    const map = new Map<string, string>();
+    selectionMap.forEach((rawEl, processedKey) => { map.set(rawEl.key, processedKey); });
+    return map;
+  }, [selectionMap]);
+  const processedSelection = selection ? rawToProcessed.get(selection) ?? null : null;
+
   const selectedRawElement = useMemo(
-    () => (selection ? selectionMap.get(selection) ?? null : null),
-    [selection, selectionMap]
+    () => (selection ? rawModel.elements.find(e => e.key === selection) ?? null : null),
+    [selection, rawModel]
   );
+
+  // DiagramViewer click: processed key -> raw key.
+  const handleSelect = (processedKey: string | null) => {
+    if (!processedKey) {
+      setSelection(null);
+      return;
+    }
+    const raw = selectionMap.get(processedKey);
+    setSelection(raw ? raw.key : null);
+  };
   const resolvedArrowStyles = useMemo(
     () => rewriteArrowStyles(viewsData, actorOptions),
     [viewsData, actorOptions]
@@ -274,15 +305,135 @@ export default function ClientPage() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
-  const handleEditMessageLabel = (newLabel: string) => {
-    if (!selectedRawElement) return;
-    const result = editMessageLabel(rawCode, viewsData, selectedRawElement.key, newLabel);
+  // --- Edit dispatch (EDITING_PLAN.md Steps 7-8): every panel action runs a
+  // pure transform over (rawCode, viewsData) and applies the result. ---
+  const applyEditResult = (result: EditResult) => {
     if (result.warning) {
       setEditWarning(result.warning);
       return;
     }
     setEditWarning(null);
     setRawCode(result.code);
+  };
+
+  const selectedComponent = selectedRawElement && (selectedRawElement.kind === 'participant' || selectedRawElement.kind === 'node')
+    ? selectedRawElement
+    : null;
+  const selectedArrow = selectedRawElement && (selectedRawElement.kind === 'message' || selectedRawElement.kind === 'edge')
+    ? selectedRawElement
+    : null;
+
+  const selectedArrowStyle = useMemo(
+    () => (selectedArrow ? getArrowStyle(rawCode, viewsData, selectedArrow.key) : null),
+    [selectedArrow, rawCode, viewsData]
+  );
+
+  // Current arrow style as a complete patch (setArrowStyle replaces the whole
+  // entry, so single-field edits must carry the other fields along).
+  const currentArrowPatch = (): ArrowStylePatch => {
+    const cur = selectedArrowStyle ?? {};
+    return {
+      color: cur.color,
+      width: cur.width,
+      dash: cur.dash && cur.dash !== 'solid' ? cur.dash : undefined,
+    };
+  };
+
+  const handleEditLabel = (newLabel: string) => {
+    if (!selectedRawElement) return;
+    const fn = selectedComponent ? renameParticipant : editMessageLabel;
+    applyEditResult(fn(rawCode, viewsData, selectedRawElement.key, newLabel));
+  };
+
+  const handleSetColor = (color: string) => {
+    if (selectedComponent) {
+      applyEditResult(setActorColor(rawCode, viewsData, selectedComponent.key, color));
+    } else if (selectedArrow) {
+      const patch = currentArrowPatch();
+      patch.color = color.trim() || undefined;
+      applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+    }
+  };
+
+  const handleSetType = (operator: string) => {
+    if (!selectedArrow) return;
+    if (selectedArrow.operator === operator) return;
+    applyEditResult(setArrowType(rawCode, viewsData, selectedArrow.key, operator));
+  };
+
+  const handleSetWidth = (width: number | '') => {
+    if (!selectedArrow) return;
+    const patch = currentArrowPatch();
+    patch.width = width === '' ? undefined : width;
+    applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+  };
+
+  const handleSetDash = (dash: 'solid' | 'dashed' | 'dotted') => {
+    if (!selectedArrow) return;
+    const patch = currentArrowPatch();
+    patch.dash = dash === 'solid' ? undefined : dash;
+    applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+  };
+
+  const handleAddTag = (tag: string) => {
+    if (!selectedComponent) return;
+    applyEditResult(addTag(rawCode, viewsData, selectedComponent.key, tag));
+  };
+
+  const handleRemoveTag = (tag: string) => {
+    if (!selectedComponent) return;
+    applyEditResult(removeTag(rawCode, viewsData, selectedComponent.key, tag));
+  };
+
+  const handleRequestDelete = () => {
+    if (!selectedRawElement) return;
+    const result = deleteElement(rawCode, viewsData, selectedRawElement.key);
+    if (result.warning) {
+      setEditWarning(result.warning);
+      return;
+    }
+    const cascaded = (result.cascaded ?? [])
+      .map(k => rawModel.elements.find(e => e.key === k))
+      .filter((e): e is ModelElement => e !== undefined);
+    setPendingDelete({ code: result.code, element: selectedRawElement, cascaded });
+  };
+
+  const handleConfirmDelete = () => {
+    if (!pendingDelete) return;
+    setRawCode(pendingDelete.code);
+    setPendingDelete(null);
+    setSelection(null);
+    setEditWarning(null);
+  };
+
+  const handleCancelDelete = () => setPendingDelete(null);
+
+  // --- Add Participant / Add Message (EDITING_PLAN.md 4.12) ---
+  const componentElements = useMemo(
+    () => rawModel.elements.filter(e => e.kind === 'participant' || e.kind === 'node'),
+    [rawModel]
+  );
+
+  const handleAddParticipant = () => {
+    const afterKey = selectedComponent ? selectedComponent.key : undefined;
+    applyEditResult(addParticipant(rawCode, viewsData, afterKey));
+  };
+
+  const handleAddMessage = () => {
+    if (componentElements.length === 0) {
+      setEditWarning('Add a participant first');
+      return;
+    }
+    const fromEl = selectedComponent ?? componentElements[0];
+    const idx = componentElements.findIndex(e => e.key === fromEl.key);
+    // Selected participant becomes `from`; `to` is the next participant
+    // (a lone participant gets a self-message, which Mermaid supports).
+    const toEl = componentElements.length > 1
+      ? componentElements[(idx + 1) % componentElements.length]
+      : fromEl;
+    // A selected message/edge sets the insertion point.
+    const afterKey = selectedArrow ? selectedArrow.key : undefined;
+    applyEditResult(addMessage(rawCode, viewsData, fromEl.key, toEl.key, afterKey));
   };
 
   const saveCurrentView = async () => {
@@ -660,6 +811,33 @@ export default function ClientPage() {
             >
               <Pencil size={16} />
             </button>
+            {editMode && (
+              <>
+                <button
+                  onClick={handleAddParticipant}
+                  title="Add Participant"
+                  className="flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-100"
+                >
+                  <UserPlus size={14} />
+                  <span>Participant</span>
+                </button>
+                <button
+                  onClick={handleAddMessage}
+                  disabled={componentElements.length === 0}
+                  title={componentElements.length === 0
+                    ? 'Add a participant first'
+                    : 'Add Message'}
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
+                    componentElements.length === 0
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:bg-gray-100'
+                  }`}
+                >
+                  <MessageSquarePlus size={14} />
+                  <span>Message</span>
+                </button>
+              </>
+            )}
           </div>
           {warnings.length > 0 && (
             <div className="text-yellow-600 text-sm font-medium">
@@ -677,16 +855,29 @@ export default function ClientPage() {
               editMode={editMode}
               arrowStyles={resolvedArrowStyles}
               nodeColors={viewsData}
-              selection={selection}
-              onSelect={setSelection}
+              selection={processedSelection}
+              onSelect={handleSelect}
             />
           </div>
           {editMode && (
             <div className="w-72 flex-shrink-0 border-l border-gray-200  bg-white  overflow-y-auto">
               <EditorPanel
                 element={selectedRawElement}
+                diagramType={rawModel.type}
+                config={viewsData}
+                arrowStyle={selectedArrowStyle}
                 warning={editWarning}
-                onEditLabel={handleEditMessageLabel}
+                pendingDelete={pendingDelete}
+                onEditLabel={handleEditLabel}
+                onSetColor={handleSetColor}
+                onSetType={handleSetType}
+                onSetWidth={handleSetWidth}
+                onSetDash={handleSetDash}
+                onAddTag={handleAddTag}
+                onRemoveTag={handleRemoveTag}
+                onRequestDelete={handleRequestDelete}
+                onConfirmDelete={handleConfirmDelete}
+                onCancelDelete={handleCancelDelete}
               />
             </div>
           )}
