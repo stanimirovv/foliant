@@ -4,7 +4,7 @@ import { buildActorRewriteMap, transformActors } from './preprocessor';
 import { parseModel, MessageElement, EdgeElement } from './model';
 import { updateViewsData, DiagramConfig } from './views';
 import { createSequenceDiagram, createFlowchartDiagram, parseConfig, renderPipeline, applyStyles, svgText } from './editorTestHarness';
-import { setArrowStyle, setActorColor } from './editor';
+import { setArrowStyle, setActorColor, addTag } from './editor';
 import { buildSelectionMap } from './svgmap';
 import { SEQ_SVG, SEQ_CODE, FLOW_SVG, FLOW_CODE, parseSvgRoot } from './svgTestFixtures';
 
@@ -439,5 +439,73 @@ describe('create -> change -> verify (render pipeline, EDITING_PLAN.md Step 5)',
     const merged = root.querySelector('g.node[id*="flowchart-MergedColor_e11d48-"] .label-container')!;
     expect(merged).toBeTruthy();
     expect(styleOf(merged).fill).toBe(rgb('#e11d48'));
+  });
+});
+
+describe('Step 11 — panel dispatch -> merge/hide integration (create -> change -> verify)', () => {
+  it('flowchart: node colors set via the panel dispatch render as node fills', async () => {
+    // create a new flowchart, then change it with the same transforms the
+    // panel dispatches (setActorColor per node)
+    const raw = createFlowchartDiagram();
+    const c1 = setActorColor(raw, null, 'n:0', '#e11d48');
+    const c2 = setActorColor(c1.code, c1.config, 'n:1', '#2563eb');
+    expect(c2.config?.actors).toEqual({ A: { color: '#e11d48' }, B: { color: '#2563eb' } });
+
+    // verify: full render pipeline -> applyNodeColors -> SVG fills
+    const { svg, processedCode, config } = await renderPipeline(c2.code);
+    const out = applyStyles(svg, processedCode, config);
+    const root = parseSvgRoot(out);
+    const nodeA = root.querySelector('g.node[id*="flowchart-A-"] .label-container')!;
+    const nodeB = root.querySelector('g.node[id*="flowchart-B-"] .label-container')!;
+    expect(styleOf(nodeA).fill).toBe(rgb('#e11d48'));
+    expect(styleOf(nodeB).fill).toBe(rgb('#2563eb'));
+  });
+
+  it('sequence: component color flows through the box grouping', async () => {
+    const raw = createSequenceDiagram();
+    const colored = setActorColor(raw, null, 'p:0', '#e11d48');
+    const { processedCode } = await renderPipeline(colored.code);
+    // transformActors reads config.actors[id].color and regroups the
+    // participant into a box block
+    expect(processedCode).toContain('box #e11d48');
+    expect(processedCode.indexOf('participant A as Alice')).toBeGreaterThan(processedCode.indexOf('box #e11d48'));
+  });
+
+  it('sequence: tagged actors merged by key — the internal styled arrow follows merge / clean / un-merge', async () => {
+    // create a new sequence diagram; tag both actors and style their arrow
+    // with the same transforms the panel dispatches
+    const raw = createSequenceDiagram();
+    const t1 = addTag(raw, null, 'p:0', 'backend');
+    const t2 = addTag(t1.code, t1.config, 'p:1', 'backend');
+    const styled = setArrowStyle(t2.code, t2.config, 'm:0', { color: '#e11d48', width: 3 });
+    expect(styled.config?.arrows).toEqual([
+      { from: 'A', to: 'B', label: 'Hello', color: '#e11d48', width: 3 },
+    ]);
+
+    // merged by key: A and B collapse into one actor; the internal arrow
+    // renders as a merged self-call that carries the style
+    const merged = await renderPipeline(styled.code, { mergeByKeys: ['backend'] });
+    const mergedOut = applyStyles(merged.svg, merged.processedCode, merged.config, { mergeByKeys: ['backend'] });
+    const mergedRoot = parseSvgRoot(mergedOut);
+    const selfCall = mergedRoot.querySelector('[data-et="message"][data-from^="MergedKey_"][data-to^="MergedKey_"]');
+    expect(selfCall).toBeTruthy();
+    expect(styleOf(selfCall).stroke).toBe(rgb('#e11d48'));
+    expect(styleOf(selfCall).strokeWidth).toBe('3');
+    expect(svgText(mergedOut)).toContain('Hello');
+
+    // clean merge: the internal self-call is dropped — and its style with it
+    const clean = await renderPipeline(styled.code, { mergeCleanByKeys: ['backend'] });
+    const cleanOut = applyStyles(clean.svg, clean.processedCode, clean.config, { mergeCleanByKeys: ['backend'] });
+    const cleanRoot = parseSvgRoot(cleanOut);
+    expect(cleanRoot.querySelector('[data-et="message"]')).toBeNull();
+
+    // un-merged (default): the original arrow carries the style again
+    const plain = await renderPipeline(styled.code);
+    const plainOut = applyStyles(plain.svg, plain.processedCode, plain.config);
+    const plainRoot = parseSvgRoot(plainOut);
+    const arrow = plainRoot.querySelector('[data-et="message"][data-from="A"][data-to="B"]')!;
+    expect(styleOf(arrow).stroke).toBe(rgb('#e11d48'));
+    expect(styleOf(arrow).strokeWidth).toBe('3');
+    expect(svgText(plainOut)).toContain('Hello');
   });
 });

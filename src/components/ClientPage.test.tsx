@@ -755,4 +755,27 @@ describe('ClientPage', () => {
       expect(code()).toContain('A->>B: Hey');
     }, { timeout: 3000 });
   }, 15000);
+
+  it('tags and colors set in the panel appear in the sidebar Actors controls', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    // no CONFIG yet -> no Actors section
+    expect(screen.queryByText('By Color')).toBeNull();
+    expect(screen.queryByText('By Key')).toBeNull();
+
+    // set a color and a tag on participant A through the panel
+    fireEvent.click(screen.getByTestId('select-p:0'));
+    await screen.findByDisplayValue('Alice');
+    fireEvent.change(screen.getByLabelText('Color'), { target: { value: '#e11d48' } });
+    const tagInput = screen.getByPlaceholderText('Add tag...');
+    fireEvent.change(tagInput, { target: { value: 'backend' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+
+    // the Actors panel reads CONFIG: both controls appear (Step 11, R-04/R-06)
+    await screen.findByText('By Color');
+    await screen.findByText('By Key');
+    expect(screen.getByText('#e11d48')).toBeTruthy(); // By Color item
+    // the panel tag chip and the sidebar By Key item both render the key
+    expect(screen.getAllByText('backend').length).toBeGreaterThanOrEqual(2);
+  }, 10000);
 });
