@@ -64,3 +64,11 @@ export function parseSvgRoot(svg: string): Element {
   if (!root) throw new Error('fixture did not parse');
   return root;
 }
+
+// jsdom's CSSOM normalizes hex colors to rgb(); named colors pass through.
+export function rgb(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
+
+export const styleOf = (el: Element | null) => (el as unknown as SVGElement).style;
