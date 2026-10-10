@@ -756,6 +756,39 @@ describe('ClientPage', () => {
     }, { timeout: 3000 });
   }, 15000);
 
+  it('undo/redo stores at most 15 entries (the oldest edits fall off the stack)', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    // 20 edits: the label becomes v1 .. v20
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    for (let i = 1; i <= 20; i++) {
+      fireEvent.change(input, { target: { value: `v${i}` } });
+    }
+    await screen.findByDisplayValue('v20');
+
+    // 15 undos land exactly on v5: the stack kept the last 15 states
+    // (v19 .. v5), the older ones (v4 .. v0) fell off the cap
+    const undoButton = () => screen.getByTitle('Undo (Ctrl+Z)') as HTMLButtonElement;
+    for (let i = 0; i < 15; i++) {
+      fireEvent.click(undoButton());
+    }
+    await screen.findByDisplayValue('v5');
+    expect(undoButton().disabled).toBe(true);
+
+    // a 16th undo is a no-op
+    fireEvent.click(undoButton());
+    await screen.findByDisplayValue('v5');
+
+    // redo still works within the capped window: 15 redos reach v20
+    const redoButton = () => screen.getByTitle('Redo (Ctrl+Y)') as HTMLButtonElement;
+    for (let i = 0; i < 15; i++) {
+      fireEvent.click(redoButton());
+    }
+    await screen.findByDisplayValue('v20');
+    expect(redoButton().disabled).toBe(true);
+  }, 15000);
+
   it('tags and colors set in the panel appear in the sidebar Actors controls', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
 

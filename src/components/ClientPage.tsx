@@ -18,7 +18,8 @@ import { buildSelectionMap } from '@/lib/svgmap';
 import { rewriteArrowStyles } from '@/lib/styling';
 import { PendingDelete } from './EditorPanel';
 
-const HISTORY_LIMIT = 100;
+// Undo/redo history depth: capped so both stacks stay small (10-15 steps).
+const HISTORY_LIMIT = 15;
 
 export default function ClientPage() {
   const router = useRouter();
