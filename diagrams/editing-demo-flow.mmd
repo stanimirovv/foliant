@@ -1,0 +1,8 @@
+flowchart TD
+    Client[Web Client] --> Gateway[API Gateway]
+    Gateway -->|Validate| Auth{Auth Service}
+    Gateway ==> Orders[Order Service]
+    Orders --> DB[(Order Database)]
+    Auth -.->|Token OK| Gateway
+    Client <--> Gateway
+    Orders --- Queue[Message Queue]
