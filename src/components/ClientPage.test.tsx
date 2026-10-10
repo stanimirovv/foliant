@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import ClientPage from './ClientPage';
 import { parseModel } from '@/lib/model';
 import { parseViewsData } from '@/lib/views';
@@ -52,11 +52,24 @@ vi.mock('./DiagramViewer', () => ({
 
 global.fetch = vi.fn();
 
+// Stateful file mock: POST persists the body (like the real API) and GET
+// returns the current content; postControl.fail simulates a failing write.
+const fileContent = { current: '' };
+const postControl = { fail: false };
+
 class MockEventSource {
+  static instance: MockEventSource | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
+  constructor() {
+    MockEventSource.instance = this;
+  }
   close() {}
 }
 (global as unknown as { EventSource: typeof MockEventSource }).EventSource = MockEventSource;
+
+const fireSse = (file: string) => {
+  MockEventSource.instance?.onmessage?.({ data: JSON.stringify({ file }) } as MessageEvent);
+};
 
 const DEMO = `sequenceDiagram
     participant A as Alice
@@ -65,13 +78,27 @@ const DEMO = `sequenceDiagram
     B-->>A: Hi there`;
 
 const mockFetchWithFile = (content: string) => {
+  fileContent.current = content;
   const mockFetch = global.fetch as import('vitest').Mock;
-  mockFetch.mockImplementation(async (url: unknown) => ({
-    json: async () => {
-      if (String(url).startsWith('/api/file/')) return { content };
-      return { files: ['demo.mmd'] };
-    },
-  }));
+  mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
+    if (init?.method === 'POST') {
+      if (postControl.fail) return { ok: false, status: 500, json: async () => ({}) };
+      fileContent.current = JSON.parse(init.body ?? '{}').content ?? '';
+      return { ok: true, json: async () => ({}) };
+    }
+    return {
+      ok: true,
+      json: async () => {
+        if (String(url).startsWith('/api/file/')) return { content: fileContent.current };
+        return { files: ['demo.mmd'] };
+      },
+    };
+  });
+};
+
+const postCalls = () => {
+  const mockFetch = global.fetch as import('vitest').Mock;
+  return mockFetch.mock.calls.filter(c => (c[1] as { method?: string } | undefined)?.method === 'POST');
 };
 
 const mockParams = (params: Record<string, string>) => {
@@ -94,6 +121,8 @@ const renderInEditMode = async (content: string, marker: string) => {
 describe('ClientPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fileContent.current = '';
+    postControl.fail = false;
   });
   afterEach(() => {
     cleanup();
@@ -399,4 +428,146 @@ describe('ClientPage', () => {
     expect(remaining.elements.some(e => e.kind === 'participant' && e.id === 'B')).toBe(true);
     expect(remaining.elements.some(e => e.kind === 'participant' && e.id === 'New1')).toBe(true);
   }, 15000);
+
+  it('does not auto-save on load (no edit, no POST)', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockClear();
+    await new Promise(r => setTimeout(r, 1000)); // past the 800 ms debounce
+    expect(postCalls()).toHaveLength(0);
+  });
+
+  it('auto-saves an edit with a debounced POST carrying the edited content (create -> change -> verify)', async () => {
+    const viewer = await renderInEditMode(createSequenceDiagram(), 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockClear();
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    fireEvent.change(input, { target: { value: 'Hi' } });
+
+    // nothing is posted before the 800 ms debounce fires
+    expect(postCalls()).toHaveLength(0);
+
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+
+    const [url, init] = postCalls()[0];
+    expect(String(url)).toContain('/api/file/demo.mmd');
+    const body = JSON.parse((init as { body: string }).body);
+    expect(body.content).toContain('A->>B: Hi');
+    expect(body.content).not.toContain('Hello');
+
+    // the indicator reports the successful save
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
+    expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+  }, 10000);
+
+  it('ignores an SSE echo of our own save', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    fireEvent.change(input, { target: { value: 'Hi' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+    }, { timeout: 3000 });
+
+    // the file changed on disk (our POST) -> SSE fires -> the refetch returns
+    // the last-written content -> ignored: no adoption, no notice
+    mockFetch.mockClear();
+    await act(async () => { fireSse('demo.mmd'); });
+    expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/file/'))).toBe(true); // refetch happened
+    expect(screen.queryByTestId('reload-notice')).toBeNull();
+    expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+  }, 10000);
+
+  it('adopts an external on-disk change and shows a notice; the next edit wins', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    fireEvent.change(input, { target: { value: 'Hi' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
+
+    // an external editor writes different content while we are idle
+    fileContent.current = DEMO.replace('Hello', 'Edited externally');
+    await act(async () => { fireSse('demo.mmd'); });
+
+    const notice = await screen.findByTestId('reload-notice');
+    expect(notice.textContent).toContain('Reloaded from disk');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('Edited externally');
+    }, { timeout: 3000 });
+
+    // editing again wins: the auto-save posts the new content
+    mockFetch.mockClear();
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input2 = await screen.findByDisplayValue('Edited externally');
+    fireEvent.change(input2, { target: { value: 'Mine again' } });
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    const body = JSON.parse((postCalls()[0][1] as { body: string }).body);
+    expect(body.content).toContain('Mine again');
+    expect(body.content).not.toContain('Edited externally');
+  }, 10000);
+
+  it('shows an error indicator when the save fails and retries on the next edit', async () => {
+    postControl.fail = true;
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockClear();
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    fireEvent.change(input, { target: { value: 'Hi' } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Save failed');
+    }, { timeout: 3000 });
+    expect(postCalls()).toHaveLength(1);
+
+    // the next edit retries the save
+    postControl.fail = false;
+    fireEvent.change(screen.getByDisplayValue('Hi'), { target: { value: 'Hi again' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
+    expect(postCalls().length).toBeGreaterThanOrEqual(2);
+    const lastPost = postCalls()[postCalls().length - 1];
+    expect(JSON.parse((lastPost[1] as { body: string }).body).content).toContain('Hi again');
+  }, 10000);
+
+  it('saving a view updates the last-written content (its SSE echo is ignored)', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+    (window as unknown as { prompt: unknown }).prompt = vi.fn(() => 'My View');
+    mockFetch.mockClear();
+
+    fireEvent.click(screen.getByTitle('Save Current View'));
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('"views"');
+    }, { timeout: 3000 });
+
+    // the SSE echo of the view save carries the last-written content -> ignored
+    mockFetch.mockClear();
+    await act(async () => { fireSse('demo.mmd'); });
+    expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/file/'))).toBe(true); // refetch happened
+    expect(screen.queryByTestId('reload-notice')).toBeNull();
+    expect(viewer.getAttribute('data-code')).toContain('"views"');
+  }, 10000);
 });

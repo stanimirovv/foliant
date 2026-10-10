@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
@@ -38,6 +38,17 @@ export default function ClientPage() {
   // so the confirm dialog can list the cascaded elements; the new code is
   // applied only on confirm.
   const [pendingDelete, setPendingDelete] = useState<(PendingDelete & { code: string }) | null>(null);
+
+  // Auto-save state (EDITING_PLAN.md Section 4.10): lastWrittenRef holds the
+  // exact content string of the last successful POST. The auto-save effect
+  // debounces every edit into a write-through POST; the SSE handler routes
+  // refetches through the same comparison, so echoes of our own writes are
+  // ignored and anything else is adopted as an external change.
+  const lastWrittenRef = useRef<string | null>(null);
+  const rawCodeFileRef = useRef<string | null>(null); // which file rawCode belongs to
+  const saveSeqRef = useRef(0);                       // only the latest save applies its result
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [reloadNotice, setReloadNotice] = useState(false);
   
   const currentFile = searchParams.get('file');
   const searchQuery = searchParams.get('q') || '';
@@ -176,15 +187,38 @@ export default function ClientPage() {
     return () => { ignore = true; };
   }, [currentFile, pathname, router, searchParams, dirParam, refreshKey]);
 
-  const loadFile = useCallback(async (filename: string) => {
+  const fetchFileContent = useCallback(async (filename: string): Promise<string | null> => {
     try {
       const r = await fetch(`/api/file/${filename}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
       const data = await r.json();
-      setRawCode(data.content || '');
+      return data.content || '';
     } catch (e) {
       console.error(e);
+      return null;
     }
   }, [dirParam]);
+
+  const postFile = useCallback(async (filename: string, content: string): Promise<boolean> => {
+    try {
+      const r = await fetch(`/api/file/${filename}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      return r.ok;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, [dirParam]);
+
+  const loadFile = useCallback(async (filename: string) => {
+    const content = await fetchFileContent(filename);
+    if (content === null) return;
+    lastWrittenRef.current = content;
+    rawCodeFileRef.current = filename;
+    setRawCode(content);
+  }, [fetchFileContent]);
 
   useEffect(() => {
     if (currentFile) {
@@ -192,6 +226,7 @@ export default function ClientPage() {
       setSelection(null);
       setPendingDelete(null);
     } else {
+      rawCodeFileRef.current = null;
       setRawCode('');
       setSelection(null);
       setPendingDelete(null);
@@ -202,12 +237,27 @@ export default function ClientPage() {
     const evtSource = new EventSource(`/api/events${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
     evtSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (currentFile && data.file === currentFile) {
-        loadFile(currentFile);
-      }
+      if (!currentFile || data.file !== currentFile) return;
+      // Refetch and route through the last-written comparison (Section 4.10):
+      // identical content is our own write echoed back — ignore it; anything
+      // else is an external change — adopt it, do not clobber it.
+      fetchFileContent(currentFile).then(content => {
+        if (content === null) return;
+        if (content === lastWrittenRef.current) return;
+        lastWrittenRef.current = content;
+        setRawCode(content);
+        setReloadNotice(true);
+      });
     };
     return () => evtSource.close();
-  }, [currentFile, loadFile, dirParam]);
+  }, [currentFile, fetchFileContent, dirParam]);
+
+  // The "Reloaded from disk" notice auto-dismisses.
+  useEffect(() => {
+    if (!reloadNotice) return;
+    const timer = setTimeout(() => setReloadNotice(false), 5000);
+    return () => clearTimeout(timer);
+  }, [reloadNotice]);
 
   const [debouncedCode, setDebouncedCode] = useState(rawCode);
   useEffect(() => {
@@ -216,6 +266,31 @@ export default function ClientPage() {
     }, 500);
     return () => clearTimeout(handler);
   }, [rawCode]);
+
+  // Auto-save (Section 4.10): every committed edit becomes a debounced
+  // write-through POST. Skipped when there is no file, when the content
+  // belongs to another file (a switch discarded it), or when it is already
+  // the last successfully written content (initial load, own SSE echo, or an
+  // undo back to the saved state).
+  useEffect(() => {
+    if (!currentFile) return;
+    if (rawCodeFileRef.current !== currentFile) return;
+    if (rawCode === lastWrittenRef.current) return;
+    setSaveStatus('saving');
+    const seq = ++saveSeqRef.current;
+    const timer = setTimeout(() => {
+      postFile(currentFile, rawCode).then(ok => {
+        if (seq !== saveSeqRef.current) return; // a newer edit superseded this save
+        if (ok) {
+          lastWrittenRef.current = rawCode;
+          setSaveStatus('saved');
+        } else {
+          setSaveStatus('error'); // retried on the next edit
+        }
+      });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [rawCode, currentFile, postFile]);
 
   const regionRoots = useMemo(() => extractRegions(debouncedCode), [debouncedCode]);
 
@@ -463,17 +538,14 @@ export default function ClientPage() {
 
     const newCode = updateViewsData(rawCode, newData);
 
-    try {
-      await fetch(`/api/file/${currentFile}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ content: newCode })
-      });
+    // Saving a view writes the file directly, so it must also update
+    // lastWrittenRef (Section 4.10) or the SSE echo would be adopted as an
+    // external change.
+    if (await postFile(currentFile, newCode)) {
+      lastWrittenRef.current = newCode;
       setRawCode(newCode);
-    } catch (e) {
-      console.error('Failed to save view', e);
+    } else {
+      console.error('Failed to save view');
     }
   };
 
@@ -490,17 +562,11 @@ export default function ClientPage() {
 
     const newCode = updateViewsData(rawCode, newData);
 
-    try {
-      await fetch(`/api/file/${currentFile}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ content: newCode })
-      });
+    if (await postFile(currentFile, newCode)) {
+      lastWrittenRef.current = newCode;
       setRawCode(newCode);
-    } catch (e) {
-      console.error('Failed to delete view', e);
+    } else {
+      console.error('Failed to delete view');
     }
   };
 
@@ -839,11 +905,32 @@ export default function ClientPage() {
               </>
             )}
           </div>
-          {warnings.length > 0 && (
-            <div className="text-yellow-600 text-sm font-medium">
-              {warnings.length} warning(s)
-            </div>
-          )}
+          <div className="flex items-center space-x-3">
+            {editMode && saveStatus !== 'idle' && (
+              <span
+                data-testid="save-indicator"
+                className={`text-xs ${
+                  saveStatus === 'error'
+                    ? 'text-red-500'
+                    : saveStatus === 'saved'
+                      ? 'text-green-600'
+                      : 'text-blue-500'
+                }`}
+              >
+                {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : 'Save failed'}
+              </span>
+            )}
+            {reloadNotice && (
+              <span data-testid="reload-notice" className="text-xs text-green-600">
+                Reloaded from disk
+              </span>
+            )}
+            {warnings.length > 0 && (
+              <div className="text-yellow-600 text-sm font-medium">
+                {warnings.length} warning(s)
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 flex min-h-0">
