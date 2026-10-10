@@ -287,6 +287,18 @@ describe('applyArrowStyles (sequence fixture)', () => {
     expect(applyArrowStyles('not an svg at all', model, config)).toBe('not an svg at all');
     expect(applyArrowStyles('', model, config)).toBe('');
   });
+
+  it('soft-fails when a styled arrow has no SVG counterpart (NFR-01)', () => {
+    // model has one message more than the SVG has lines: the zip falls back to
+    // label matching, the unmatched arrow maps to null, and styling is a
+    // byte-identical no-op instead of a throw
+    const bigger = parseModel(`${SEQ_CODE}\n    A->>C: extra`);
+    const withExtra: DiagramConfig = {
+      version: 1,
+      arrows: [{ from: 'A', to: 'C', label: 'extra', color: 'red' }],
+    };
+    expect(applyArrowStyles(SEQ_SVG, bigger, withExtra)).toBe(SEQ_SVG);
+  });
 });
 
 describe('applyArrowStyles (flowchart fixture)', () => {

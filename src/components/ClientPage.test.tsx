@@ -41,7 +41,7 @@ vi.mock('./DiagramViewer', () => ({
       data-edit-mode={String(props.editMode ?? false)}
       data-selection={props.selection ?? ''}
     >
-      {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2'].map(k => (
+      {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0'].map(k => (
         <button key={k} data-testid={`select-${k}`} onClick={() => props.onSelect?.(k)}>
           select {k}
         </button>
@@ -777,5 +777,83 @@ describe('ClientPage', () => {
     expect(screen.getByText('#e11d48')).toBeTruthy(); // By Color item
     // the panel tag chip and the sidebar By Key item both render the key
     expect(screen.getAllByText('backend').length).toBeGreaterThanOrEqual(2);
+  }, 10000);
+
+  it('a broken diagram (unclosed region) still renders, shows a warning, and recognized elements stay editable (NFR-01)', async () => {
+    const broken = `${DEMO}\n    %% @region-start: flow=checkout`;  // unclosed
+    const viewer = await renderInEditMode(broken, 'A->>B: Hello');
+
+    // the pipeline soft-failed: the viewer still receives the original content
+    expect(viewer.getAttribute('data-code')).toContain('%% @region-start: flow=checkout');
+    // the warning indicator shows
+    expect(await screen.findByText('1 warning(s)')).toBeTruthy();
+
+    // the broken area (the region) is not selectable: the panel stays empty
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+    fireEvent.click(screen.getByTestId('select-r:0'));
+    expect(await screen.findByText('Click an element in the diagram to edit it.')).toBeTruthy();
+
+    // edits to recognized elements still work and auto-save
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    fireEvent.change(input, { target: { value: 'Hey' } });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hey');
+    }, { timeout: 3000 });
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    expect(fileContent.current).toContain('A->>B: Hey');
+  }, 10000);
+
+  it('a soft-failing edit is a no-op and shows the warning in the panel (NFR-01)', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-p:0'));
+    await screen.findByDisplayValue('Alice');
+    const tagInput = screen.getByPlaceholderText('Add tag...');
+    fireEvent.change(tagInput, { target: { value: 'bad tag!' } });
+    fireEvent.click(screen.getByTestId('add-tag'));
+
+    // the transform soft-failed: the warning shows in the panel
+    expect(await screen.findByText('Invalid tag: bad tag!')).toBeTruthy();
+    // the code is unchanged and nothing was saved
+    expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    expect(viewer.getAttribute('data-code')).not.toContain('CONFIG');
+    await screen.findByDisplayValue('Alice');  // the selection survived
+    await new Promise(r => setTimeout(r, 1000));  // past the 800 ms auto-save debounce
+    expect(postCalls()).toHaveLength(0);
+  }, 10000);
+
+  it('rapid successive edits coalesce: the final state wins and the selection survives (NFR-03)', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    // three edits in quick succession (inside the 500 ms render debounce)
+    fireEvent.change(input, { target: { value: 'One' } });
+    fireEvent.change(input, { target: { value: 'Two' } });
+    fireEvent.change(input, { target: { value: 'Three' } });
+
+    // the panel reflects the last edit immediately
+    await screen.findByDisplayValue('Three');
+    // the debounced render shows only the final state
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Three');
+    }, { timeout: 3000 });
+    expect(viewer.getAttribute('data-code')).not.toContain('A->>B: Two');
+    // the selection (highlight target) is intact
+    expect(viewer.getAttribute('data-selection')).toBe('m:0');
+
+    // a single auto-save carried the final content
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThanOrEqual(1);
+    }, { timeout: 3000 });
+    expect(fileContent.current).toContain('A->>B: Three');
+    expect(fileContent.current).not.toContain('A->>B: Two');
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
   }, 10000);
 });

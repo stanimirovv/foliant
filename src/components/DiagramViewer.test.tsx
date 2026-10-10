@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
+import mermaid from 'mermaid';
 import DiagramViewer from './DiagramViewer';
 import { SEQ_SVG, SEQ_CODE, FLOW_SVG, FLOW_CODE } from '@/lib/svgTestFixtures';
 import { DiagramConfig } from '@/lib/views';
@@ -210,5 +211,75 @@ describe('DiagramViewer', () => {
     const line = container.querySelector('line[data-id="i1"]')!;
     expect(styleOf(line).stroke).toBe('rgb(225, 29, 72)');
     expect(line.classList.contains('editor-selected')).toBe(true);
+  });
+
+  it('keeps the last good render and shows an error when a re-render fails (soft-fail, NFR-01)', async () => {
+    const defaultImpl = renderMock.getMockImplementation()!;
+    renderMock.mockImplementation(async (id: string, code: string) => {
+      if (code.includes('garbage')) throw new Error('Syntax error in text');
+      return defaultImpl(id, code);
+    });
+    try {
+      const { container, rerender } = render(
+        <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />
+      );
+      await waitFor(() => {
+        expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+      });
+      const goodSvg = container.querySelector('#diagram-container svg');
+
+      // the code breaks (e.g. a half-finished edit produced unparsable
+      // mermaid): the render throws, the error banner shows, the previous
+      // SVG stays on screen
+      rerender(
+        <DiagramViewer code={`${SEQ_CODE}\n    this is garbage`} searchQuery="" theme="default" />
+      );
+      await waitFor(() => {
+        expect(container.textContent).toContain('Syntax error in text');
+      });
+      expect(container.querySelector('#diagram-container svg')).toBe(goodSvg);
+    } finally {
+      renderMock.mockImplementation(defaultImpl);
+    }
+  });
+
+  it('applies the selection highlight in the dark theme', async () => {
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="dark" editMode selection="m:1" onSelect={() => {}} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('line[data-id="i2"]')?.classList.contains('editor-selected')).toBe(true);
+    });
+    expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({ theme: 'dark' }));
+  });
+
+  it('keeps pan/zoom and the highlight across a code change (NFR-03)', async () => {
+    const { container, rerender } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection="m:1" onSelect={() => {}} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('line[data-id="i2"]')).toBeTruthy();
+    });
+    const component = () => container.querySelector('.react-transform-component') as HTMLElement;
+    expect(component().style.transform).toBe('translate(0px, 0px) scale(1)');
+
+    // zoom in with the wheel, then let the zoom animation settle
+    fireEvent.wheel(container.querySelector('.react-transform-wrapper')!, { deltaY: -100 });
+    await waitFor(() => {
+      expect(component().style.transform).not.toBe('translate(0px, 0px) scale(1)');
+    });
+    await act(async () => { await new Promise(r => setTimeout(r, 350)); });
+    const zoomed = component().style.transform;
+
+    // an edit lands: new code -> full re-render of the SVG
+    rerender(
+      <DiagramViewer code={`${SEQ_CODE}\n    %% an edit`} searchQuery="" theme="default" editMode selection="m:1" onSelect={() => {}} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('line[data-id="i2"]')?.classList.contains('editor-selected')).toBe(true);
+    });
+
+    // pan/zoom state survived the re-render (the TransformWrapper never unmounts)
+    expect(component().style.transform).toBe(zoomed);
   });
 });

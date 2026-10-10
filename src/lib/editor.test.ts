@@ -4,6 +4,7 @@ import {
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
 } from './editor';
 import { parseModel } from './model';
+import { processMermaid, transformActors } from './preprocessor';
 import { updateViewsData, DiagramConfig } from './views';
 import { createSequenceDiagram, createFlowchartDiagram, parseConfig } from './editorTestHarness';
 
@@ -723,5 +724,73 @@ describe('getArrowStyle', () => {
     const styled = setArrowStyle(thrice.code, thrice.config, 'm:2', { color: 'blue' });
     expect(getArrowStyle(styled.code, styled.config, 'm:1')).toBeNull();
     expect(getArrowStyle(styled.code, styled.config, 'm:2')).toEqual({ color: 'blue', dash: 'solid' });
+  });
+});
+
+describe('soft-fail on a broken diagram (NFR-01, Step 13)', () => {
+  // An unclosed region: the preprocessor soft-fails and renders the original
+  // code; the editor must still edit recognized elements and refuse
+  // broken-area edits with a warning, never corrupt the file.
+  const BROKEN = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    %% @region-start: flow=checkout
+    A->>B: Hello
+    B-->>A: Hi there`;
+
+  it('parseModel still recognizes the elements of a broken diagram', () => {
+    const model = parseModel(BROKEN);
+    expect(model.type).toBe('sequence');
+    const keys = model.elements.map(e => e.key);
+    expect(keys).toEqual(['p:0', 'p:1', 'r:0', 'm:0', 'm:1']);
+    expect(model.elements.find(e => e.key === 'r:0')).toMatchObject({ kind: 'region', regionType: 'flow', value: 'checkout' });
+  });
+
+  it('the pipeline soft-fails and hands the original code to the renderer', () => {
+    const { code, warnings } = processMermaid(transformActors(BROKEN, null, {}), { isRegionVisible: () => true });
+    expect(code).toBe(BROKEN);
+    expect(warnings).toEqual(['Unclosed region tag: flow=checkout']);
+  });
+
+  it('edits to recognized elements still apply', () => {
+    const renamed = renameParticipant(BROKEN, null, 'p:1', 'Robert');
+    expect(renamed.warning).toBeUndefined();
+    expect(renamed.code).toContain('participant B as Robert');
+
+    const labeled = editMessageLabel(BROKEN, null, 'm:0', 'Hey');
+    expect(labeled.warning).toBeUndefined();
+    expect(labeled.code).toContain('A->>B: Hey');
+
+    const retyped = setArrowType(BROKEN, null, 'm:1', '->>');
+    expect(retyped.warning).toBeUndefined();
+    expect(retyped.code).toContain('B->>A: Hi there');
+  });
+
+  it('edits to the broken area are no-ops with a warning', () => {
+    const del = deleteElement(BROKEN, null, 'r:0');
+    expect(del.warning).toBe(`Cannot delete element of kind 'region'`);
+    expect(del.code).toBe(BROKEN);
+
+    const unknown = deleteElement(BROKEN, null, 'r:9');
+    expect(unknown.warning).toBe('Unknown element key: r:9');
+    expect(unknown.code).toBe(BROKEN);
+
+    const wrongKind = editMessageLabel(BROKEN, null, 'p:0', 'x');
+    expect(wrongKind.warning).toBe('Element p:0 is not a message or edge');
+    expect(wrongKind.code).toBe(BROKEN);
+  });
+
+  it('invalid edits on recognized elements are no-ops with a warning', () => {
+    const badTag = addTag(BROKEN, null, 'p:0', 'bad tag!');
+    expect(badTag.warning).toBe('Invalid tag: bad tag!');
+    expect(badTag.code).toBe(BROKEN);
+
+    const badWidth = setArrowStyle(BROKEN, null, 'm:0', { width: 99 });
+    expect(badWidth.warning).toBe('Arrow width must be an integer between 1 and 10');
+    expect(badWidth.code).toBe(BROKEN);
+
+    const multiline = renameParticipant(BROKEN, null, 'p:0', 'two\nlines');
+    expect(multiline.warning).toBe('Label must be a single line');
+    expect(multiline.code).toBe(BROKEN);
   });
 });
