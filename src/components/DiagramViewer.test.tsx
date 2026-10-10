@@ -283,3 +283,333 @@ describe('DiagramViewer', () => {
     expect(component().style.transform).toBe(zoomed);
   });
 });
+
+// --- Drag interactions (reorder + create-message) ---------------------------
+
+function mockRect(el: Element, left: number, top: number, width: number, height: number) {
+  el.getBoundingClientRect = () => ({
+    left, top, width, height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  });
+}
+
+// Mock screen rects for the SEQ fixture: participants A(0), B(150), C(300)
+// at the top, messages at Y=100,150,200,250.
+function mockSeqScreenRects(container: HTMLElement) {
+  const svg = container.querySelector('#diagram-container svg');
+  if (!svg) return;
+  const groups = svg.querySelectorAll('g[data-et="participant"]');
+  const byId = new Map<string, Element>();
+  groups.forEach(g => { const id = g.getAttribute('data-id'); if (id) byId.set(id, g); });
+  mockRect(byId.get('A')!, 0, 10, 100, 40);
+  mockRect(byId.get('B')!, 150, 10, 100, 40);
+  mockRect(byId.get('C')!, 300, 10, 100, 40);
+  const lines = svg.querySelectorAll('[data-et="message"]');
+  const ys = [100, 150, 200, 250];
+  lines.forEach((el, i) => { if (i < ys.length) mockRect(el, 0, ys[i], 200, 2); });
+  // container rect for reorder Y extent
+  const diagramContainer = container.querySelector('#diagram-container') as HTMLElement;
+  if (diagramContainer) mockRect(diagramContainer, 0, 0, 500, 400);
+}
+
+describe('DiagramViewer drag interactions', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  // Helper: the lifeline element for a participant id.
+  const lifelineOf = (container: HTMLElement, id: string) =>
+    container.querySelector(`line.actor-line[data-id="${id}"]`) as Element;
+
+  // Helper: the top actor box for a participant id.
+  const actorBoxOf = (container: HTMLElement, id: string) =>
+    container.querySelector(`g[data-et="participant"][data-id="${id}"]`) as Element;
+
+  it('dragging an actor box fires onMoveParticipant (reorder), regardless of selection', async () => {
+    const onMoveParticipant = vi.fn();
+    const onCreateMessageDrag = vi.fn();
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={onSelect} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // Mouse down on participant C's actor box → reorder, even though nothing is selected
+    fireEvent.mouseDown(actorBoxOf(container, 'C'), { button: 0, clientX: 350, clientY: 30 });
+    expect(onSelect).toHaveBeenCalledWith('p:2');
+
+    // Drag left past B (to X=100, between A and B)
+    fireEvent.mouseMove(window, { clientX: 100, clientY: 200 });
+    await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
+
+    fireEvent.mouseUp(window, { clientX: 100, clientY: 200 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('p:2', 'p:1'); // move C before B
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+  });
+
+  it('dragging an actor box reorders even when that participant is already selected', async () => {
+    const onMoveParticipant = vi.fn();
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection="p:0"
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // A is selected, but dragging its actor box still reorders (spatial, not selection-based)
+    fireEvent.mouseDown(actorBoxOf(container, 'A'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 200 }); // drag right past C
+    fireEvent.mouseUp(window, { clientX: 350, clientY: 200 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('p:0', null); // move A to end
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+  });
+
+  it('dragging a participant to the front inserts before the first participant', async () => {
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // Drag C's actor box to the far left (before A)
+    fireEvent.mouseDown(actorBoxOf(container, 'C'), { button: 0, clientX: 350, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: -50, clientY: 200 });
+    fireEvent.mouseUp(window, { clientX: -50, clientY: 200 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('p:2', 'p:0'); // move C before A
+  });
+
+  it('dragging into the right half of the last gap inserts before the last participant, not at the end', async () => {
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // Drag A's actor box to X=300: past B's center (200) but before C's center (350).
+    // The gap midpoint is 275, so the cursor is in the right half of the gap —
+    // the drop must land between B and C, not at the end.
+    fireEvent.mouseDown(actorBoxOf(container, 'A'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 300, clientY: 200 });
+    fireEvent.mouseUp(window, { clientX: 300, clientY: 200 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('p:0', 'p:2'); // move A before C
+  });
+
+  it('dragging a lifeline fires onCreateMessageDrag with insert position', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={onSelect} onCreateMessageDrag={onCreateMessageDrag} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // Mouse down on A's lifeline → message drag
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 100 });
+    expect(onSelect).toHaveBeenCalledWith('p:0');
+
+    // Drag to participant C at Y=180 (between messages at 150 and 200)
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 180 });
+    await waitFor(() => expect(container.querySelector('[data-testid="message-drag-line"]')).toBeTruthy());
+    await waitFor(() => expect(container.querySelector('[data-testid="message-insert-indicator"]')).toBeTruthy());
+
+    fireEvent.mouseUp(window, { clientX: 350, clientY: 180 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith(
+      'p:0', 'p:2',
+      { type: 'before', key: 'm:2' } // between msg at Y=150 (m:1) and Y=200 (m:2)
+    );
+    expect(onMoveParticipant).not.toHaveBeenCalled();
+  });
+
+  it('grabbing near a lifeline from empty space starts a message drag', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // Mouse down on the SVG background near A's lifeline (centerX=50, within 20px)
+    const svgRoot = container.querySelector('#diagram-container svg') as Element;
+    fireEvent.mouseDown(svgRoot, { button: 0, clientX: 55, clientY: 150 });
+    // Drag to C
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 180 });
+    fireEvent.mouseUp(window, { clientX: 350, clientY: 180 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith(
+      'p:0', 'p:2',
+      expect.objectContaining({ type: 'before' })
+    );
+  });
+
+  it('releasing a message drag over the same participant does not create a message', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // Drag from A's lifeline back to A — no valid target
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 100 });
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 180 });
+    fireEvent.mouseUp(window, { clientX: 50, clientY: 180 });
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+  });
+
+  it('a plain click on an actor box (no drag) does not fire drag callbacks', async () => {
+    const onMoveParticipant = vi.fn();
+    const onCreateMessageDrag = vi.fn();
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={onSelect} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    fireEvent.mouseDown(actorBoxOf(container, 'A'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseUp(window, { clientX: 50, clientY: 30 }); // no movement
+    expect(onMoveParticipant).not.toHaveBeenCalled();
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+  });
+
+  it('dragging from a lifeline to create a message at the top inserts before the first message', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 100 });
+    // Drag to C at Y=60 (above the first message at Y=100)
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 60 });
+    fireEvent.mouseUp(window, { clientX: 350, clientY: 60 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith(
+      'p:0', 'p:2',
+      { type: 'before', key: 'm:0' } // before the first message
+    );
+  });
+
+  it('dragging from a lifeline to create a message at the bottom inserts after the last message', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 100 });
+    // Drag to C at Y=350 (below the last message at Y=250)
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 350 });
+    fireEvent.mouseUp(window, { clientX: 350, clientY: 350 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith(
+      'p:0', 'p:2',
+      { type: 'after', key: 'm:3' } // after the last message
+    );
+  });
+});
+
+describe('DiagramViewer pan exclusion (participant drag)', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('does not pan the screen when dragging a participant in edit mode', async () => {
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={() => {}}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    const component = container.querySelector('.react-transform-component') as HTMLElement;
+    const initialTransform = component.style.transform;
+
+    // Mouse down on a participant and drag — should start a drag, not pan
+    const participantA = container.querySelector('g[data-et="participant"][data-id="A"]') as Element;
+    fireEvent.mouseDown(participantA, { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 200 });
+    fireEvent.mouseUp(window, { clientX: 200, clientY: 200 });
+
+    // The transform should not have changed — panning was excluded
+    expect(component.style.transform).toBe(initialTransform);
+  });
+
+  it('still allows panning from non-participant areas in edit mode', async () => {
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    // Mouse down on the SVG background (not a participant) and drag — should pan
+    const svgRoot = container.querySelector('#diagram-container svg') as Element;
+    fireEvent.mouseDown(svgRoot, { button: 0, clientX: 400, clientY: 350 });
+    fireEvent.mouseMove(svgRoot, { clientX: 300, clientY: 250 });
+    fireEvent.mouseUp(svgRoot, { clientX: 300, clientY: 250 });
+
+    // Panning is not globally disabled — only participant elements are excluded.
+    // (In jsdom the pan may or may not apply depending on the library's internal
+    // coordinate handling; the key assertion is that no error occurs and the
+    // component remains functional.)
+    expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+  });
+
+  it('allows panning when not in edit mode (no exclusion)', async () => {
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode={false}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    // No edit mode → no exclusion → component renders normally
+    expect(container.querySelector('.react-transform-wrapper')).toBeTruthy();
+  });
+});

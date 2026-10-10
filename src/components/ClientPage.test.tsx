@@ -26,7 +26,8 @@ vi.mock('next/navigation', () => {
 });
 
 // The DiagramViewer stub records the props it receives and lets tests drive
-// selection through onSelect (processed keys, like real clicks).
+// selection through onSelect (processed keys, like real clicks) and the drag
+// callbacks through dedicated buttons.
 vi.mock('./DiagramViewer', () => ({
   __esModule: true,
   default: (props: {
@@ -34,6 +35,8 @@ vi.mock('./DiagramViewer', () => ({
     editMode?: boolean;
     selection?: string | null;
     onSelect?: (key: string | null) => void;
+    onCreateMessageDrag?: (fromKey: string, toKey: string, position: { type: string; key?: string }) => void;
+    onMoveParticipant?: (key: string, beforeKey: string | null) => void;
   }) => (
     <div
       data-testid="diagram-viewer"
@@ -46,6 +49,18 @@ vi.mock('./DiagramViewer', () => ({
           select {k}
         </button>
       ))}
+      <button
+        data-testid="drag-create-message"
+        onClick={() => props.onCreateMessageDrag?.('p:0', 'p:1', { type: 'bottom' })}
+      >
+        drag create message
+      </button>
+      <button
+        data-testid="drag-move-participant"
+        onClick={() => props.onMoveParticipant?.('p:0', null)}
+      >
+        drag move participant
+      </button>
     </div>
   ),
 }));
@@ -249,6 +264,40 @@ describe('ClientPage', () => {
     await waitFor(() => {
       expect(viewer.getAttribute('data-code')).toContain('A->>B: New message');
     }, { timeout: 3000 });
+  });
+
+  it('a message created by drag is selected: the right panel shows it', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('drag-create-message'));
+
+    // the new message appears in the diagram (appended at the bottom)
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: New message');
+    }, { timeout: 3000 });
+    // and it becomes the selection: the viewer highlight follows it once the
+    // processed code catches up...
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-selection')).toBe('m:2');
+    }, { timeout: 3000 });
+    // ...and the right panel shows the new message's editor
+    const input = await screen.findByDisplayValue('New message');
+    expect(input).toBeTruthy();
+  });
+
+  it('a message created from the Add Message button is selected in the right panel', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTitle('Add Message'));
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: New message');
+    }, { timeout: 3000 });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-selection')).toBe('m:2');
+    }, { timeout: 3000 });
+    const input = await screen.findByDisplayValue('New message');
+    expect(input).toBeTruthy();
   });
 
   it('Add Message with a selected message inserts after it', async () => {

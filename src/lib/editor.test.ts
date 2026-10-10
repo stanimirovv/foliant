@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
+  moveParticipant, MessageInsertPosition,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
@@ -309,7 +310,7 @@ describe('addMessage', () => {
   });
 
   it('inserts after the given message', () => {
-    const res = addMessage(SEQ, SEQ_CFG, 'p:1', 'p:0', 'm:0');
+    const res = addMessage(SEQ, SEQ_CFG, 'p:1', 'p:0', { type: 'after', key: 'm:0' });
     const lines = res.code.split('\n');
     expect(lines[8]).toBe('    B->>A: New message');
     expect(lines[7]).toBe('    A->>B: Hello');
@@ -327,11 +328,177 @@ describe('addMessage', () => {
     expect(res.code.endsWith('    A->>B: New message\n')).toBe(true);
   });
 
-  it('soft-fails on non-component endpoints and unknown afterKey', () => {
+  it('soft-fails on non-component endpoints and unknown position key', () => {
     expect(addMessage(SEQ, SEQ_CFG, 'm:0', 'p:1').warning).toBeTruthy();
     expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:99').warning).toBeTruthy();
-    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', 'm:99').warning).toBeTruthy();
-    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', 'm:99').code).toBe(SEQ);
+    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', { type: 'after', key: 'm:99' }).warning).toBeTruthy();
+    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', { type: 'after', key: 'm:99' }).code).toBe(SEQ);
+  });
+
+  it('inserts at the top (after the last participant declaration)', () => {
+    const res = addMessage(SEQ, SEQ_CFG, 'p:1', 'p:0', { type: 'top' });
+    const lines = res.code.split('\n');
+    // SEQ: line 0=CONFIG, 1=sequenceDiagram, 2=comment, 3=participant A, 4=participant B, 5=blank
+    // Top insertion goes right after the last participant (line 4), so at line 5.
+    expect(lines[5]).toBe('    B->>A: New message');
+    expect(lines[6]).toBe(''); // the original blank line shifts down
+    expect(lines[7]).toBe('    %% @region-start: flow=login');
+  });
+
+  it('inserts before the given element', () => {
+    const res = addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', { type: 'before', key: 'm:1' });
+    const lines = res.code.split('\n');
+    // m:1 is "B-->>A: Hi" at line 8; the new message goes at line 8, pushing Hi to line 9.
+    expect(lines[8]).toBe('    A->>B: New message');
+    expect(lines[9]).toBe('    B-->>A: Hi');
+  });
+
+  it('inserts at the top of a diagram with no messages yet', () => {
+    const code = `sequenceDiagram\n    participant A as Alice\n    participant B as Bob`;
+    const res = addMessage(code, null, 'p:0', 'p:1', { type: 'top' });
+    expect(res.code).toBe(`sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: New message`);
+  });
+
+  it('preserves CONFIG, comments, regions and blank lines on positional insert', () => {
+    for (const pos of [
+      { type: 'top' },
+      { type: 'before', key: 'm:0' },
+      { type: 'after', key: 'm:1' },
+      { type: 'bottom' },
+    ] as MessageInsertPosition[]) {
+      const res = addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', pos);
+      expect(res.warning).toBeUndefined();
+      // CONFIG line 0 and comment line 2 are byte-identical
+      expect(res.code.split('\n')[0]).toBe(SEQ.split('\n')[0]);
+      expect(res.code.split('\n')[2]).toBe(SEQ.split('\n')[2]);
+      // region tags survive
+      expect(res.code).toContain('%% @region-start: flow=login');
+      expect(res.code).toContain('%% @region-end');
+    }
+  });
+
+  it('reports the created element key (newKey) for every insert position', () => {
+    // SEQ has 3 messages (m:0..m:2); FLOW has 3 edges (e:0..e:2).
+    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1').newKey).toBe('m:3'); // bottom
+    expect(addMessage(SEQ + '\n', SEQ_CFG, 'p:0', 'p:1').newKey).toBe('m:3'); // bottom, trailing newline
+    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', { type: 'top' }).newKey).toBe('m:0');
+    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', { type: 'before', key: 'm:1' }).newKey).toBe('m:1');
+    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', { type: 'after', key: 'm:1' }).newKey).toBe('m:2');
+    expect(addMessage(FLOW, FLOW_CFG, 'n:0', 'n:1').newKey).toBe('e:3');
+    // The reported key resolves to the created element in the resulting code.
+    const res = addMessage(SEQ, SEQ_CFG, 'p:0', 'p:1', { type: 'after', key: 'm:0' });
+    const el = parseModel(res.code).elements.find(e => e.key === res.newKey);
+    expect(el).toMatchObject({ kind: 'message', from: 'A', to: 'B', label: 'New message' });
+    // Failed transforms report no newKey.
+    expect(addMessage(SEQ, SEQ_CFG, 'p:0', 'p:99').newKey).toBeUndefined();
+  });
+});
+
+describe('moveParticipant', () => {
+  const SEQ3 = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    participant C as Carol
+    A->>B: Hello
+    B->>C: Hi
+    C-->>A: Done`;
+
+  it('moves a participant before another participant', () => {
+    // Move C before A: [C, A, B]
+    const res = moveParticipant(SEQ3, null, 'p:2', 'p:0');
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[1]).toBe('    participant C as Carol');
+    expect(lines[2]).toBe('    participant A as Alice');
+    expect(lines[3]).toBe('    participant B as Bob');
+    // Messages are untouched
+    expect(lines[4]).toBe('    A->>B: Hello');
+    expect(lines[5]).toBe('    B->>C: Hi');
+    expect(lines[6]).toBe('    C-->>A: Done');
+  });
+
+  it('moves a participant to the end (beforeKey undefined)', () => {
+    // Move A to end: [B, C, A]
+    const res = moveParticipant(SEQ3, null, 'p:0');
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[1]).toBe('    participant B as Bob');
+    expect(lines[2]).toBe('    participant C as Carol');
+    expect(lines[3]).toBe('    participant A as Alice');
+    // Messages are untouched
+    expect(lines[4]).toBe('    A->>B: Hello');
+  });
+
+  it('moves a participant before the next one (swap adjacent)', () => {
+    // Move A before B is a no-op (A is already before B)
+    const res = moveParticipant(SEQ3, null, 'p:0', 'p:1');
+    expect(res.code).toBe(SEQ3);
+  });
+
+  it('moves a participant before the previous one (swap adjacent backwards)', () => {
+    // Move B before A: [B, A, C]
+    const res = moveParticipant(SEQ3, null, 'p:1', 'p:0');
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[1]).toBe('    participant B as Bob');
+    expect(lines[2]).toBe('    participant A as Alice');
+    expect(lines[3]).toBe('    participant C as Carol');
+  });
+
+  it('preserves CONFIG, comments, regions and messages byte-for-byte', () => {
+    const res = moveParticipant(SEQ, SEQ_CFG, 'p:1', 'p:0');
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    // SEQ: line 0=CONFIG, 1=sequenceDiagram, 2=comment, 3=participant A, 4=participant B, 5=blank
+    // After moving B before A: 0=CONFIG, 1=sequenceDiagram, 2=comment, 3=participant B, 4=participant A, 5=blank
+    expect(lines[0]).toBe(SEQ.split('\n')[0]);
+    expect(lines[1]).toBe('sequenceDiagram');
+    expect(lines[2]).toBe('    %% a comment');
+    // participants swapped
+    expect(lines[3]).toBe('    participant B as Bob');
+    expect(lines[4]).toBe('    participant A as Alice');
+    // All message/region lines preserved
+    expect(res.code).toContain('A->>B: Hello');
+    expect(res.code).toContain('B-->>A: Hi');
+    expect(res.code).toContain('A->>B: Again');
+    expect(res.code).toContain('%% @region-start: flow=login');
+    expect(res.code).toContain('%% @region-end');
+  });
+
+  it('is a no-op when moving before itself', () => {
+    const res = moveParticipant(SEQ3, null, 'p:1', 'p:1');
+    expect(res.code).toBe(SEQ3);
+    expect(res.warning).toBeUndefined();
+  });
+
+  it('is a no-op with a single participant', () => {
+    const code = `sequenceDiagram\n    participant A as Alice\n    A->>A: Self`;
+    const res = moveParticipant(code, null, 'p:0');
+    expect(res.code).toBe(code);
+  });
+
+  it('soft-fails on non-participant keys, unknown keys, and flowchart diagrams', () => {
+    expect(moveParticipant(SEQ3, null, 'm:0', 'p:0').warning).toBeTruthy();
+    expect(moveParticipant(SEQ3, null, 'p:0', 'm:0').warning).toBeTruthy();
+    expect(moveParticipant(SEQ3, null, 'p:99').warning).toBeTruthy();
+    expect(moveParticipant(FLOW, FLOW_CFG, 'n:0').warning).toBeTruthy();
+    expect(moveParticipant(SEQ3, null, 'p:0', 'p:99').code).toBe(SEQ3);
+  });
+
+  it('reorders participants on a diagram with interleaved messages', () => {
+    const code = `sequenceDiagram
+    participant A as Alice
+    A->>B: hello
+    participant C as Carol
+    C->>A: hi`;
+    // Move C before A: participant C's declaration moves up, messages stay
+    const res = moveParticipant(code, null, 'p:1', 'p:0');
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[1]).toBe('    participant C as Carol');
+    expect(lines[2]).toBe('    participant A as Alice');
+    expect(lines[3]).toBe('    A->>B: hello');
+    expect(lines[4]).toBe('    C->>A: hi');
   });
 });
 
@@ -752,6 +919,58 @@ describe('create -> change -> verify (harness)', () => {
     expect(model.elements.map(e => e.key)).toEqual(['p:0']);
   });
 
+  it('reorders participants on a newly created sequence diagram', () => {
+    // createSequenceDiagram: participants A, B; messages A->>B: Hello, B-->>A: Hi there
+    const code = createSequenceDiagram();
+    // Add a third participant, then move it before A
+    const withC = addParticipant(code, null);
+    const moved = moveParticipant(withC.code, withC.config, 'p:2', 'p:0');
+    expect(moved.warning).toBeUndefined();
+    const model = parseModel(moved.code);
+    const participantIds = model.elements.filter(e => e.kind === 'participant').map(e => (e as { id: string }).id);
+    expect(participantIds).toEqual(['New1', 'A', 'B']);
+    // Messages are untouched
+    const messages = model.elements.filter(e => e.kind === 'message');
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ from: 'A', to: 'B', label: 'Hello' });
+    // The rendered diagram still parses and the new order is reflected
+    const { code: processed } = processMermaid(moved.code, { isRegionVisible: () => true });
+    const processedModel = parseModel(processed);
+    const processedIds = processedModel.elements.filter(e => e.kind === 'participant').map(e => (e as { id: string }).id);
+    expect(processedIds).toEqual(['New1', 'A', 'B']);
+  });
+
+  it('inserts messages at top, between, and bottom on a newly created sequence diagram', () => {
+    const code = createSequenceDiagram();
+    // Insert at top: before the first message (Hello)
+    const atTop = addMessage(code, null, 'p:1', 'p:0', { type: 'top' });
+    const topLines = atTop.code.split('\n');
+    // createSequenceDiagram: line 0=sequenceDiagram, 1=participant A, 2=participant B, 3=A->>B: Hello, 4=B-->>A: Hi there
+    // Top insert goes after participant B (line 2), so at line 3
+    expect(topLines[3]).toBe('    B->>A: New message');
+    expect(topLines[4]).toBe('    A->>B: Hello');
+    const topModel = parseModel(atTop.code);
+    expect(topModel.elements.filter(e => e.kind === 'message').map(e => e.key)).toEqual(['m:0', 'm:1', 'm:2']);
+    expect(topModel.elements.find(e => e.key === 'm:0')).toMatchObject({ from: 'B', to: 'A', label: 'New message' });
+
+    // Insert between the two existing messages (after m:0 = Hello)
+    const between = addMessage(code, null, 'p:0', 'p:1', { type: 'after', key: 'm:0' });
+    const betweenLines = between.code.split('\n');
+    expect(betweenLines[4]).toBe('    A->>B: New message');
+    expect(betweenLines[3]).toBe('    A->>B: Hello');
+    expect(betweenLines[5]).toBe('    B-->>A: Hi there');
+
+    // Insert before the last message
+    const before = addMessage(code, null, 'p:0', 'p:1', { type: 'before', key: 'm:1' });
+    const beforeLines = before.code.split('\n');
+    expect(beforeLines[4]).toBe('    A->>B: New message');
+    expect(beforeLines[5]).toBe('    B-->>A: Hi there');
+
+    // Insert at bottom (default)
+    const atBottom = addMessage(code, null, 'p:0', 'p:1');
+    expect(atBottom.code.endsWith('    A->>B: New message')).toBe(true);
+  });
+
   it('sets colors, tags and arrow styles on newly created diagrams and verifies via CONFIG + model', () => {
     const seq = createSequenceDiagram();
     const colored = setActorColor(seq, null, 'p:0', 'red');
@@ -790,8 +1009,8 @@ describe('getArrowStyle', () => {
   it('disambiguates same-(from,to,label) arrows by occurrence', () => {
     const seq = createSequenceDiagram();
     // two identical A->>B: New message arrows after m:0
-    const twice = addMessage(seq, null, 'p:0', 'p:1', 'm:0');
-    const thrice = addMessage(twice.code, twice.config, 'p:0', 'p:1', 'm:0');
+    const twice = addMessage(seq, null, 'p:0', 'p:1', { type: 'after', key: 'm:0' });
+    const thrice = addMessage(twice.code, twice.config, 'p:0', 'p:1', { type: 'after', key: 'm:0' });
     expect(getArrowStyle(thrice.code, thrice.config, 'm:1')).toBeNull();
     // style the SECOND of the identical arrows (occurrence 1)
     const styled = setArrowStyle(thrice.code, thrice.config, 'm:2', { color: 'blue' });

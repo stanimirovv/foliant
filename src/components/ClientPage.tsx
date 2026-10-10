@@ -12,7 +12,7 @@ import { parseModel, ModelElement } from '@/lib/model';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  EditResult, ArrowStylePatch,
+  moveParticipant, EditResult, ArrowStylePatch, MessageInsertPosition,
 } from '@/lib/editor';
 import { buildSelectionMap } from '@/lib/svgmap';
 import { rewriteArrowStyles } from '@/lib/styling';
@@ -406,6 +406,40 @@ export default function ClientPage() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
+  // --- Drag callbacks (processed keys -> raw keys via the selection map) ---
+
+  // DiagramViewer drag: reorder a participant. beforeKey is the processed key
+  // of the participant to insert before, or null to move to the end.
+  const handleMoveParticipant = (processedKey: string, beforeProcessedKey: string | null) => {
+    const raw = selectionMap.get(processedKey);
+    if (!raw) return;
+    const beforeRawKey = beforeProcessedKey
+      ? selectionMap.get(beforeProcessedKey)?.key
+      : undefined;
+    applyEditResult(moveParticipant(rawCode, viewsData, raw.key, beforeRawKey));
+  };
+
+  // DiagramViewer drag: create a message by dragging from one participant to
+  // another. The position's key (before/after) is also a processed key.
+  const handleCreateMessageDrag = (
+    fromProcessedKey: string,
+    toProcessedKey: string,
+    position: MessageInsertPosition,
+  ) => {
+    const fromRaw = selectionMap.get(fromProcessedKey);
+    const toRaw = selectionMap.get(toProcessedKey);
+    if (!fromRaw || !toRaw) return;
+    let rawPosition: MessageInsertPosition;
+    if (position.type === 'before' || position.type === 'after') {
+      const rawTarget = selectionMap.get(position.key);
+      if (!rawTarget) return;
+      rawPosition = { type: position.type, key: rawTarget.key };
+    } else {
+      rawPosition = position;
+    }
+    applyEditResult(addMessage(rawCode, viewsData, fromRaw.key, toRaw.key, rawPosition));
+  };
+
   // --- Edit dispatch (EDITING_PLAN.md Steps 7-8): every panel action runs a
   // pure transform over (rawCode, viewsData) and applies the result. ---
 
@@ -425,6 +459,9 @@ export default function ClientPage() {
     setEditWarning(null);
     if (result.code === rawCode) return; // no-op transform: no history entry
     commitEdit(result.code);
+    // Select a newly created element (e.g. a message created by drag), so the
+    // right panel shows it immediately.
+    if (result.newKey) setSelection(result.newKey);
   };
 
   const undo = useCallback(() => {
@@ -597,8 +634,10 @@ export default function ClientPage() {
       ? componentElements[(idx + 1) % componentElements.length]
       : fromEl;
     // A selected message/edge sets the insertion point.
-    const afterKey = selectedArrow ? selectedArrow.key : undefined;
-    applyEditResult(addMessage(rawCode, viewsData, fromEl.key, toEl.key, afterKey));
+    const position: MessageInsertPosition | undefined = selectedArrow
+      ? { type: 'after', key: selectedArrow.key }
+      : undefined;
+    applyEditResult(addMessage(rawCode, viewsData, fromEl.key, toEl.key, position));
   };
 
   const saveCurrentView = async () => {
@@ -1064,6 +1103,8 @@ export default function ClientPage() {
               nodeColors={viewsData}
               selection={processedSelection}
               onSelect={handleSelect}
+              onMoveParticipant={handleMoveParticipant}
+              onCreateMessageDrag={handleCreateMessageDrag}
             />
           </div>
           {editMode && (

@@ -12,6 +12,7 @@ export interface EditResult {
   config: DiagramConfig | null;
   warning?: string;
   cascaded?: string[];   // deleteElement: keys of referencing elements also removed
+  newKey?: string;       // addMessage: key of the created element (so the UI can select it)
 }
 
 // The complete desired arrow style; empty/undefined fields mean "no style".
@@ -384,7 +385,24 @@ export function addParticipant(code: string, config: DiagramConfig | null, after
   return { code: lines.join('\n'), config };
 }
 
-export function addMessage(code: string, config: DiagramConfig | null, fromKey: string, toKey: string, afterKey?: string): EditResult {
+// Where a new message/edge is inserted vertically (sequence diagrams):
+//   top    — right after the last participant declaration (before all messages)
+//   bottom — appended at the end of the file (default)
+//   before — immediately before the given element (message/note/block)
+//   after  — immediately after the given element
+export type MessageInsertPosition =
+  | { type: 'top' }
+  | { type: 'bottom' }
+  | { type: 'before'; key: string }
+  | { type: 'after'; key: string };
+
+export function addMessage(
+  code: string,
+  config: DiagramConfig | null,
+  fromKey: string,
+  toKey: string,
+  position: MessageInsertPosition = { type: 'bottom' },
+): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
   const componentKind = model.type === 'sequence' ? 'participant' : 'node';
@@ -398,13 +416,102 @@ export function addMessage(code: string, config: DiagramConfig | null, fromKey: 
     ? `    ${fromEl.id}->>${toEl.id}: New message`
     : `    ${fromEl.id} --> ${toEl.id}`;
 
-  if (afterKey !== undefined) {
-    const el = findElement(model, afterKey);
-    if (!el) return fail(code, config, `Unknown element key: ${afterKey}`);
-    lines.splice(el.lineEnd + 1, 0, line);
-    return { code: lines.join('\n'), config };
+  let insertAt: number;
+  switch (position.type) {
+    case 'bottom':
+      // Keep a trailing newline last: insert before a trailing empty line.
+      insertAt = lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length;
+      break;
+    case 'before': {
+      const el = findElement(model, position.key);
+      if (!el) return fail(code, config, `Unknown element key: ${position.key}`);
+      insertAt = el.lineStart;
+      break;
+    }
+    case 'after': {
+      const el = findElement(model, position.key);
+      if (!el) return fail(code, config, `Unknown element key: ${position.key}`);
+      insertAt = el.lineEnd + 1;
+      break;
+    }
+    case 'top': {
+      // Insert right after the last participant declaration (sequence) or the
+      // type line (flowchart, no participants yet).
+      const lastParticipant = [...model.elements].reverse().find(e => e.kind === 'participant');
+      insertAt = lastParticipant
+        ? lastParticipant.lineEnd + 1
+        : lines.findIndex(l => /^\s*(sequenceDiagram|flowchart|graph)\b/.test(l)) + 1;
+      break;
+    }
   }
-  return { code: appendLine(lines, line), config };
+  lines.splice(insertAt, 0, line);
+  const newCode = lines.join('\n');
+  // Report the created element's key so the UI can select it: re-parse and find
+  // the message/edge sitting on the inserted line.
+  const created = parseModel(newCode).elements.find(
+    e => e.lineStart === insertAt && (e.kind === 'message' || e.kind === 'edge')
+  );
+  return { code: newCode, config, newKey: created?.key };
+}
+
+// Move a participant's declaration to a new position among the participants
+// (sequence diagrams only). The participant's messages/notes are untouched —
+// they reference the participant by id, so only the visual order changes.
+// beforeKey === undefined moves the participant to the end (after the last
+// participant).
+export function moveParticipant(
+  code: string,
+  config: DiagramConfig | null,
+  key: string,
+  beforeKey?: string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'participant') return fail(code, config, `Element ${key} is not a participant`);
+
+  const participants = model.elements.filter(e => e.kind === 'participant');
+  const currentIndex = participants.findIndex(p => p.key === key);
+  if (currentIndex < 0) return fail(code, config, `Unknown participant: ${key}`);
+
+  // Determine the target participant (the one the dragged participant should
+  // land before). undefined = move to end.
+  let targetEl: ModelElement | undefined;
+  if (beforeKey !== undefined) {
+    targetEl = findElement(model, beforeKey);
+    if (!targetEl || targetEl.kind !== 'participant') {
+      return fail(code, config, `Unknown participant key: ${beforeKey}`);
+    }
+    if (targetEl.key === key) return { code, config }; // no-op
+  }
+
+  const lines = code.split('\n');
+  const participantLine = lines[el.lineStart];
+
+  // Remove the participant's declaration line.
+  lines.splice(el.lineStart, 1);
+
+  // Compute the insertion line in the post-removal line array. Line numbers
+  // after el.lineStart shift down by 1.
+  const adjust = (lineNo: number) => lineNo > el.lineStart ? lineNo - 1 : lineNo;
+
+  let insertAt: number;
+  if (targetEl) {
+    insertAt = adjust(targetEl.lineStart);
+  } else {
+    // Move to end: after the last remaining participant.
+    const remaining = participants.filter(p => p.key !== key);
+    if (remaining.length === 0) {
+      // Only one participant: nothing to reorder.
+      lines.splice(el.lineStart, 0, participantLine);
+      return { code, config };
+    }
+    const lastRemaining = remaining[remaining.length - 1];
+    insertAt = adjust(lastRemaining.lineEnd) + 1;
+  }
+
+  lines.splice(insertAt, 0, participantLine);
+  return { code: lines.join('\n'), config };
 }
 
 export function deleteElement(code: string, config: DiagramConfig | null, key: string): EditResult {

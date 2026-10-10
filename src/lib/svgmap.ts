@@ -369,6 +369,80 @@ export function svgElementForKey(svg: Element, model: DiagramModel, key: string)
   return null;
 }
 
+// --- Screen-coordinate helpers for drag interactions (sequence diagrams) ---
+// These use getBoundingClientRect (post-transform screen coordinates) so the
+// drag overlay aligns with the rendered diagram regardless of pan/zoom.
+
+export interface ParticipantScreenInfo {
+  key: string;
+  id: string;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  centerX: number;
+  centerY: number;
+}
+
+// Screen rects of all participants, in model (source) order. The rendered
+// left-to-right order matches source order for sequence diagrams.
+export function getParticipantScreenInfo(svg: Element, model: DiagramModel): ParticipantScreenInfo[] {
+  const zip = zipModelToSvg(svg, model);
+  const participants = ofKind<ParticipantElement>(model, 'participant');
+  const result: ParticipantScreenInfo[] = [];
+  participants.forEach((p, i) => {
+    const el = zip.participants[i];
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    result.push({
+      key: p.key,
+      id: p.id,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+    });
+  });
+  return result;
+}
+
+export interface MessageScreenInfo {
+  key: string;
+  y: number;  // vertical center of the message line
+}
+
+// Screen Y of each message line, in model (source) order.
+export function getMessageScreenInfo(svg: Element, model: DiagramModel): MessageScreenInfo[] {
+  const zip = zipModelToSvg(svg, model);
+  const messages = ofKind<MessageElement>(model, 'message');
+  const result: MessageScreenInfo[] = [];
+  messages.forEach((m, i) => {
+    const el = zip.messages[i];
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    result.push({ key: m.key, y: rect.top + rect.height / 2 });
+  });
+  return result;
+}
+
+// The participant nearest to the given screen X (by center distance). Used as
+// the drop target when creating a message by dragging between participants.
+export function nearestParticipantAtX(
+  participants: ParticipantScreenInfo[],
+  x: number,
+): ParticipantScreenInfo | null {
+  if (participants.length === 0) return null;
+  let closest = participants[0];
+  for (const p of participants) {
+    if (Math.abs(p.centerX - x) < Math.abs(closest.centerX - x)) {
+      closest = p;
+    }
+  }
+  return closest;
+}
+
 // Selection map (processed -> raw), plan 4.7: parses both models, rewrites
 // the raw model's ids through buildActorRewriteMap, and joins on
 // (kind, from, to, label, occurrence). Elements stripped by the transform

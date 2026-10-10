@@ -306,3 +306,99 @@ describe('zip + click against real mermaid renders', () => {
     expect(doc.querySelector('svg')?.getAttribute('viewBox')).toBeTruthy();
   });
 });
+
+// --- Screen-coordinate helpers for drag interactions ------------------------
+
+import {
+  getParticipantScreenInfo, getMessageScreenInfo, nearestParticipantAtX,
+  ParticipantScreenInfo,
+} from './svgmap';
+
+function mockRect(el: Element, left: number, top: number, width: number, height: number) {
+  el.getBoundingClientRect = () => ({
+    left, top, width, height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  });
+}
+
+describe('getParticipantScreenInfo', () => {
+  it('returns screen rects in model (source) order with mocked getBoundingClientRect', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    // Mock rects: A at x=0, B at x=150, C at x=300 (left-to-right = source order)
+    const groups = svg.querySelectorAll('g[data-et="participant"]');
+    const byId = new Map<string, Element>();
+    groups.forEach(g => { const id = g.getAttribute('data-id'); if (id) byId.set(id, g); });
+    mockRect(byId.get('A')!, 0, 10, 100, 40);
+    mockRect(byId.get('B')!, 150, 10, 100, 40);
+    mockRect(byId.get('C')!, 300, 10, 100, 40);
+
+    const info = getParticipantScreenInfo(svg, model);
+    expect(info).toHaveLength(3);
+    expect(info.map(p => p.id)).toEqual(['A', 'B', 'C']);
+    expect(info.map(p => p.key)).toEqual(['p:0', 'p:1', 'p:2']);
+    expect(info[0]).toMatchObject({ left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 });
+    expect(info[1]).toMatchObject({ left: 150, right: 250, centerX: 200 });
+    expect(info[2]).toMatchObject({ left: 300, right: 400, centerX: 350 });
+  });
+
+  it('skips participants with no SVG counterpart', () => {
+    const svg = parseSvg(SEQ_SVG);
+    // Model claims a 4th participant the SVG doesn't have
+    const model = parseModel(SEQ_CODE + '\n    participant D');
+    const groups = svg.querySelectorAll('g[data-et="participant"]');
+    const byId = new Map<string, Element>();
+    groups.forEach(g => { const id = g.getAttribute('data-id'); if (id) byId.set(id, g); });
+    mockRect(byId.get('A')!, 0, 10, 100, 40);
+    mockRect(byId.get('B')!, 150, 10, 100, 40);
+    mockRect(byId.get('C')!, 300, 10, 100, 40);
+    const info = getParticipantScreenInfo(svg, model);
+    expect(info).toHaveLength(3); // D has no SVG element, skipped
+    expect(info.map(p => p.id)).toEqual(['A', 'B', 'C']);
+  });
+});
+
+describe('getMessageScreenInfo', () => {
+  it('returns screen Y of each message line in model order', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const lines = svg.querySelectorAll('[data-et="message"]');
+    // Mock: 4 messages at Y = 100, 150, 200, 250 (height 2 each)
+    const ys = [100, 150, 200, 250];
+    lines.forEach((el, i) => mockRect(el, 0, ys[i], 200, 2));
+
+    const info = getMessageScreenInfo(svg, model);
+    expect(info).toHaveLength(4);
+    expect(info.map(m => m.key)).toEqual(['m:0', 'm:1', 'm:2', 'm:3']);
+    // Y is the vertical center: top + height/2
+    expect(info.map(m => m.y)).toEqual([101, 151, 201, 251]);
+  });
+});
+
+describe('nearestParticipantAtX', () => {
+  const participants: ParticipantScreenInfo[] = [
+    { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
+    { key: 'p:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30 },
+    { key: 'p:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30 },
+  ];
+
+  it('returns the participant whose center is nearest to the given X', () => {
+    expect(nearestParticipantAtX(participants, 0)?.id).toBe('A');
+    expect(nearestParticipantAtX(participants, 60)?.id).toBe('A');
+    expect(nearestParticipantAtX(participants, 120)?.id).toBe('A'); // closer to A(50) than B(200)
+    expect(nearestParticipantAtX(participants, 130)?.id).toBe('B'); // closer to B(200)
+    expect(nearestParticipantAtX(participants, 500)?.id).toBe('C');
+  });
+
+  it('returns null for an empty list', () => {
+    expect(nearestParticipantAtX([], 100)).toBeNull();
+  });
+
+  it('handles a single participant', () => {
+    expect(nearestParticipantAtX([participants[0]], 999)?.id).toBe('A');
+  });
+});
