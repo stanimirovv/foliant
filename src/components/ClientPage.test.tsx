@@ -570,4 +570,189 @@ describe('ClientPage', () => {
     expect(screen.queryByTestId('reload-notice')).toBeNull();
     expect(viewer.getAttribute('data-code')).toContain('"views"');
   }, 10000);
+
+  it('undo reverts an edit and redo reapplies it (toolbar buttons)', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    // no edits yet: both buttons disabled
+    expect((screen.getByTitle('Undo (Ctrl+Z)') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTitle('Redo (Ctrl+Y)') as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    fireEvent.change(input, { target: { value: 'Hi' } });
+    await screen.findByDisplayValue('Hi');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+    }, { timeout: 3000 });
+    expect((screen.getByTitle('Undo (Ctrl+Z)') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+    expect(viewer.getAttribute('data-code')).not.toContain('A->>B: Hi');
+    // the panel follows the reverted state (the selection survives the undo)
+    await screen.findByDisplayValue('Hello');
+    expect((screen.getByTitle('Redo (Ctrl+Y)') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTitle('Redo (Ctrl+Y)'));
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+    }, { timeout: 3000 });
+    await screen.findByDisplayValue('Hi');
+  }, 10000);
+
+  it('a new edit clears the redo stack', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hello'), { target: { value: 'Hi' } });
+    await screen.findByDisplayValue('Hi');
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+    expect((screen.getByTitle('Redo (Ctrl+Y)') as HTMLButtonElement).disabled).toBe(false);
+
+    // a new edit while the future stack is non-empty clears it
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hello'), { target: { value: 'Hey' } });
+    await screen.findByDisplayValue('Hey');
+    expect((screen.getByTitle('Redo (Ctrl+Y)') as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hey');
+    }, { timeout: 3000 });
+    expect(viewer.getAttribute('data-code')).not.toContain('A->>B: Hi');
+  }, 10000);
+
+  it('Ctrl+Z / Ctrl+Y trigger undo/redo', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hello'), { target: { value: 'Hi' } });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+    }, { timeout: 3000 });
+
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+
+    fireEvent.keyDown(document.body, { key: 'y', ctrlKey: true });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+    }, { timeout: 3000 });
+  }, 10000);
+
+  it('does not hijack Ctrl+Z inside text inputs', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    fireEvent.change(input, { target: { value: 'Hi' } });
+    await screen.findByDisplayValue('Hi');
+    expect((screen.getByTitle('Undo (Ctrl+Z)') as HTMLButtonElement).disabled).toBe(false);
+
+    // Ctrl+Z inside the label input is the input's own undo, not the diagram's
+    fireEvent.keyDown(input, { key: 'z', ctrlKey: true });
+    expect((screen.getByTitle('Undo (Ctrl+Z)') as HTMLButtonElement).disabled).toBe(false);
+  }, 10000);
+
+  it('switching files resets the undo history', async () => {
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DEMO);
+    const { rerender } = render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    });
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hello'), { target: { value: 'Hi' } });
+    await screen.findByDisplayValue('Hi');
+    expect((screen.getByTitle('Undo (Ctrl+Z)') as HTMLButtonElement).disabled).toBe(false);
+
+    // switch to another file
+    params.file = 'other.mmd';
+    fileContent.current = 'sequenceDiagram\n    participant X\n    X->>X: Solo';
+    rerender(<ClientPage />);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('Solo');
+    }, { timeout: 3000 });
+
+    // history was reset: undo is disabled and the old edit is gone
+    expect((screen.getByTitle('Undo (Ctrl+Z)') as HTMLButtonElement).disabled).toBe(true);
+    expect(viewer.getAttribute('data-code')).not.toContain('Hello');
+  }, 10000);
+
+  it('auto-save applies to undo results', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hello'), { target: { value: 'Hi' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
+
+    // undoing reverts the file content on disk too
+    mockFetch.mockClear();
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    const body = JSON.parse((postCalls()[0][1] as { body: string }).body);
+    expect(body.content).toContain('A->>B: Hello');
+    expect(body.content).not.toContain('A->>B: Hi');
+  }, 10000);
+
+  it('end to end (create -> change -> verify): three edits, undo twice, redo, future cleared (Step 10)', async () => {
+    const viewer = await renderInEditMode(createSequenceDiagram(), 'A->>B: Hello');
+    const code = () => viewer.getAttribute('data-code') ?? '';
+
+    // edit 1: rename the message label
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hello'), { target: { value: 'Hi' } });
+    await screen.findByDisplayValue('Hi');
+    // edit 2: rename the participant
+    fireEvent.click(screen.getByTestId('select-p:0'));
+    fireEvent.change(await screen.findByDisplayValue('Alice'), { target: { value: 'Alicia' } });
+    await screen.findByDisplayValue('Alicia');
+    // edit 3: add a participant
+    fireEvent.click(screen.getByTitle('Add Participant'));
+    await waitFor(() => {
+      expect(parseModel(code()).elements.some(e => e.kind === 'participant' && e.id === 'New1')).toBe(true);
+    }, { timeout: 3000 });
+
+    // undo twice: the participant add reverts, then the participant rename
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    await waitFor(() => {
+      expect(parseModel(code()).elements.some(e => e.kind === 'participant' && e.id === 'New1')).toBe(false);
+    }, { timeout: 3000 });
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    await waitFor(() => {
+      expect(parseModel(code()).elements.some(e => e.kind === 'participant' && e.alias === 'Alicia')).toBe(false);
+    }, { timeout: 3000 });
+    expect(parseModel(code()).elements.some(e => e.kind === 'participant' && e.alias === 'Alice')).toBe(true);
+    // edit 1 is still in effect
+    expect(parseModel(code()).elements.some(e => e.kind === 'message' && e.label === 'Hi')).toBe(true);
+
+    // redo: the participant rename reapplies
+    fireEvent.click(screen.getByTitle('Redo (Ctrl+Y)'));
+    await waitFor(() => {
+      expect(parseModel(code()).elements.some(e => e.kind === 'participant' && e.alias === 'Alicia')).toBe(true);
+    }, { timeout: 3000 });
+
+    // a new edit clears the future stack
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hi'), { target: { value: 'Hey' } });
+    await screen.findByDisplayValue('Hey');
+    expect((screen.getByTitle('Redo (Ctrl+Y)') as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => {
+      expect(code()).toContain('A->>B: Hey');
+    }, { timeout: 3000 });
+  }, 15000);
 });

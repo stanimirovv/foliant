@@ -6,7 +6,7 @@ import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2 } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import {
@@ -17,6 +17,8 @@ import {
 import { buildSelectionMap } from '@/lib/svgmap';
 import { rewriteArrowStyles } from '@/lib/styling';
 import { PendingDelete } from './EditorPanel';
+
+const HISTORY_LIMIT = 100;
 
 export default function ClientPage() {
   const router = useRouter();
@@ -49,6 +51,14 @@ export default function ClientPage() {
   const saveSeqRef = useRef(0);                       // only the latest save applies its result
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [reloadNotice, setReloadNotice] = useState(false);
+
+  // Undo/redo (EDITING_PLAN.md Section 4.11): the state is a single string
+  // (the raw code, CONFIG included), so history is string[] past + future
+  // stacks around the current rawCode, capped at 100. Pushing happens in the
+  // edit dispatch (commitEdit), never in a render effect; undo/redo results
+  // flow through the same rawCode state, so auto-save applies to them too.
+  const [historyPast, setHistoryPast] = useState<string[]>([]);
+  const [historyFuture, setHistoryFuture] = useState<string[]>([]);
   
   const currentFile = searchParams.get('file');
   const searchQuery = searchParams.get('q') || '';
@@ -231,6 +241,9 @@ export default function ClientPage() {
       setSelection(null);
       setPendingDelete(null);
     }
+    // Switching files or directories resets the undo history (Section 4.11).
+    setHistoryPast([]);
+    setHistoryFuture([]);
   }, [currentFile, loadFile]);
 
   useEffect(() => {
@@ -246,6 +259,8 @@ export default function ClientPage() {
         if (content === lastWrittenRef.current) return;
         lastWrittenRef.current = content;
         setRawCode(content);
+        setHistoryPast([]);   // external change: the in-memory history no longer applies
+        setHistoryFuture([]);
         setReloadNotice(true);
       });
     };
@@ -382,14 +397,57 @@ export default function ClientPage() {
 
   // --- Edit dispatch (EDITING_PLAN.md Steps 7-8): every panel action runs a
   // pure transform over (rawCode, viewsData) and applies the result. ---
+
+  // Commit a new raw text state: push the current state onto the undo stack
+  // (before the auto-save debounce fires) and clear the redo stack.
+  const commitEdit = (newCode: string) => {
+    setHistoryPast(past => [...past, rawCode].slice(-HISTORY_LIMIT));
+    setHistoryFuture([]);
+    setRawCode(newCode);
+  };
+
   const applyEditResult = (result: EditResult) => {
     if (result.warning) {
       setEditWarning(result.warning);
       return;
     }
     setEditWarning(null);
-    setRawCode(result.code);
+    if (result.code === rawCode) return; // no-op transform: no history entry
+    commitEdit(result.code);
   };
+
+  const undo = useCallback(() => {
+    if (historyPast.length === 0) return;
+    const previous = historyPast[historyPast.length - 1];
+    setHistoryPast(historyPast.slice(0, -1));
+    setHistoryFuture([...historyFuture, rawCode].slice(-HISTORY_LIMIT));
+    setRawCode(previous);
+  }, [historyPast, historyFuture, rawCode]);
+
+  const redo = useCallback(() => {
+    if (historyFuture.length === 0) return;
+    const next = historyFuture[historyFuture.length - 1];
+    setHistoryFuture(historyFuture.slice(0, -1));
+    setHistoryPast([...historyPast, rawCode].slice(-HISTORY_LIMIT));
+    setRawCode(next);
+  }, [historyPast, historyFuture, rawCode]);
+
+  // Ctrl+Z / Ctrl+Y (Section 4.11). Inside text fields the native input undo
+  // wins; the diagram-level shortcut applies everywhere else.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'z' && key !== 'y') return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' || target.isContentEditable)) return;
+      e.preventDefault();
+      if (key === 'z') undo(); else redo();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [undo, redo]);
 
   const selectedComponent = selectedRawElement && (selectedRawElement.kind === 'participant' || selectedRawElement.kind === 'node')
     ? selectedRawElement
@@ -475,7 +533,7 @@ export default function ClientPage() {
 
   const handleConfirmDelete = () => {
     if (!pendingDelete) return;
-    setRawCode(pendingDelete.code);
+    commitEdit(pendingDelete.code);
     setPendingDelete(null);
     setSelection(null);
     setEditWarning(null);
@@ -901,6 +959,28 @@ export default function ClientPage() {
                 >
                   <MessageSquarePlus size={14} />
                   <span>Message</span>
+                </button>
+                <button
+                  onClick={undo}
+                  disabled={historyPast.length === 0}
+                  title="Undo (Ctrl+Z)"
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
+                    historyPast.length === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100'
+                  }`}
+                >
+                  <Undo2 size={14} />
+                  <span>Undo</span>
+                </button>
+                <button
+                  onClick={redo}
+                  disabled={historyFuture.length === 0}
+                  title="Redo (Ctrl+Y)"
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
+                    historyFuture.length === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100'
+                  }`}
+                >
+                  <Redo2 size={14} />
+                  <span>Redo</span>
                 </button>
               </>
             )}
