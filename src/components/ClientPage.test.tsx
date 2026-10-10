@@ -41,7 +41,7 @@ vi.mock('./DiagramViewer', () => ({
       data-edit-mode={String(props.editMode ?? false)}
       data-selection={props.selection ?? ''}
     >
-      {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0'].map(k => (
+      {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0', 'n:0', 'n:1', 'e:0', 'e:1'].map(k => (
         <button key={k} data-testid={`select-${k}`} onClick={() => props.onSelect?.(k)}>
           select {k}
         </button>
@@ -54,7 +54,9 @@ global.fetch = vi.fn();
 
 // Stateful file mock: POST persists the body (like the real API) and GET
 // returns the current content; postControl.fail simulates a failing write.
+// filesState mirrors the directory listing: a POST to a new file adds it.
 const fileContent = { current: '' };
+const filesState = { list: ['demo.mmd'] };
 const postControl = { fail: false };
 
 class MockEventSource {
@@ -79,18 +81,21 @@ const DEMO = `sequenceDiagram
 
 const mockFetchWithFile = (content: string) => {
   fileContent.current = content;
+  filesState.list = ['demo.mmd'];
   const mockFetch = global.fetch as import('vitest').Mock;
   mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
     if (init?.method === 'POST') {
       if (postControl.fail) return { ok: false, status: 500, json: async () => ({}) };
       fileContent.current = JSON.parse(init.body ?? '{}').content ?? '';
+      const m = String(url).match(/^\/api\/file\/([^?]+)/);
+      if (m && !filesState.list.includes(m[1])) filesState.list.push(m[1]);
       return { ok: true, json: async () => ({}) };
     }
     return {
       ok: true,
       json: async () => {
         if (String(url).startsWith('/api/file/')) return { content: fileContent.current };
-        return { files: ['demo.mmd'] };
+        return { files: [...filesState.list] };
       },
     };
   });
@@ -888,5 +893,134 @@ describe('ClientPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
     }, { timeout: 3000 });
+  }, 10000);
+
+  it('end to end (create -> change -> verify): create a new diagram (name + type), open it, edit it, auto-save', async () => {
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DEMO);
+    const { rerender } = render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    });
+
+    // create a brand-new flowchart through the dialog
+    fireEvent.click(screen.getByTestId('new-diagram'));
+    fireEvent.change(screen.getByTestId('new-diagram-name'), { target: { value: 'fresh' } });
+    fireEvent.change(screen.getByTestId('new-diagram-type'), { target: { value: 'flowchart' } });
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+
+    // the file was created through the API with the flowchart template
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    const [createUrl, createInit] = postCalls()[0];
+    expect(String(createUrl)).toContain('/api/file/fresh.mmd');
+    const createBody = JSON.parse((createInit as { body: string }).body);
+    expect(createBody.content).toContain('flowchart TD');
+    expect(createBody.content).toContain('A[Alice] --> B[Bob]');
+    // the app navigated to the new file
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('file=fresh.mmd'), { scroll: false });
+    });
+
+    // simulate the URL change (the mock router does not navigate)
+    params.file = 'fresh.mmd';
+    rerender(<ClientPage />);
+    const mockFetch = global.fetch as import('vitest').Mock;
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some(c => String(c[0]).includes('/api/file/fresh.mmd'))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A[Alice] --> B[Bob]');
+    }, { timeout: 3000 });
+    // the sidebar lists the new file
+    expect(await screen.findByText('fresh.mmd')).toBeTruthy();
+
+    // change: edit an edge of the new diagram; the edit auto-saves to the new file
+    fireEvent.click(screen.getByTestId('select-e:1'));
+    fireEvent.change(await screen.findByDisplayValue('Reply'), { target: { value: 'Thanks' } });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('B -->|Thanks| A');
+    }, { timeout: 3000 });
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
+    expect(fileContent.current).toContain('B -->|Thanks| A');
+    const lastPost = postCalls()[postCalls().length - 1];
+    expect(String(lastPost[0])).toContain('/api/file/fresh.mmd');
+  }, 15000);
+
+  it('creating a sequence diagram normalizes the name and opens the new file', async () => {
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DEMO);
+    const { rerender } = render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    });
+
+    // the user types the extension too: it must not be doubled
+    fireEvent.click(screen.getByTestId('new-diagram'));
+    fireEvent.change(screen.getByTestId('new-diagram-name'), { target: { value: 'seq-one.mmd' } });
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    expect(String(postCalls()[0][0])).toContain('/api/file/seq-one.mmd');
+    const body = JSON.parse((postCalls()[0][1] as { body: string }).body);
+    expect(body.content).toContain('sequenceDiagram');
+
+    params.file = 'seq-one.mmd';
+    rerender(<ClientPage />);
+    const mockFetch = global.fetch as import('vitest').Mock;
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some(c => String(c[0]).includes('/api/file/seq-one.mmd'))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+    expect(await screen.findByText('seq-one.mmd')).toBeTruthy();
+  }, 15000);
+
+  it('the New Diagram dialog validates the name and reports API failures', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('new-diagram'));
+    const dialog = await screen.findByTestId('new-diagram-dialog');
+
+    // empty name
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+    expect((await screen.findByTestId('new-diagram-error')).textContent).toBe('Enter a file name');
+    expect(postCalls()).toHaveLength(0);
+
+    // duplicate of an existing file
+    fireEvent.change(screen.getByTestId('new-diagram-name'), { target: { value: 'demo' } });
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+    expect((await screen.findByTestId('new-diagram-error')).textContent).toBe('demo.mmd already exists');
+    expect(postCalls()).toHaveLength(0);
+
+    // characters outside the safe set
+    fireEvent.change(screen.getByTestId('new-diagram-name'), { target: { value: 'my diagram!' } });
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+    expect((await screen.findByTestId('new-diagram-error')).textContent).toBe('Use letters, numbers, dashes and underscores only');
+    expect(postCalls()).toHaveLength(0);
+
+    // the API write fails
+    postControl.fail = true;
+    fireEvent.change(screen.getByTestId('new-diagram-name'), { target: { value: 'okname' } });
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+    expect((await screen.findByTestId('new-diagram-error')).textContent).toBe('Could not create the file');
+    expect(postCalls()).toHaveLength(1);
+    postControl.fail = false;
+
+    // cancel closes the dialog without creating anything
+    expect(dialog).toBeTruthy();
+    fireEvent.click(screen.getByTestId('new-diagram-cancel'));
+    expect(screen.queryByTestId('new-diagram-dialog')).toBeNull();
+    expect(postCalls()).toHaveLength(1);
   }, 10000);
 });

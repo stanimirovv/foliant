@@ -6,7 +6,7 @@ import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2 } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import {
@@ -20,6 +20,13 @@ import { PendingDelete } from './EditorPanel';
 
 // Undo/redo history depth: capped so both stacks stay small (10-15 steps).
 const HISTORY_LIMIT = 15;
+
+// Starter content for the New Diagram dialog (the user picks the file name
+// and the diagram type).
+const NEW_DIAGRAM_TEMPLATES: Record<'sequence' | 'flowchart', string> = {
+  sequence: 'sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: Hello\n    B-->>A: Hi there',
+  flowchart: 'flowchart TD\n    A[Alice] --> B[Bob]\n    B -->|Reply| A',
+};
 
 export default function ClientPage() {
   const router = useRouter();
@@ -41,6 +48,9 @@ export default function ClientPage() {
   // so the confirm dialog can list the cascaded elements; the new code is
   // applied only on confirm.
   const [pendingDelete, setPendingDelete] = useState<(PendingDelete & { code: string }) | null>(null);
+  // New Diagram dialog: create a brand-new .mmd in the current directory
+  // (the user picks the file name and the diagram type) and open it.
+  const [pendingNew, setPendingNew] = useState(false);
 
   // Auto-save state (EDITING_PLAN.md Section 4.10): lastWrittenRef holds the
   // exact content string of the last successful POST. The auto-save effect
@@ -542,6 +552,27 @@ export default function ClientPage() {
 
   const handleCancelDelete = () => setPendingDelete(null);
 
+  // Creates a new diagram file through the API and navigates to it. Returns
+  // a validation/API error message, or null on success.
+  const createNewDiagram = async (rawName: string, type: 'sequence' | 'flowchart'): Promise<string | null> => {
+    const base = rawName.trim().replace(/\.mmd$/i, '');
+    if (!base) return 'Enter a file name';
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(base)) {
+      return 'Use letters, numbers, dashes and underscores only';
+    }
+    const name = `${base}.mmd`;
+    if (files.includes(name)) return `${name} already exists`;
+    if (!(await postFile(name, NEW_DIAGRAM_TEMPLATES[type]))) {
+      return 'Could not create the file';
+    }
+    setFiles(prev => [...prev, name].sort());
+    setPendingNew(false);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('file', name);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    return null;
+  };
+
   // --- Add Participant / Add Message (EDITING_PLAN.md 4.12) ---
   const componentElements = useMemo(
     () => rawModel.elements.filter(e => e.kind === 'participant' || e.kind === 'node'),
@@ -737,6 +768,14 @@ export default function ClientPage() {
           <div className="mb-6">
             <h2 className="text-xs font-bold uppercase text-gray-500 mb-2 flex items-center">
               <Folder size={14} className="mr-1" /> Files
+              <button
+                data-testid="new-diagram"
+                title="New diagram"
+                onClick={() => setPendingNew(true)}
+                className="ml-auto normal-case font-normal text-blue-500 hover:text-blue-600 flex items-center space-x-0.5"
+              >
+                <Plus size={12} /> New
+              </button>
             </h2>
             <ul className="space-y-1">
               {files.map(f => (
@@ -1049,6 +1088,94 @@ export default function ClientPage() {
               />
             </div>
           )}
+        </div>
+      </div>
+
+      {pendingNew && (
+        <NewDiagramDialog
+          onCreate={createNewDiagram}
+          onCancel={() => setPendingNew(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function NewDiagramDialog({
+  onCreate,
+  onCancel,
+}: {
+  onCreate: (name: string, type: 'sequence' | 'flowchart') => Promise<string | null>;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [type, setType] = useState<'sequence' | 'flowchart'>('sequence');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    const err = await onCreate(name, type);
+    setBusy(false);
+    if (err) setError(err);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      data-testid="new-diagram-dialog"
+    >
+      <div className="bg-white rounded shadow-lg p-4 w-80">
+        <h3 className="text-sm font-semibold mb-2">New diagram</h3>
+        <label className="block mb-2">
+          <span className="text-xs text-gray-500">File name</span>
+          <input
+            type="text"
+            data-testid="new-diagram-name"
+            className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="my-diagram"
+            value={name}
+            onChange={(e) => { setName(e.target.value); setError(null); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+        </label>
+        <label className="block mb-3">
+          <span className="text-xs text-gray-500">Type</span>
+          <select
+            data-testid="new-diagram-type"
+            className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={type}
+            onChange={(e) => setType(e.target.value as 'sequence' | 'flowchart')}
+          >
+            <option value="sequence">Sequence diagram</option>
+            <option value="flowchart">Flowchart</option>
+          </select>
+        </label>
+        {error && (
+          <p data-testid="new-diagram-error" className="text-xs text-red-500 mb-2">{error}</p>
+        )}
+        <div className="flex justify-end space-x-2">
+          <button
+            onClick={onCancel}
+            data-testid="new-diagram-cancel"
+            className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            data-testid="new-diagram-create"
+            disabled={busy}
+            className="px-2 py-1 text-xs rounded bg-blue-500 text-white hover:bg-blue-600"
+          >
+            Create
+          </button>
         </div>
       </div>
     </div>
