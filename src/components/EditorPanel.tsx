@@ -100,9 +100,16 @@ export default function EditorPanel({
     <div className="p-4">
       <h2 className="text-xs font-bold uppercase text-gray-500 mb-2">Editor</h2>
       {!element && (
-        <p className="text-xs text-gray-500 italic">
-          Click an element in the diagram to edit it.
-        </p>
+        <>
+          <p className="text-xs text-gray-500 italic">
+            Click an element in the diagram to edit it.
+          </p>
+          <p className="text-xs text-gray-400 italic mt-1">
+            {diagramType === 'flowchart'
+              ? 'Drag a node onto another node to connect them, or drag it into empty space to move it.'
+              : 'Drag an actor box to reorder it, or drag between lifelines to add a message.'}
+          </p>
+        </>
       )}
       {element && isComponent(element) && (
         <ParticipantFields

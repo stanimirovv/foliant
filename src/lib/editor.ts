@@ -521,6 +521,142 @@ export function moveParticipant(
   return { code: newCode, config, newKey: moved?.key };
 }
 
+// Move a flowchart node to a new position among the nodes (flowcharts only).
+// Mermaid lays same-rank nodes out in first-declaration order, so moving a
+// node means moving its FIRST declaration in the source:
+//   - target earlier than the current first declaration -> insert a
+//     standalone declaration at the target position (the original lines stay;
+//     Mermaid keeps the label because re-declarations with identical text are
+//     no-ops, and a bare endpoint never resets a label)
+//   - target later -> relocate every line that mentions the node before the
+//     target, as a block (relative order preserved), landing immediately
+//     before the target line. Only moving the first-declaring line would
+//     leave the node behind its other declarations; moving all of them keeps
+//     edges connecting the same endpoints and keeps the last shaped
+//     declaration (what Mermaid shows as the label) last.
+// beforeKey === undefined moves the node to the end (after every other node's
+// first declaration). Nodes inside a subgraph cannot be moved out of it (or
+// vice versa): that would silently change the cluster, so it soft-fails.
+export function moveNode(
+  code: string,
+  config: DiagramConfig | null,
+  key: string,
+  beforeKey?: string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'flowchart') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'node') return fail(code, config, `Element ${key} is not a node`);
+
+  let targetEl: ModelElement | undefined;
+  if (beforeKey !== undefined) {
+    targetEl = findElement(model, beforeKey);
+    if (!targetEl || targetEl.kind !== 'node') {
+      return fail(code, config, `Unknown node key: ${beforeKey}`);
+    }
+    if (targetEl.key === key) return { code, config }; // no-op
+  }
+
+  // Nodes in first-declaration order (parseModel emits them in source order).
+  const nodes = model.elements.filter(e => e.kind === 'node');
+  const idx = nodes.findIndex(n => n.key === key);
+  if (beforeKey !== undefined) {
+    // Already immediately before the target: nothing to change.
+    if (nodes[idx + 1]?.key === beforeKey) return { code, config };
+  } else if (nodes[nodes.length - 1].key === key) {
+    return { code, config }; // already last
+  }
+
+  const lines = code.split('\n');
+  // Insert position, in original line indices: the moved line lands
+  // immediately before line `insertAt`. Move-to-end appends at the end of the
+  // file (keeping a trailing newline last).
+  const insertAt = beforeKey !== undefined
+    ? targetEl!.lineStart
+    : (lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length);
+
+  // A node cannot cross a subgraph boundary: the inserted/relocated line would
+  // silently join or leave the cluster.
+  const blockAt = (line: number): ModelElement | undefined => {
+    let inner: ModelElement | undefined;
+    for (const e of model.elements) {
+      if (e.kind === 'block' && e.lineStart < line && line <= e.lineEnd) inner = e;
+    }
+    return inner;
+  };
+  if (blockAt(el.lineStart)?.key !== blockAt(insertAt)?.key) {
+    return fail(code, config, 'Cannot move a node into or out of a subgraph');
+  }
+
+  if (insertAt === el.lineStart) return { code, config }; // same position
+
+  // The node's declaration text + indent at its first appearance (used only
+  // when moving earlier, where a standalone declaration is inserted).
+  const firstLine = lines[el.lineStart];
+  let declText: string;
+  let indent: string;
+  let isStandalone = false;
+  const standaloneMatch = firstLine.match(FC_NODE_V);
+  if (standaloneMatch && standaloneMatch[2] === el.id) {
+    isStandalone = true;
+    declText = firstLine.trim();
+    indent = standaloneMatch[1];
+  } else {
+    const endpoints = flowchartEdgeEndpoints(firstLine);
+    declText = endpoints
+      ? (endpoints.fromId === el.id ? endpoints.fromDecl : endpoints.toDecl)
+      : (el.label ? `${el.id}[${el.label}]` : el.id);
+    indent = endpoints?.indent ?? '    ';
+  }
+
+  let newLines: string[];
+  if (insertAt < el.lineStart) {
+    // Move earlier: the inserted standalone declaration becomes the node's
+    // first appearance. A standalone declaration is relocated (no duplicate);
+    // an edge line stays untouched.
+    if (isStandalone) {
+      lines.splice(el.lineStart, 1);
+      lines.splice(insertAt, 0, `${indent}${declText}`);
+    } else {
+      lines.splice(insertAt, 0, `${indent}${declText}`);
+    }
+    newLines = lines;
+  } else {
+    // Move later: every line that mentions the node before the target moves
+    // with it, as a block, landing immediately before the target line.
+    const mentions: number[] = [];
+    for (let i = 0; i < insertAt; i++) {
+      const line = lines[i];
+      const node = line.match(FC_NODE_V);
+      if (node && node[2] === el.id) {
+        mentions.push(i);
+        continue;
+      }
+      const endpoints = flowchartEdgeEndpoints(line);
+      if (endpoints && (endpoints.fromId === el.id || endpoints.toId === el.id)) {
+        mentions.push(i);
+      }
+    }
+    const movedLines = mentions.map(i => lines[i]);
+    const drop = new Set(mentions);
+    const kept: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (!drop.has(i)) kept.push(lines[i]);
+    }
+    // All dropped lines were before insertAt, so the target line sits at
+    // insertAt - mentions.length in `kept`.
+    kept.splice(insertAt - mentions.length, 0, ...movedLines);
+    newLines = kept;
+  }
+
+  const newCode = newLines.join('\n');
+  // Keys are positional, so report the moved node's key in the new code.
+  const moved = parseModel(newCode).elements.find(
+    e => e.kind === 'node' && e.id === el.id
+  );
+  return { code: newCode, config, newKey: moved?.key };
+}
+
 export function deleteElement(code: string, config: DiagramConfig | null, key: string): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);

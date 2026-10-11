@@ -6,8 +6,8 @@ import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { parseModel, ParticipantElement } from '@/lib/model';
 import { applyArrowStyles, applyNodeColors } from '@/lib/styling';
 import {
-  elementKeyAtTarget, svgElementForKey,
-  getParticipantScreenInfo, getMessageScreenInfo, nearestParticipantAtX,
+  elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf,
+  getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, nearestParticipantAtX,
   ParticipantScreenInfo, MessageScreenInfo,
 } from '@/lib/svgmap';
 import { DiagramConfig } from '@/lib/views';
@@ -23,6 +23,7 @@ interface DiagramViewerProps {
   selection?: string | null;           // selected processed element key
   onSelect?: (key: string | null) => void;
   // Drag callbacks (processed keys; ClientPage maps them to raw keys).
+  // onMoveParticipant moves a participant (sequence) or a node (flowchart).
   onMoveParticipant?: (participantKey: string, beforeKey: string | null) => void;
   onCreateMessageDrag?: (fromKey: string, toKey: string, position: MessageInsertPosition) => void;
 }
@@ -37,17 +38,18 @@ const LIFELINE_HIT_THRESHOLD = 20;
 // SVG selectors for every element that resolves to a participant (the same
 // set elementKeyAtTarget checks). Excluded from TransformWrapper panning in
 // edit mode so dragging a participant reorders / creates a message instead
-// of panning the screen.
+// of panning the screen. Flowchart node drags exclude the node groups.
 const PARTICIPANT_PAN_EXCLUSIONS = [
   'g[data-et="participant"]',
   'line.actor-line',
   'rect.actor',
   'g.actor-man',
 ];
+const NODE_PAN_EXCLUSIONS = ['g.node'];
 
 interface DragState {
-  type: 'reorder' | 'message';
-  participantKey: string;   // processed key of the dragged participant
+  type: 'reorder' | 'message' | 'node';
+  participantKey: string;   // processed key of the dragged participant/node
   participantId: string;
   startX: number;
   startY: number;
@@ -60,15 +62,22 @@ interface DragState {
   toParticipantKey: string | null;
   toParticipantId: string | null;
   insertPosition: MessageInsertPosition | null;
+  // Flowchart node drags: 'connect' while the cursor is over another node
+  // (drop creates an edge), 'move' otherwise (drop reorders the node).
+  flowMode: 'move' | 'connect' | null;
 }
 
 // Visual overlay data (screen coordinates, rendered in a fixed SVG).
 interface DragOverlay {
   type: 'reorder' | 'message';
-  // Reorder: vertical dashed insertion line.
+  // Reorder: dashed insertion line — vertical for horizontal layouts
+  // (sequence diagrams, flowchart TD/BT), horizontal for LR/RL flowcharts.
   reorderX: number | null;
   reorderY1: number;
   reorderY2: number;
+  reorderY: number | null;
+  reorderX1: number;
+  reorderX2: number;
   // Message: drag line from source to cursor + horizontal insertion indicator.
   lineX1: number;
   lineY1: number;
@@ -78,6 +87,180 @@ interface DragOverlay {
   insertX1: number;
   insertX2: number;
   hasTarget: boolean;
+}
+
+// The layout axis of a flowchart: TD/BT stack nodes vertically (same-rank
+// nodes sit side by side, so reordering runs along X); LR/RL stack them
+// horizontally (reordering runs along Y). Default direction is TD.
+function flowAxisOf(code: string): 'x' | 'y' {
+  const m = code.match(/^\s*(?:flowchart|graph)\s+(TD|BT|LR|RL)\b/im);
+  const dir = m ? m[1].toUpperCase() : 'TD';
+  return dir === 'LR' || dir === 'RL' ? 'y' : 'x';
+}
+
+// Where a reorder drop lands among the given movable elements, sorted along
+// the layout axis: the first element whose center is past the cursor becomes
+// the "insert before" target (null = move to the end). The indicator is the
+// screen coordinate of the insertion line. Behavior for axis 'x' matches the
+// original sequence-diagram reorder exactly.
+function computeReorderDrop(
+  movables: ParticipantScreenInfo[],
+  excludeKey: string,
+  cursorCoord: number,
+  axis: 'x' | 'y',
+): { beforeKey: string | null; indicator: number | null } {
+  const coord = (p: ParticipantScreenInfo) => axis === 'x' ? p.centerX : p.centerY;
+  const startEdge = (p: ParticipantScreenInfo) => axis === 'x' ? p.left : p.top;
+  const endEdge = (p: ParticipantScreenInfo) => axis === 'x' ? p.right : p.bottom;
+  const sorted = [...movables].sort((a, b) => coord(a) - coord(b));
+  const remaining = sorted.filter(p => p.key !== excludeKey);
+  if (remaining.length === 0) return { beforeKey: null, indicator: null };
+  const first = remaining[0];
+  const last = remaining[remaining.length - 1];
+  if (cursorCoord < coord(first)) {
+    return { beforeKey: first.key, indicator: startEdge(first) };
+  }
+  if (cursorCoord > coord(last)) {
+    return { beforeKey: null, indicator: endEdge(last) + 15 };
+  }
+  const nextP = remaining.find(p => cursorCoord < coord(p));
+  if (nextP) {
+    const idx = remaining.indexOf(nextP);
+    const prev = idx > 0 ? remaining[idx - 1] : null;
+    return {
+      beforeKey: nextP.key,
+      indicator: prev ? (coord(prev) + coord(nextP)) / 2 : startEdge(nextP),
+    };
+  }
+  return { beforeKey: null, indicator: endEdge(last) + 15 };
+}
+
+// --- Transition animation (FLIP) --------------------------------------------
+// A re-render replaces the whole SVG, so a reorder would teleport elements to
+// their new positions. To make the change visible, every movable element is
+// animated from its previous screen position to the new one (First, Last,
+// Invert, Play). Only runs when the same elements are present before and
+// after — a reorder keeps the id sets identical, while switching files or
+// adding/deleting elements does not (and is not animated).
+
+// Draggable/movable SVG elements, keyed by a stable id so the same element can
+// be found across renders: participants (top boxes, lifelines, bottom boxes,
+// bottom actor men) and flowchart nodes.
+function movableElementsOf(svg: Element): Map<string, Element> {
+  const map = new Map<string, Element>();
+  const add = (key: string, el: Element) => { if (!map.has(key)) map.set(key, el); };
+  svg.querySelectorAll('g[data-et="participant"][data-id]').forEach(el => {
+    const id = el.getAttribute('data-id');
+    if (id) add(`participant:${id}`, el);
+  });
+  svg.querySelectorAll('line.actor-line[data-id]').forEach(el => {
+    const id = el.getAttribute('data-id');
+    if (id) add(`lifeline:${id}`, el);
+  });
+  svg.querySelectorAll('rect.actor-bottom[name]').forEach(el => {
+    const id = el.getAttribute('name');
+    if (id) add(`bottombox:${id}`, el);
+  });
+  svg.querySelectorAll('g.actor-man[name]').forEach(el => {
+    const id = el.getAttribute('name');
+    if (id) add(`actorman:${id}`, el);
+  });
+  svg.querySelectorAll('g.node[id]').forEach(el => {
+    const svgId = el.getAttribute('id');
+    const nodeId = svgId ? flowchartNodeIdOf(svgId) : null;
+    if (nodeId) add(`node:${nodeId}`, el);
+  });
+  return map;
+}
+
+interface MovableSnapshot {
+  positions: Map<string, { x: number; y: number }>;  // screen left/top
+  participantIds: Set<string>;
+  nodeIds: Set<string>;
+}
+
+function captureMovableSnapshot(svg: Element | null): MovableSnapshot | null {
+  if (!svg) return null;
+  const elements = movableElementsOf(svg);
+  const positions = new Map<string, { x: number; y: number }>();
+  elements.forEach((el, key) => {
+    const r = el.getBoundingClientRect();
+    positions.set(key, { x: r.left, y: r.top });
+  });
+  const participantIds = new Set<string>();
+  const nodeIds = new Set<string>();
+  elements.forEach((_, key) => {
+    if (key.startsWith('node:')) nodeIds.add(key.slice(5));
+    else participantIds.add(key.slice(key.indexOf(':') + 1));
+  });
+  return { positions, participantIds, nodeIds };
+}
+
+function sameIdSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
+
+// The current zoom scale of the TransformWrapper content (deltas applied via
+// CSS transforms inside the content are in content coordinates, so screen
+// deltas must be divided by the scale).
+function zoomScaleOf(): number {
+  const content = document.querySelector('.react-transform-component') as HTMLElement | null;
+  const m = content?.style.transform.match(/scale\(([\d.]+)\)/);
+  return m ? parseFloat(m[1]) : 1;
+}
+
+// Screen-to-content scale of the SVG: the wrapper's zoom scale times the
+// svg's own viewBox scaling (the svg is often displayed at a different size
+// than its viewBox). Screen deltas are divided by this to get content
+// (transform-attribute) coordinates for the animation keyframes.
+function contentScaleOf(svg: Element): number {
+  let scale = zoomScaleOf();
+  const viewBox = svg.getAttribute('viewBox');
+  if (viewBox) {
+    const parts = viewBox.trim().split(/[\s,]+/).map(parseFloat);
+    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+      const rect = svg.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        // preserveAspectRatio defaults to "xMidYMid meet": uniform scale.
+        scale *= Math.min(rect.width / parts[2], rect.height / parts[3]);
+      }
+    }
+  }
+  return scale || 1;
+}
+
+// The element's base translation from its transform attribute (flowchart node
+// groups carry translate(x,y); a CSS transform overrides the attribute, so
+// the animation keyframes must fold the base in).
+function baseTranslateOf(el: Element): { x: number; y: number } {
+  const t = el.getAttribute('transform');
+  if (!t) return { x: 0, y: 0 };
+  const m = t.match(/translate\(\s*([-\d.]+)\s*[,\s]\s*([-\d.]+)\s*\)/);
+  return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]) } : { x: 0, y: 0 };
+}
+
+function animateMovedElements(svg: Element, prevPositions: Map<string, { x: number; y: number }>): void {
+  // jsdom has no Web Animations API; skip silently there.
+  if (typeof (Element.prototype as unknown as { animate?: unknown }).animate !== 'function') return;
+  const scale = contentScaleOf(svg);
+  movableElementsOf(svg).forEach((el, key) => {
+    const prev = prevPositions.get(key);
+    if (!prev) return;
+    const r = el.getBoundingClientRect();
+    const dx = (prev.x - r.left) / scale;
+    const dy = (prev.y - r.top) / scale;
+    if (Math.abs(dx) + Math.abs(dy) < 2) return; // did not move
+    const base = baseTranslateOf(el);
+    el.animate(
+      [
+        { transform: `translate(${base.x + dx}px, ${base.y + dy}px)` },
+        { transform: `translate(${base.x}px, ${base.y}px)` },
+      ],
+      { duration: 400, easing: 'ease-out' },
+    );
+  });
 }
 
 export default function DiagramViewer({
@@ -96,13 +279,20 @@ export default function DiagramViewer({
   const [error, setError] = useState<string | null>(null);
   const [dragOverlay, setDragOverlay] = useState<DragOverlay | null>(null);
 
-  // In edit mode on sequence diagrams, dragging a participant must not pan
-  // the screen — exclude participant elements from TransformWrapper panning.
-  const isSequenceDiagram = useMemo(() => parseModel(code).type === 'sequence', [code]);
-  const panExcluded = editMode && isSequenceDiagram && onSelect;
+  // In edit mode, dragging a participant (sequence) or a node (flowchart)
+  // must not pan the screen — exclude those elements from TransformWrapper
+  // panning.
+  const diagramType = useMemo(() => parseModel(code).type, [code]);
+  const isSequenceDiagram = diagramType === 'sequence';
+  const isFlowchartDiagram = diagramType === 'flowchart';
+  const panExcluded = editMode && (isSequenceDiagram || isFlowchartDiagram) && !!onSelect;
+  const panExclusions = isFlowchartDiagram ? NODE_PAN_EXCLUSIONS : PARTICIPANT_PAN_EXCLUSIONS;
 
   const dragRef = useRef<DragState | null>(null);
   const suppressClickRef = useRef(false);
+  // Screen positions of the movable elements of the currently rendered SVG,
+  // captured before each re-render for the FLIP transition animation.
+  const prevMovableRef = useRef<MovableSnapshot | null>(null);
   // Cached screen info, computed once on mouse-down (the diagram does not
   // re-render during a drag, so participant/message positions are stable).
   const screenCacheRef = useRef<{
@@ -115,6 +305,12 @@ export default function DiagramViewer({
   }, [theme]);
 
   useEffect(() => {
+    // Capture the movable elements' screen positions while the OLD SVG is
+    // still in the DOM (svgStr lags one render behind), for the FLIP
+    // transition animation once the new render lands.
+    prevMovableRef.current = captureMovableSnapshot(
+      document.getElementById('diagram-container')?.querySelector('svg') ?? null
+    );
     let isMounted = true;
     const renderDiagram = async () => {
       try {
@@ -138,11 +334,36 @@ export default function DiagramViewer({
     };
     if (code) {
       renderDiagram();
+    } else {
+      // No diagram to show (e.g. the active directory has no .mmd files, or
+      // the directory was just switched): drop the previous render instead of
+      // leaving the old diagram on screen.
+      setSvgStr('');
+      setError(null);
     }
     return () => {
       isMounted = false;
     };
   }, [code, theme, arrowStyles, nodeColors]);
+
+  // FLIP transition animation: when a re-render moves elements (e.g. after a
+  // drag-reorder), animate the moved ones from their previous screen positions
+  // to the new ones. Skipped when the element id sets changed (file switch,
+  // add, delete) or when nothing moved.
+  useEffect(() => {
+    const prev = prevMovableRef.current;
+    prevMovableRef.current = null;
+    if (!prev || !svgStr) return;
+    if (typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const svg = document.getElementById('diagram-container')?.querySelector('svg');
+    if (!svg) return;
+    const next = captureMovableSnapshot(svg);
+    if (!next) return;
+    if (!sameIdSet(prev.participantIds, next.participantIds)) return;
+    if (!sameIdSet(prev.nodeIds, next.nodeIds)) return;
+    animateMovedElements(svg, prev.positions);
+  }, [svgStr]);
 
   useEffect(() => {
     if (svgStr && searchQuery) {
@@ -188,6 +409,11 @@ export default function DiagramViewer({
   //     message: drag to another participant and release to connect. A drag
   //     line follows the cursor and a green horizontal indicator shows the
   //     vertical insertion point (top / between messages / bottom).
+  // Flowchart diagrams:
+  //   - Node box (g.node) → node drag: release over another node to connect
+  //     them (a drag line follows the cursor), release over empty space to
+  //     move the node (a dashed indicator shows the insertion position along
+  //     the layout axis — horizontal for TD/BT, vertical for LR/RL).
 
   const getSvgAndModel = () => {
     const container = document.getElementById('diagram-container');
@@ -197,17 +423,17 @@ export default function DiagramViewer({
   };
 
   // Capture phase: stopPropagation prevents TransformWrapper from starting a
-  // pan when the press is on a participant element (or near a lifeline).
+  // pan when the press is on a participant/node element (or near a lifeline).
   const handleMouseDownCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (!editMode || e.button !== 0) return;
     const ctx = getSvgAndModel();
-    if (!ctx || ctx.model.type !== 'sequence') return;
+    if (!ctx || (ctx.model.type !== 'sequence' && ctx.model.type !== 'flowchart')) return;
     if (!onSelect) return;
 
     const target = e.target as Element;
     const key = elementKeyAtTarget(target, ctx.svgRoot, ctx.model);
 
-    let dragType: 'reorder' | 'message' | null = null;
+    let dragType: 'reorder' | 'message' | 'node' | null = null;
     let participantKey: string | null = null;
     let cachedParticipants: ParticipantScreenInfo[] | null = null;
 
@@ -218,9 +444,13 @@ export default function DiagramViewer({
         const isLifeline = target.closest('line.actor-line') !== null;
         dragType = isLifeline ? 'message' : 'reorder';
         participantKey = key;
+      } else if (el?.kind === 'node') {
+        // Flowchart node box → node drag (connect or move).
+        dragType = 'node';
+        participantKey = key;
       }
-      // Messages / notes: no drag — the click handler manages selection.
-    } else {
+      // Messages / edges / notes: no drag — the click handler manages selection.
+    } else if (ctx.model.type === 'sequence') {
       // Empty space: check proximity to a lifeline for a message drag.
       cachedParticipants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
       const nearest = nearestParticipantAtX(cachedParticipants, e.clientX);
@@ -245,17 +475,27 @@ export default function DiagramViewer({
     e.stopPropagation();
     e.preventDefault();
 
-    const participant = ctx.model.elements.find(e2 => e2.key === participantKey) as ParticipantElement;
+    const draggedEl = ctx.model.elements.find(e2 => e2.key === participantKey);
+    const participantId =
+      draggedEl && (draggedEl.kind === 'participant' || draggedEl.kind === 'node')
+        ? draggedEl.id
+        : '';
 
     screenCacheRef.current = {
-      participants: cachedParticipants ?? getParticipantScreenInfo(ctx.svgRoot, ctx.model),
-      messages: getMessageScreenInfo(ctx.svgRoot, ctx.model),
+      participants: cachedParticipants ?? (
+        ctx.model.type === 'flowchart'
+          ? getNodeScreenInfo(ctx.svgRoot, ctx.model)
+          : getParticipantScreenInfo(ctx.svgRoot, ctx.model)
+      ),
+      messages: ctx.model.type === 'sequence'
+        ? getMessageScreenInfo(ctx.svgRoot, ctx.model)
+        : [],
     };
 
     dragRef.current = {
       type: dragType,
       participantKey,
-      participantId: participant.id,
+      participantId,
       startX: e.clientX,
       startY: e.clientY,
       isDragging: false,
@@ -265,10 +505,11 @@ export default function DiagramViewer({
       toParticipantKey: null,
       toParticipantId: null,
       insertPosition: null,
+      flowMode: null,
     };
     suppressClickRef.current = false;
 
-    // Select the participant on press.
+    // Select the participant/node on press.
     onSelect(participantKey);
   };
 
@@ -281,36 +522,9 @@ export default function DiagramViewer({
 
     if (drag.type === 'reorder') {
       // Participants sorted by screen X (left-to-right = source order).
-      const sorted = [...cache.participants].sort((a, b) => a.centerX - b.centerX);
-      const remaining = sorted.filter(p => p.key !== drag.participantKey);
-      // Find the gap where the cursor X falls.
-      let beforeKey: string | null = null;
-      let indicatorX: number | null = null;
-      if (remaining.length === 0) {
-        indicatorX = null;
-      } else if (drag.currentX < remaining[0].centerX) {
-        beforeKey = remaining[0].key;
-        indicatorX = remaining[0].left;
-      } else if (drag.currentX > remaining[remaining.length - 1].centerX) {
-        beforeKey = null; // move to end
-        indicatorX = remaining[remaining.length - 1].right + 15;
-      } else {
-        // Cursor is within the span of the remaining participants: insert
-        // before the first remaining participant whose center is past the cursor.
-        const nextP = remaining.find(p => drag.currentX < p.centerX);
-        if (nextP) {
-          beforeKey = nextP.key;
-          const idx = remaining.indexOf(nextP);
-          indicatorX =
-            idx > 0
-              ? (remaining[idx - 1].centerX + nextP.centerX) / 2
-              : nextP.left;
-        } else {
-          // Cursor at/past the last participant's center: move to end.
-          beforeKey = null;
-          indicatorX = remaining[remaining.length - 1].right + 15;
-        }
-      }
+      const { beforeKey, indicator } = computeReorderDrop(
+        cache.participants, drag.participantKey, drag.currentX, 'x'
+      );
       drag.targetBeforeKey = beforeKey;
       // Vertical extent: from top of participant boxes to bottom of the SVG.
       const y1 = Math.min(...cache.participants.map(p => p.top));
@@ -318,9 +532,87 @@ export default function DiagramViewer({
       const y2 = svgRect ? svgRect.bottom : y1 + 400;
       return {
         type: 'reorder',
-        reorderX: indicatorX,
+        reorderX: indicator,
         reorderY1: y1,
         reorderY2: y2,
+        reorderY: null,
+        reorderX1: 0,
+        reorderX2: 0,
+        lineX1: 0, lineY1: 0, lineX2: 0, lineY2: 0,
+        insertY: null, insertX1: 0, insertX2: 0,
+        hasTarget: true,
+      };
+    }
+
+    if (drag.type === 'node') {
+      const axis = flowAxisOf(code);
+      const cursorCoord = axis === 'x' ? drag.currentX : drag.currentY;
+      // Connect: the cursor is over another node (padded hit area).
+      const connectTarget = cache.participants.find(p =>
+        p.key !== drag.participantKey &&
+        drag.currentX >= p.left - 20 && drag.currentX <= p.right + 20 &&
+        drag.currentY >= p.top - 20 && drag.currentY <= p.bottom + 20
+      ) ?? null;
+      if (connectTarget) {
+        drag.flowMode = 'connect';
+        drag.toParticipantKey = connectTarget.key;
+        drag.toParticipantId = connectTarget.id;
+        drag.targetBeforeKey = null;
+        return {
+          type: 'message',
+          reorderX: null,
+          reorderY1: 0,
+          reorderY2: 0,
+          reorderY: null,
+          reorderX1: 0,
+          reorderX2: 0,
+          lineX1: source.centerX,
+          lineY1: source.centerY,
+          lineX2: drag.currentX,
+          lineY2: drag.currentY,
+          insertY: null,
+          insertX1: 0,
+          insertX2: 0,
+          hasTarget: true,
+        };
+      }
+      // Move: dashed insertion indicator along the layout axis.
+      drag.flowMode = 'move';
+      drag.toParticipantKey = null;
+      drag.toParticipantId = null;
+      const { beforeKey, indicator } = computeReorderDrop(
+        cache.participants, drag.participantKey, cursorCoord, axis
+      );
+      drag.targetBeforeKey = beforeKey;
+      const svgRect = document.getElementById('diagram-container')?.getBoundingClientRect();
+      if (axis === 'x') {
+        // Vertical extent: from top of the node boxes to bottom of the SVG.
+        const y1 = Math.min(...cache.participants.map(p => p.top));
+        const y2 = svgRect ? svgRect.bottom : y1 + 400;
+        return {
+          type: 'reorder',
+          reorderX: indicator,
+          reorderY1: y1,
+          reorderY2: y2,
+          reorderY: null,
+          reorderX1: 0,
+          reorderX2: 0,
+          lineX1: 0, lineY1: 0, lineX2: 0, lineY2: 0,
+          insertY: null, insertX1: 0, insertX2: 0,
+          hasTarget: true,
+        };
+      }
+      // Horizontal extent: from left of the node boxes to right of the SVG.
+      const x1 = Math.min(...cache.participants.map(p => p.left));
+      const x2 = svgRect ? svgRect.right : x1 + 400;
+      return {
+        type: 'reorder',
+        reorderX: null,
+        reorderY1: 0,
+        reorderY2: 0,
+        reorderY: indicator,
+        reorderX1: x1,
+        reorderX2: x2,
         lineX1: 0, lineY1: 0, lineX2: 0, lineY2: 0,
         insertY: null, insertX1: 0, insertX2: 0,
         hasTarget: true,
@@ -377,6 +669,9 @@ export default function DiagramViewer({
       reorderX: null,
       reorderY1: 0,
       reorderY2: 0,
+      reorderY: null,
+      reorderX1: 0,
+      reorderX2: 0,
       lineX1: x1,
       lineY1: y1,
       lineX2: x2,
@@ -423,6 +718,19 @@ export default function DiagramViewer({
           // handles no-ops (e.g. already at end).
           onMoveParticipant(drag.participantKey, drag.targetBeforeKey);
         }
+      } else if (drag.type === 'node') {
+        if (drag.flowMode === 'connect') {
+          // Released over another node: create an edge between them.
+          if (onCreateMessageDrag && drag.toParticipantKey) {
+            onCreateMessageDrag(drag.participantKey, drag.toParticipantKey, { type: 'bottom' });
+          }
+        } else if (drag.flowMode === 'move') {
+          // Released over empty space: reorder the node. targetBeforeKey ===
+          // null means "move to end"; the transform handles no-ops.
+          if (onMoveParticipant && drag.targetBeforeKey !== undefined) {
+            onMoveParticipant(drag.participantKey, drag.targetBeforeKey);
+          }
+        }
       } else {
         // Message drag: only create when released over a different participant.
         if (onCreateMessageDrag && drag.toParticipantKey && drag.insertPosition) {
@@ -468,10 +776,16 @@ export default function DiagramViewer({
         onMouseDownCapture={handleMouseDownCapture}
       >
         <TransformWrapper
-          panning={panExcluded ? { excluded: PARTICIPANT_PAN_EXCLUSIONS } : undefined}
+          panning={panExcluded ? { excluded: panExclusions } : undefined}
         >
           <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full flex items-center justify-center p-8">
-            {svgStr && <div dangerouslySetInnerHTML={{ __html: svgStr }} />}
+            {svgStr
+              ? <div dangerouslySetInnerHTML={{ __html: svgStr }} />
+              : !code && !error && (
+                <div className="text-sm text-gray-400 select-none" data-testid="no-diagram">
+                  No diagram selected
+                </div>
+              )}
           </TransformComponent>
         </TransformWrapper>
       </div>
@@ -488,6 +802,18 @@ export default function DiagramViewer({
               y1={dragOverlay.reorderY1}
               x2={dragOverlay.reorderX}
               y2={dragOverlay.reorderY2}
+              stroke="#3b82f6"
+              strokeWidth={2}
+              strokeDasharray="6 4"
+            />
+          )}
+          {dragOverlay.type === 'reorder' && dragOverlay.reorderY !== null && (
+            <line
+              data-testid="reorder-indicator-h"
+              x1={dragOverlay.reorderX1}
+              y1={dragOverlay.reorderY}
+              x2={dragOverlay.reorderX2}
+              y2={dragOverlay.reorderY}
               stroke="#3b82f6"
               strokeWidth={2}
               strokeDasharray="6 4"

@@ -12,7 +12,7 @@ import { parseModel, ModelElement } from '@/lib/model';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  EditResult, ArrowStylePatch, MessageInsertPosition,
+  moveNode, EditResult, ArrowStylePatch, MessageInsertPosition,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
 import { buildSelectionMap } from '@/lib/svgmap';
@@ -35,6 +35,7 @@ export default function ClientPage() {
   const searchParams = useSearchParams();
 
   const [files, setFiles] = useState<string[]>([]);
+  const [filesError, setFilesError] = useState<string | null>(null);
   const [rawCode, setRawCode] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
 
@@ -88,6 +89,13 @@ export default function ClientPage() {
       } catch {}
     }
   }, []);
+
+  // Keep the directory input in sync with the active directory: the URL can
+  // change without the form (browser back/forward, a pasted link, a recent
+  // directory click), and the input must show the directory actually loaded.
+  useEffect(() => {
+    setCustomDirInput(dirParam);
+  }, [dirParam]);
 
   const handleDirSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,12 +207,24 @@ export default function ClientPage() {
       .then(r => r.json())
       .then(data => {
         if (ignore) return;
+        if (data.error) {
+          // Unreadable directory: say why instead of silently emptying the list.
+          setFiles([]);
+          setFilesError(data.error);
+          return;
+        }
+        setFilesError(null);
         setFiles(data.files || []);
         if (!currentFile && data.files && data.files.length > 0) {
           const params = new URLSearchParams(searchParams.toString());
           params.set('file', data.files[0]);
           router.replace(`${pathname}?${params.toString()}`, { scroll: false });
         }
+      })
+      .catch(() => {
+        if (ignore) return;
+        setFiles([]);
+        setFilesError('Failed to read directory');
       });
     return () => { ignore = true; };
   }, [currentFile, pathname, router, searchParams, dirParam, refreshKey]);
@@ -410,12 +430,30 @@ export default function ClientPage() {
 
   // --- Drag callbacks (processed keys -> raw keys via the selection map) ---
 
-  // DiagramViewer drag: reorder a participant. beforeKey is the processed key
-  // of the participant to insert before, or null to move to the end. The drop
-  // is computed in rendered order, so resolve it against the raw code through
-  // the processing pipeline: transformActors regroups participants into color
-  // boxes, so rendered order is not the raw declaration order.
+  // DiagramViewer drag: reorder a participant (sequence) or a node (flowchart).
+  // beforeKey is the processed key of the element to insert before, or null
+  // to move to the end.
   const handleMoveParticipant = (processedKey: string, beforeProcessedKey: string | null) => {
+    if (rawModel.type === 'flowchart') {
+      // Flowchart nodes: map the processed keys to raw node keys and move the
+      // node's declaration. transformActors only hides/renames flowchart
+      // actors (it never reorders them), so the rendered order is the raw
+      // declaration order and a direct raw move is exact.
+      const fromRaw = selectionMap.get(processedKey);
+      if (!fromRaw || fromRaw.kind !== 'node') return;
+      let beforeRaw: ModelElement | undefined;
+      if (beforeProcessedKey !== null) {
+        const b = selectionMap.get(beforeProcessedKey);
+        if (!b || b.kind !== 'node') return;
+        beforeRaw = b;
+      }
+      applyEditResult(moveNode(rawCode, viewsData, fromRaw.key, beforeRaw?.key));
+      return;
+    }
+    // Sequence participants: the drop is computed in rendered order, so
+    // resolve it against the raw code through the processing pipeline:
+    // transformActors regroups participants into color boxes, so rendered
+    // order is not the raw declaration order.
     applyEditResult(resolveParticipantReorder(
       rawCode,
       processedCode,
@@ -826,6 +864,14 @@ export default function ClientPage() {
                 <Plus size={12} /> New
               </button>
             </h2>
+            {filesError && (
+              <p className="text-xs text-red-600 mb-1" data-testid="files-error">
+                {filesError}{dirParam ? `: ${dirParam}` : ''}
+              </p>
+            )}
+            {!filesError && files.length === 0 && (
+              <p className="text-xs text-gray-400 italic mb-1">No .mmd files in this directory</p>
+            )}
             <ul className="space-y-1">
               {files.map(f => (
                 <li key={f}>

@@ -310,7 +310,7 @@ describe('zip + click against real mermaid renders', () => {
 // --- Screen-coordinate helpers for drag interactions ------------------------
 
 import {
-  getParticipantScreenInfo, getMessageScreenInfo, nearestParticipantAtX,
+  getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, nearestParticipantAtX,
   ParticipantScreenInfo,
 } from './svgmap';
 
@@ -359,6 +359,42 @@ describe('getParticipantScreenInfo', () => {
     const info = getParticipantScreenInfo(svg, model);
     expect(info).toHaveLength(3); // D has no SVG element, skipped
     expect(info.map(p => p.id)).toEqual(['A', 'B', 'C']);
+  });
+});
+
+describe('getNodeScreenInfo', () => {
+  const mockFlowRects = (svg: Element) => {
+    const byId = new Map<string, Element>();
+    svg.querySelectorAll('g.node[id]').forEach(g => {
+      const id = g.getAttribute('id') ?? '';
+      const m = id.match(/-flowchart-(.+)-\d+$/);
+      if (m) byId.set(m[1], g);
+    });
+    mockRect(byId.get('A')!, 0, 10, 100, 40);
+    mockRect(byId.get('B')!, 150, 10, 100, 40);
+    mockRect(byId.get('C')!, 300, 10, 100, 40);
+  };
+
+  it('returns screen rects of flowchart nodes in model (source) order', () => {
+    const svg = parseSvg(FLOW_SVG);
+    mockFlowRects(svg);
+    const info = getNodeScreenInfo(svg, flowModel());
+    expect(info).toHaveLength(3);
+    expect(info.map(n => n.id)).toEqual(['A', 'B', 'C']);
+    expect(info.map(n => n.key)).toEqual(['n:0', 'n:1', 'n:2']);
+    expect(info[0]).toMatchObject({ left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 });
+    expect(info[1]).toMatchObject({ left: 150, right: 250, centerX: 200 });
+    expect(info[2]).toMatchObject({ left: 300, right: 400, centerX: 350 });
+  });
+
+  it('skips nodes with no SVG counterpart', () => {
+    const svg = parseSvg(FLOW_SVG);
+    mockFlowRects(svg);
+    // Model claims a 4th node the SVG doesn't have
+    const model = parseModel(FLOW_CODE + '\n    D[Extra]');
+    const info = getNodeScreenInfo(svg, model);
+    expect(info).toHaveLength(3); // D has no SVG element, skipped
+    expect(info.map(n => n.id)).toEqual(['A', 'B', 'C']);
   });
 });
 

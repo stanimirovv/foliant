@@ -612,4 +612,438 @@ describe('DiagramViewer pan exclusion (participant drag)', () => {
     // No edit mode → no exclusion → component renders normally
     expect(container.querySelector('.react-transform-wrapper')).toBeTruthy();
   });
+
+  it('clears the previous diagram when the code becomes empty (e.g. an empty directory)', async () => {
+    const { container, rerender } = render(<DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />);
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+    });
+
+    rerender(<DiagramViewer code="" searchQuery="" theme="default" />);
+
+    // the stale SVG is dropped and an empty-state placeholder shows instead
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeNull();
+    });
+    expect(container.querySelector('[data-testid="no-diagram"]')?.textContent).toBe('No diagram selected');
+  });
+});
+
+// --- Flowchart node drag (connect + move) ------------------------------------
+
+// Mock screen rects for the FLOW fixture: nodes A(0), B(150), C(300) at the
+// top (same geometry as the sequence fixture).
+function mockFlowScreenRects(container: HTMLElement) {
+  const svg = container.querySelector('#diagram-container svg');
+  if (!svg) return;
+  const byId = new Map<string, Element>();
+  svg.querySelectorAll('g.node[id]').forEach(g => {
+    const id = g.getAttribute('id') ?? '';
+    const m = id.match(/-flowchart-(.+)-\d+$/);
+    if (m) byId.set(m[1], g);
+  });
+  mockRect(byId.get('A')!, 0, 10, 100, 40);
+  mockRect(byId.get('B')!, 150, 10, 100, 40);
+  mockRect(byId.get('C')!, 300, 10, 100, 40);
+  // container rect for the reorder indicator extent
+  const diagramContainer = container.querySelector('#diagram-container') as HTMLElement;
+  if (diagramContainer) mockRect(diagramContainer, 0, 0, 500, 400);
+}
+
+// The node group for a node id, by the fixture's id suffix (-A-0, -B-1, -C-7).
+const flowNodeOf = (container: HTMLElement, suffix: string) =>
+  container.querySelector(`g.node[id$="${suffix}"]`) as Element;
+
+describe('DiagramViewer flowchart node drag', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('dragging a node onto another node fires onCreateMessageDrag', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={onSelect} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    // Press node A, drag onto node B's box
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    expect(onSelect).toHaveBeenCalledWith('n:0');
+
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 30 }); // over B (150-250)
+    await waitFor(() => expect(container.querySelector('[data-testid="message-drag-line"]')).toBeTruthy());
+
+    fireEvent.mouseUp(window, { clientX: 200, clientY: 30 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith('n:0', 'n:1', { type: 'bottom' });
+    expect(onMoveParticipant).not.toHaveBeenCalled();
+  });
+
+  it('dragging a node into empty space fires onMoveParticipant (reorder)', async () => {
+    const onMoveParticipant = vi.fn();
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    // Press node C, drag to the far left (before A)
+    fireEvent.mouseDown(flowNodeOf(container, '-C-7'), { button: 0, clientX: 350, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: -50, clientY: 200 });
+    await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
+
+    fireEvent.mouseUp(window, { clientX: -50, clientY: 200 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:2', 'n:0'); // move C before A
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+  });
+
+  it('dragging a node past the last node moves it to the end', async () => {
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    // Press node A, drag right past C
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 500, clientY: 200 });
+    fireEvent.mouseUp(window, { clientX: 500, clientY: 200 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', null); // move A to end
+  });
+
+  it('dragging a node into the gap between two nodes inserts before the right one', async () => {
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    // Press node A, drag to X=300: past B's center (200), before C's center (350)
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 300, clientY: 200 });
+    fireEvent.mouseUp(window, { clientX: 300, clientY: 200 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2'); // move A before C
+  });
+
+  it('releasing a node drag over the same node does not create a connection', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    // Press A, drag a little — still within A's own (padded) box: no connect target
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 70, clientY: 40 });
+    fireEvent.mouseUp(window, { clientX: 70, clientY: 40 });
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+  });
+
+  it('a plain click on a node (no drag) does not fire drag callbacks', async () => {
+    const onMoveParticipant = vi.fn();
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseUp(window, { clientX: 50, clientY: 30 }); // no movement
+    expect(onMoveParticipant).not.toHaveBeenCalled();
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+  });
+
+  it('does not pan the screen when dragging a node in edit mode', async () => {
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={() => {}}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    const component = container.querySelector('.react-transform-component') as HTMLElement;
+    const initialTransform = component.style.transform;
+
+    // Mouse down on a node and drag — should start a drag, not pan
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 200 });
+    fireEvent.mouseUp(window, { clientX: 200, clientY: 200 });
+
+    // The transform should not have changed — panning was excluded
+    expect(component.style.transform).toBe(initialTransform);
+  });
+});
+
+// --- Transition animation (FLIP) ---------------------------------------------
+
+describe('DiagramViewer transition animation (FLIP)', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  // Prototype-level rect mock: each render generation (svg id) gets its own
+  // layout, so the capture (old SVG) and the animation effect (new SVG) see
+  // different positions. Keys are participant/node ids (data-id or name).
+  const setupLayoutMock = (layouts: Record<string, number>[]) => {
+    const seenSvgIds: string[] = [];
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      // The svg root reports its viewBox size so the viewBox scale factor
+      // in contentScaleOf stays 1.
+      if (this.tagName.toLowerCase() === 'svg') {
+        const vb = (this.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number);
+        const w = vb.length === 4 && vb[2] > 0 ? vb[2] : 100;
+        const h = vb.length === 4 && vb[3] > 0 ? vb[3] : 40;
+        return {
+          left: 0, top: 0, width: w, height: h,
+          right: w, bottom: h, x: 0, y: 0,
+          toJSON: () => ({}),
+        };
+      }
+      const svg = this.closest('svg');
+      const svgId = svg?.getAttribute('id') ?? '';
+      let gen = seenSvgIds.indexOf(svgId);
+      if (gen < 0) {
+        seenSvgIds.push(svgId);
+        gen = seenSvgIds.length - 1;
+      }
+      const layout = layouts[Math.min(gen, layouts.length - 1)];
+      // Participants/lifelines carry data-id, bottom boxes/men carry name,
+      // flowchart node groups carry the id in their id attribute.
+      const rawId = this.getAttribute('data-id') ?? this.getAttribute('name') ?? this.getAttribute('id') ?? '';
+      const nodeMatch = rawId.match(/-flowchart-(.+)-\d+$/);
+      const id = nodeMatch ? nodeMatch[1] : rawId;
+      const x = layout[id] ?? 0;
+      return {
+        left: x, top: 10, width: 100, height: 40,
+        right: x + 100, bottom: 50, x, y: 10,
+        toJSON: () => ({}),
+      };
+    };
+    return () => {
+      Element.prototype.getBoundingClientRect = original;
+    };
+  };
+
+  const installAnimateMock = () => {
+    const animateMock = vi.fn();
+    (Element.prototype as unknown as { animate: unknown }).animate = animateMock;
+    return animateMock;
+  };
+  const uninstallAnimateMock = () => {
+    delete (Element.prototype as unknown as { animate?: unknown }).animate;
+  };
+
+  it('animates moved participants from their old positions after a reorder', async () => {
+    const animateMock = installAnimateMock();
+    const restore = setupLayoutMock([
+      { A: 0, B: 150, C: 300 },  // before: A, B, C left-to-right
+      { C: 0, B: 150, A: 300 },  // after reorder: C, B, A
+    ]);
+    try {
+      const REORDERED = `sequenceDiagram
+    participant C
+    participant B
+    participant A
+    A->>B: m1
+    B-->>A: m2
+    Note over A,C: Shared
+    A->>A: m3
+    A->>C: m4`;
+      const { container, rerender } = render(
+        <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+      );
+      await waitFor(() => {
+        expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+      });
+      // let the first render's effects settle (no animation on mount)
+      await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+      animateMock.mockClear();
+
+      rerender(
+        <DiagramViewer code={REORDERED} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+      );
+      await waitFor(() => expect(animateMock).toHaveBeenCalled());
+
+      const starts = animateMock.mock.calls.map(c => c[0][0].transform as string);
+      // C moved from x=300 to x=0: the animation starts at +300
+      expect(starts).toContain('translate(300px, 0px)');
+      // A moved from x=0 to x=300: the animation starts at -300
+      expect(starts).toContain('translate(-300px, 0px)');
+      // every animation glides to the element's base transform
+      animateMock.mock.calls.forEach(c => {
+        expect(c[0][1].transform).toBe('translate(0px, 0px)');
+        expect(c[1]).toMatchObject({ duration: 400, easing: 'ease-out' });
+      });
+      // A and C each contribute a participant group, a lifeline and a bottom
+      // box; B did not move, so it is never animated.
+      expect(animateMock.mock.calls).toHaveLength(6);
+    } finally {
+      restore();
+      uninstallAnimateMock();
+    }
+  });
+
+  it('does not animate when nothing moved (same ids, same positions)', async () => {
+    const animateMock = installAnimateMock();
+    const restore = setupLayoutMock([
+      { A: 0, B: 150, C: 300 },
+      { A: 0, B: 150, C: 300 },
+    ]);
+    try {
+      const { container, rerender } = render(
+        <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+      );
+      await waitFor(() => {
+        expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+      });
+      await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+      animateMock.mockClear();
+
+      // a comment-only edit: same elements, same positions
+      rerender(
+        <DiagramViewer code={`${SEQ_CODE}\n    %% a comment`} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+      );
+      await waitFor(() => {
+        expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+      });
+      await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+      expect(animateMock).not.toHaveBeenCalled();
+    } finally {
+      restore();
+      uninstallAnimateMock();
+    }
+  });
+
+  it('does not animate when the element ids change (participant added)', async () => {
+    const defaultImpl = renderMock.getMockImplementation()!;
+    // The second render adds a participant D to the SVG fixture.
+    const SEQ_SVG_WITH_D = SEQ_SVG.replace(
+      '</svg>',
+      '<g id="root-3" data-et="participant" data-type="participant" data-id="D"><rect class="actor actor-top" name="D"></rect><text class="actor actor-box"><tspan>D</tspan></text></g></svg>'
+    );
+    renderMock.mockImplementation(async (id: string, code: string) => {
+      if (code.includes('participant D')) {
+        return { svg: SEQ_SVG_WITH_D.replaceAll('fx-seq', id) };
+      }
+      return defaultImpl(id, code);
+    });
+    const animateMock = installAnimateMock();
+    const restore = setupLayoutMock([
+      { A: 0, B: 150, C: 300 },
+      { A: 0, B: 150, C: 300, D: 450 },
+    ]);
+    try {
+      const { container, rerender } = render(
+        <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+      );
+      await waitFor(() => {
+        expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+      });
+      await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+      animateMock.mockClear();
+
+      rerender(
+        <DiagramViewer code={`${SEQ_CODE}\n    participant D`} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+      );
+      await waitFor(() => {
+        expect(container.querySelector('g[data-et="participant"][data-id="D"]')).toBeTruthy();
+      });
+      await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+      // The id sets differ (D is new): no cross-element animation.
+      expect(animateMock).not.toHaveBeenCalled();
+    } finally {
+      restore();
+      uninstallAnimateMock();
+      renderMock.mockImplementation(defaultImpl);
+    }
+  });
+
+  it('folds the node group transform attribute into the animation keyframes (flowchart)', async () => {
+    const defaultImpl = renderMock.getMockImplementation()!;
+    // Fixture variant: node groups carry a base translate like real mermaid output.
+    const FLOW_SVG_TRANSLATED = FLOW_SVG
+      .replace('<g class="node default" id="fx-flow-flowchart-A-0">', '<g class="node default" id="fx-flow-flowchart-A-0" transform="translate(100, 50)">')
+      .replace('<g class="node default" id="fx-flow-flowchart-B-1">', '<g class="node default" id="fx-flow-flowchart-B-1" transform="translate(100, 110)">')
+      .replace('<g class="node default" id="fx-flow-flowchart-C-7">', '<g class="node default" id="fx-flow-flowchart-C-7" transform="translate(240, 50)">');
+    renderMock.mockImplementation(async (id: string, code: string) => {
+      const isFlow = /^\s*(flowchart|graph)\b/m.test(code);
+      const fixture = isFlow ? FLOW_SVG_TRANSLATED : SEQ_SVG;
+      return { svg: fixture.replaceAll('fx-seq', id).replaceAll('fx-flow', id) };
+    });
+    const animateMock = installAnimateMock();
+    // Layouts are screen rects of the node groups; the mock serves left=x.
+    const restore = setupLayoutMock([
+      { A: 100, B: 100, C: 240 },
+      { A: 240, B: 100, C: 100 }, // after reorder: C, B, A left-to-right
+    ]);
+    try {
+      const REORDERED_FLOW = `flowchart TD\n    C[Charlie]\n    A[Alice] --> B[Bob]`;
+      const { container, rerender } = render(
+        <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+      );
+      await waitFor(() => {
+        expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+      });
+      await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+      animateMock.mockClear();
+
+      rerender(
+        <DiagramViewer code={REORDERED_FLOW} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+      );
+      await waitFor(() => expect(animateMock).toHaveBeenCalled());
+
+      // Node A moved from x=100 to x=240 (dx=-140): the keyframes fold in the
+      // base translate(100, 50) from the transform attribute.
+      const aCall = animateMock.mock.calls.find(c =>
+        c[0][0].transform === 'translate(-40px, 50px)'
+      );
+      expect(aCall).toBeTruthy();
+      expect(aCall![0][1].transform).toBe('translate(100px, 50px)');
+      // Node C moved from x=240 to x=100 (dx=+140), base translate(240, 50).
+      const cCall = animateMock.mock.calls.find(c =>
+        c[0][0].transform === 'translate(380px, 50px)'
+      );
+      expect(cCall).toBeTruthy();
+      expect(cCall![0][1].transform).toBe('translate(240px, 50px)');
+    } finally {
+      restore();
+      uninstallAnimateMock();
+      renderMock.mockImplementation(defaultImpl);
+    }
+  });
 });

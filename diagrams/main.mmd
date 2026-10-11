@@ -1,10 +1,9 @@
-%% CONFIG: {"version":1,"views":[{"name":"Happy Path","hiddenPaths":["flow=login/edge-case=invalid-password","flow=login/note"]}],"actors":{"Auth":{"color":"red","keys":["backend"]},"DB":{"color":"red","keys":["backend","database"]},"API":{"color":"blue","keys":["backend","gateway"]},"New1":{"color":"red"}}}
+%% CONFIG: {"version":1,"views":[{"name":"Happy Path","hiddenPaths":["flow=login/edge-case=invalid-password","flow=login/note"]}],"actors":{"Auth":{"color":"red","keys":["backend"]},"DB":{"color":"red","keys":["backend","database"]},"API":{"color":"blue","keys":["backend","gateway"]}}}
 sequenceDiagram
     participant C as Client
     participant API as API Gateway
     participant Auth as Auth Service
     participant DB as Database
-    participant New1 as New Participant
 
     %% @region-start: flow=login
     C->>API: POST /login

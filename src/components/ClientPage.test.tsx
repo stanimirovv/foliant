@@ -67,6 +67,18 @@ vi.mock('./DiagramViewer', () => ({
       >
         drag move participant to front
       </button>
+      <button
+        data-testid="drag-move-node"
+        onClick={() => props.onMoveParticipant?.('n:2', 'n:0')}
+      >
+        drag move node
+      </button>
+      <button
+        data-testid="drag-create-connection"
+        onClick={() => props.onCreateMessageDrag?.('n:0', 'n:1', { type: 'bottom' })}
+      >
+        drag create connection
+      </button>
     </div>
   ),
 }));
@@ -377,6 +389,59 @@ sequenceDiagram
     }, { timeout: 3000 });
     const input = await screen.findByDisplayValue('API Gateway');
     expect(input).toBeTruthy();
+  });
+
+  it('dragging a node reorders it in a flowchart diagram and keeps it selected', async () => {
+    const FLOW_DEMO = `flowchart TD
+    A[Alice] --> B[Bob]
+    B -->|Reply| C[Charlie]`;
+    const viewer = await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+
+    // Drag node C (n:2) before node A (n:0): C's declaration moves to the front
+    fireEvent.click(screen.getByTestId('drag-move-node'));
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('    C[Charlie]\n    A[Alice] --> B[Bob]');
+    }, { timeout: 3000 });
+    // The dragged node stays selected: C is now the first node (n:0)
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-selection')).toBe('n:0');
+    }, { timeout: 3000 });
+    const input = await screen.findByDisplayValue('Charlie');
+    expect(input).toBeTruthy();
+  });
+
+  it('dragging between nodes creates a connection in a flowchart diagram', async () => {
+    const FLOW_DEMO = `flowchart TD
+    A[Alice] --> B[Bob]
+    B -->|Reply| C[Charlie]`;
+    const viewer = await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+
+    // Drag from node A (n:0) to node B (n:1): appends an A --> B edge
+    fireEvent.click(screen.getByTestId('drag-create-connection'));
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('    A --> B');
+    }, { timeout: 3000 });
+    // the new edge is selected (e:2), as with sequence message drags
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-selection')).toBe('e:2');
+    }, { timeout: 3000 });
+  });
+
+  it('shows drag hints per diagram type', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+    expect(await screen.findByText(/Drag an actor box to reorder it/)).toBeTruthy();
+
+    cleanup();
+
+    const FLOW_DEMO = `flowchart TD
+    A[Alice] --> B[Bob]
+    B -->|Reply| C[Charlie]`;
+    await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+    expect(await screen.findByText(/Drag a node onto another node to connect them/)).toBeTruthy();
   });
 
   it('Add Message with a selected message inserts after it', async () => {
@@ -1151,4 +1216,50 @@ sequenceDiagram
     expect(screen.queryByTestId('new-diagram-dialog')).toBeNull();
     expect(postCalls()).toHaveLength(1);
   }, 10000);
+
+  it('shows an error when the directory cannot be read', async () => {
+    mockParams({ dir: '/bad/dir' });
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockResolvedValue({
+      json: async () => ({ error: 'Failed to read directory' })
+    });
+
+    render(<ClientPage />);
+
+    const err = await screen.findByTestId('files-error');
+    expect(err.textContent).toContain('Failed to read directory');
+    expect(err.textContent).toContain('/bad/dir');
+  });
+
+  it('shows a hint when the directory has no .mmd files', async () => {
+    mockParams({ dir: '/empty/dir' });
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockResolvedValue({
+      json: async () => ({ files: [] })
+    });
+
+    render(<ClientPage />);
+
+    expect(await screen.findByText('No .mmd files in this directory')).toBeTruthy();
+    expect(screen.queryByTestId('files-error')).toBeNull();
+  });
+
+  it('keeps the directory input in sync with the dir URL param', async () => {
+    mockParams({ dir: '/first/dir' });
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockResolvedValue({
+      json: async () => ({ files: [] })
+    });
+
+    const { rerender } = render(<ClientPage />);
+    expect((screen.getByPlaceholderText('Paste absolute path...') as HTMLInputElement).value).toBe('/first/dir');
+
+    // the URL changes without the form (back/forward, pasted link, recent click)
+    mockParams({ dir: '/second/dir' });
+    rerender(<ClientPage />);
+
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText('Paste absolute path...') as HTMLInputElement).value).toBe('/second/dir');
+    });
+  });
 });

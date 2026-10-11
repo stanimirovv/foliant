@@ -408,6 +408,30 @@ export function getParticipantScreenInfo(svg: Element, model: DiagramModel): Par
   return result;
 }
 
+// Screen rects of all flowchart nodes, in model (source) order. Same shape as
+// ParticipantScreenInfo; used by the node drag interactions.
+export function getNodeScreenInfo(svg: Element, model: DiagramModel): ParticipantScreenInfo[] {
+  const zip = zipModelToSvg(svg, model);
+  const nodes = ofKind<NodeElement>(model, 'node');
+  const result: ParticipantScreenInfo[] = [];
+  nodes.forEach((n, i) => {
+    const el = zip.nodes[i];
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    result.push({
+      key: n.key,
+      id: n.id,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+    });
+  });
+  return result;
+}
+
 export interface MessageScreenInfo {
   key: string;
   y: number;  // vertical center of the message line

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  moveParticipant, MessageInsertPosition,
+  moveParticipant, moveNode, MessageInsertPosition,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
@@ -510,6 +510,133 @@ describe('moveParticipant', () => {
     expect(lines[2]).toBe('    participant A as Alice');
     expect(lines[3]).toBe('    A->>B: hello');
     expect(lines[4]).toBe('    C->>A: hi');
+  });
+});
+
+describe('moveNode', () => {
+  // Mermaid lays same-rank nodes out in first-declaration order, so moving a
+  // node relocates its first declaration (see moveNode's doc comment).
+
+  it('moves a standalone-declared node to the end', () => {
+    const code = `flowchart TD\n    C[Standalone]\n    A[Alice] --> B[Bob]`;
+    // nodes: C(n:0, line 1), A(n:1, line 2), B(n:2, line 2)
+    const res = moveNode(code, null, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A[Alice] --> B[Bob]\n    C[Standalone]`);
+    expect(res.newKey).toBe('n:2');
+  });
+
+  it('moves an inline-declared node before another node (standalone decl inserted, edge line untouched)', () => {
+    const code = `flowchart TD\n    C[Standalone]\n    A[Alice] --> B[Bob]`;
+    // Move B (n:2, declared as B[Bob] on line 2's edge) before C (n:0)
+    const res = moveNode(code, null, 'n:2', 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    B[Bob]\n    C[Standalone]\n    A[Alice] --> B[Bob]`);
+    expect(res.newKey).toBe('n:0');
+  });
+
+  it('moves an inline-declared node to the end (all its mention lines move with it)', () => {
+    // FLOW: A is mentioned on lines 2, 3 and 4 (edge endpoints). Moving A to
+    // the end must relocate every one of them — the first mention decides the
+    // rendered position, so moving only line 2 would leave A behind.
+    const res = moveNode(FLOW, FLOW_CFG, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`%% CONFIG: {"version":1}
+flowchart TD
+    C[Standalone]
+    A[Alice] --> B[Bob]
+    B -->|Reply| A
+    A -- ping -- B`);
+    // CONFIG untouched, moved node keeps its id (keys are positional: A is now n:1)
+    expect(res.code.split('\n')[0]).toBe(FLOW.split('\n')[0]);
+    expect(res.newKey).toBe('n:1');
+    const el = parseModel(res.code).elements.find(e => e.key === res.newKey);
+    expect(el).toMatchObject({ kind: 'node', id: 'A' });
+  });
+
+  it('keeps the label when the node has several shaped declarations (move later)', () => {
+    // A is declared twice with shapes; the LAST one (A[Alicia]) is what Mermaid
+    // shows. The mention lines keep their relative order, so the label is kept.
+    const code = `flowchart TD\n    A[Alice] --> B\n    A[Alicia]\n    C`;
+    const res = moveNode(code, null, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    C\n    A[Alice] --> B\n    A[Alicia]`);
+  });
+
+  it('keeps the label when the last shaped declaration is on a relocated edge line', () => {
+    const code = `flowchart TD\n    A[Alicia]\n    A[Alice] --> B\n    C`;
+    // A's standalone line carries an earlier label; the edge line's A[Alice] is
+    // the last shaped declaration (what Mermaid shows). Move A to the end.
+    const res = moveNode(code, null, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    C\n    A[Alicia]\n    A[Alice] --> B`);
+  });
+
+  it('is a no-op when the node is already before the target', () => {
+    expect(moveNode(FLOW, FLOW_CFG, 'n:0', 'n:1').code).toBe(FLOW);
+  });
+
+  it('is a no-op when the node is already last (move to end)', () => {
+    expect(moveNode(FLOW, FLOW_CFG, 'n:2').code).toBe(FLOW);
+  });
+
+  it('is a no-op when moving before itself or onto its own edge line', () => {
+    expect(moveNode(FLOW, FLOW_CFG, 'n:0', 'n:0').code).toBe(FLOW);
+    // A and B share line 2 (A --> B): moving A before B is a no-op
+    const code = `flowchart TD\n    A --> B`;
+    expect(moveNode(code, null, 'n:0', 'n:1').code).toBe(code);
+  });
+
+  it('is a no-op with a single node', () => {
+    const code = `flowchart TD\n    A[Only]`;
+    expect(moveNode(code, null, 'n:0').code).toBe(code);
+  });
+
+  it('keeps a label that comes from a later declaration when moving earlier', () => {
+    // A's first appearance is a bare edge endpoint; the label comes from the
+    // later standalone declaration (Mermaid shows the last shaped one).
+    const code = `flowchart TD\n    A --> B\n    A[Alicia]\n    C`;
+    const res = moveNode(code, null, 'n:2', 'n:0'); // C before A
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    C\n    A --> B\n    A[Alicia]`);
+  });
+
+  it('preserves a trailing newline when moving to the end', () => {
+    const code = `flowchart TD\n    C\n    A --> B\n`;
+    const res = moveNode(code, null, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A --> B\n    C\n`);
+  });
+
+  it('refuses to move a node across a subgraph boundary', () => {
+    const code = `flowchart TD\n    A --> B\n    subgraph S\n        C\n    end`;
+    // C (n:2, inside S) before A (top level)
+    const res = moveNode(code, null, 'n:2', 'n:0');
+    expect(res.warning).toBeTruthy();
+    expect(res.code).toBe(code);
+  });
+
+  it('moves a top-level node to the end of a diagram with a subgraph', () => {
+    const code = `flowchart TD\n    A --> B\n    subgraph S\n        C\n    end`;
+    const res = moveNode(code, null, 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S\n        C\n    end\n    A --> B`);
+  });
+
+  it('moves nodes within a subgraph (indent preserved)', () => {
+    const code = `flowchart TD\n    subgraph S\n        A\n        B\n    end`;
+    const res = moveNode(code, null, 'n:1', 'n:0'); // B before A
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S\n        B\n        A\n    end`);
+  });
+
+  it('soft-fails on sequence diagrams, non-node keys and unknown keys', () => {
+    expect(moveNode(SEQ, SEQ_CFG, 'p:0').warning).toBeTruthy();
+    expect(moveNode(SEQ, SEQ_CFG, 'p:0').code).toBe(SEQ);
+    expect(moveNode(FLOW, FLOW_CFG, 'e:0').warning).toBeTruthy();
+    expect(moveNode(FLOW, FLOW_CFG, 'n:99').warning).toBeTruthy();
+    expect(moveNode(FLOW, FLOW_CFG, 'n:0', 'e:0').warning).toBeTruthy();
+    expect(moveNode(FLOW, FLOW_CFG, 'n:0', 'n:99').warning).toBeTruthy();
   });
 });
 
