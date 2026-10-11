@@ -21,8 +21,8 @@ interface DiagramViewerProps {
   editMode?: boolean;
   arrowStyles?: DiagramConfig | null;  // resolved config (rewriteArrowStyles); its arrows are applied
   nodeColors?: DiagramConfig | null;   // raw config; actors colors applied to flowchart nodes
-  selection?: string | null;           // selected processed element key
-  onSelect?: (key: string | null) => void;
+  selection?: string | string[] | null;           // selected processed element key(s)
+  onSelect?: (key: string | null, options?: { shiftKey?: boolean }) => void;
   // Drag callbacks (processed keys; ClientPage maps them to raw keys).
   // onMoveParticipant moves a participant (sequence) or a node (flowchart).
   onMoveParticipant?: (participantKey: string, beforeKey: string | null) => void;
@@ -174,11 +174,13 @@ function endpointHitAt(
   endpoints: MessageEndpointScreenInfo[],
   x: number,
   y: number,
-  selectedKey: string | null,
+  selectedKeys: string[] | string | null,
 ): { key: string; end: 'from' | 'to'; fixedX: number; fixedY: number } | null {
+  const isSelected = (k: string) =>
+    Array.isArray(selectedKeys) ? selectedKeys.includes(k) : selectedKeys === k;
   let best: { key: string; end: 'from' | 'to'; fixedX: number; fixedY: number; d: number } | null = null;
   for (const ep of endpoints) {
-    const radius = ep.key === selectedKey ? ENDPOINT_GRAB_RADIUS_SELECTED : ENDPOINT_GRAB_RADIUS;
+    const radius = isSelected(ep.key) ? ENDPOINT_GRAB_RADIUS_SELECTED : ENDPOINT_GRAB_RADIUS;
     const candidates = [
       { end: 'to' as const, x: ep.toX, y: ep.toY, fixedX: ep.fromX, fixedY: ep.fromY },
       { end: 'from' as const, x: ep.fromX, y: ep.fromY, fixedX: ep.toX, fixedY: ep.toY },
@@ -444,18 +446,27 @@ export default function DiagramViewer({
     }
   }, [svgStr, searchQuery]);
 
+  const selectedProcessedKeys = useMemo(() => {
+    if (!selection) return [];
+    if (Array.isArray(selection)) return selection;
+    return [selection];
+  }, [selection]);
+
   // Selection highlight: re-applied after every render via the zip (plan 4.7).
   // Coexists with the search highlight (different elements/properties).
   useEffect(() => {
     const container = document.getElementById('diagram-container');
     if (!container) return;
     container.querySelectorAll('.editor-selected').forEach(el => el.classList.remove('editor-selected'));
-    if (!editMode || !selection) return;
+    if (!editMode || selectedProcessedKeys.length === 0) return;
     const svgRoot = container.querySelector('svg');
     if (!svgRoot) return;
-    const el = svgElementForKey(svgRoot, parseModel(code), selection);
-    if (el) el.classList.add('editor-selected');
-  }, [svgStr, selection, editMode, code]);
+    const model = parseModel(code);
+    for (const key of selectedProcessedKeys) {
+      const el = svgElementForKey(svgRoot, model, key);
+      if (el) el.classList.add('editor-selected');
+    }
+  }, [svgStr, selectedProcessedKeys, editMode, code]);
 
   // --- Drag interactions (sequence diagrams, edit mode) -------------------
   // Spatial separation — the drag type is determined by WHERE the mouse is,
@@ -496,6 +507,11 @@ export default function DiagramViewer({
     if (!ctx || (ctx.model.type !== 'sequence' && ctx.model.type !== 'flowchart')) return;
     if (!onSelect) return;
 
+    if (e.shiftKey) {
+      e.stopPropagation();
+      return;
+    }
+
     const target = e.target as Element;
     const key = elementKeyAtTarget(target, ctx.svgRoot, ctx.model);
 
@@ -511,7 +527,7 @@ export default function DiagramViewer({
         getMessageEndpointScreenInfo(ctx.svgRoot, ctx.model),
         e.clientX,
         e.clientY,
-        selection,
+        selectedProcessedKeys,
       );
       if (endpointHit) {
         const msgEl = ctx.model.elements.find(e2 => e2.key === endpointHit!.key);
@@ -956,7 +972,11 @@ export default function DiagramViewer({
     const ctx = getSvgAndModel();
     if (!ctx) return;
     const key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model);
-    onSelect(key);
+    if (e.shiftKey) {
+      onSelect(key, { shiftKey: true });
+    } else {
+      onSelect(key);
+    }
   };
 
   return (

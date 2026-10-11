@@ -18,8 +18,16 @@ export interface PendingDelete {
   cascaded: ModelElement[];   // referencing elements removed with it
 }
 
+export interface ElementTagItem {
+  element: ModelElement;
+  ownTags: string[];
+  inheritedTags?: string[];
+}
+
 interface EditorPanelProps {
   element: ModelElement | null;   // selected raw element (null = nothing selected)
+  selectedElements?: ModelElement[];  // all selected raw elements
+  elementsTagInfo?: ElementTagItem[]; // tag details for all selected elements
   diagramType: DiagramType;
   config: DiagramConfig | null;   // current CONFIG (field values + datalists)
   arrowStyle: ArrowStylePatch | null;  // current style of the selected message/edge
@@ -31,8 +39,8 @@ interface EditorPanelProps {
   onSetType: (operator: string) => void;
   onSetWidth: (width: number | '') => void;
   onSetDash: (dash: Dash) => void;
-  onAddTag: (tag: string) => void;
-  onRemoveTag: (tag: string) => void;
+  onAddTag: (tag: string, targetKey?: string) => void;
+  onRemoveTag: (tag: string, targetKey?: string) => void;
   onSetKeyMode: (mode: ArrowKeyMode) => void;
   onRequestDelete: () => void;
   onConfirmDelete: () => void;
@@ -67,6 +75,8 @@ const fieldInput = 'w-full px-2 py-1 text-sm border rounded bg-gray-50 focus:out
 // Properties panel for the structured editor (EDITING_PLAN.md 4.12).
 export default function EditorPanel({
   element,
+  selectedElements,
+  elementsTagInfo,
   diagramType,
   config,
   arrowStyle,
@@ -101,10 +111,13 @@ export default function EditorPanel({
     }
   }
 
+  const isMultiSelect = Boolean(selectedElements && selectedElements.length > 1);
+  const activeElement = isMultiSelect ? null : (element ?? (selectedElements && selectedElements.length === 1 ? selectedElements[0] : null));
+
   return (
     <div className="p-4">
       <h2 className="text-xs font-bold uppercase text-gray-500 mb-2">Editor</h2>
-      {!element && (
+      {!isMultiSelect && !activeElement && (
         <>
           <p className="text-xs text-gray-500 italic">
             Click an element in the diagram to edit it.
@@ -116,10 +129,19 @@ export default function EditorPanel({
           </p>
         </>
       )}
-      {element && isComponent(element) && (
+      {isMultiSelect && (
+        <MultiElementFields
+          elements={selectedElements!}
+          elementsTagInfo={elementsTagInfo ?? []}
+          actorKeys={actorKeys}
+          onAddTag={onAddTag}
+          onRemoveTag={onRemoveTag}
+        />
+      )}
+      {!isMultiSelect && activeElement && isComponent(activeElement) && (
         <ParticipantFields
-          key={element.key}
-          element={element}
+          key={activeElement.key}
+          element={activeElement}
           config={config}
           actorColors={actorColors}
           actorKeys={actorKeys}
@@ -130,10 +152,10 @@ export default function EditorPanel({
           onRequestDelete={onRequestDelete}
         />
       )}
-      {element && isArrow(element) && (
+      {!isMultiSelect && activeElement && isArrow(activeElement) && (
         <ArrowFields
-          key={element.key}
-          element={element}
+          key={activeElement.key}
+          element={activeElement}
           diagramType={diagramType}
           arrowStyle={arrowStyle}
           arrowTags={arrowTags}
@@ -150,7 +172,7 @@ export default function EditorPanel({
           onRequestDelete={onRequestDelete}
         />
       )}
-      {element && !isComponent(element) && !isArrow(element) && (
+      {!isMultiSelect && activeElement && !isComponent(activeElement) && !isArrow(activeElement) && (
         <p className="text-xs text-gray-500 italic">
           This element is not editable.
         </p>
@@ -202,6 +224,162 @@ export default function EditorPanel({
   );
 }
 
+interface MultiElementFieldsProps {
+  elements: ModelElement[];
+  elementsTagInfo: ElementTagItem[];
+  actorKeys: string[];
+  onAddTag: (tag: string, targetKey?: string) => void;
+  onRemoveTag: (tag: string, targetKey?: string) => void;
+}
+
+function MultiElementFields({
+  elements,
+  elementsTagInfo,
+  actorKeys,
+  onAddTag,
+  onRemoveTag,
+}: MultiElementFieldsProps) {
+  const [tagInput, setTagInput] = useState('');
+  const [existingTagSelect, setExistingTagSelect] = useState('');
+
+  const submitTag = () => {
+    const tag = tagInput.trim();
+    if (tag) onAddTag(tag);
+    setTagInput('');
+  };
+
+  const submitExistingTag = () => {
+    if (existingTagSelect) {
+      onAddTag(existingTagSelect);
+      setExistingTagSelect('');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs font-semibold text-gray-700">
+          Selected Elements ({elements.length})
+        </p>
+        <p className="text-[11px] text-gray-400 mt-0.5">
+          Hold Shift and click elements in the diagram to add or remove them.
+        </p>
+      </div>
+
+      <div className="space-y-2 border border-blue-100 bg-blue-50/50 rounded p-2.5">
+        <span className={fieldLabel}>Add tag to all elements</span>
+        {actorKeys.length > 0 && (
+          <div className="flex space-x-1">
+            <select
+              className={fieldInput}
+              value={existingTagSelect}
+              onChange={(e) => setExistingTagSelect(e.target.value)}
+              data-testid="multi-select-existing-tag"
+              aria-label="Select existing tag"
+            >
+              <option value="">Select existing tag...</option>
+              {actorKeys.map(k => (
+                <option key={k} value={k}>#{k}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              data-testid="multi-add-existing-tag"
+              disabled={!existingTagSelect}
+              onClick={submitExistingTag}
+              className="px-2 text-xs rounded border border-gray-200 bg-white hover:bg-gray-100 disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+        )}
+        <div className="flex space-x-1">
+          <input
+            type="text"
+            className={fieldInput}
+            placeholder="Add tag to all..."
+            list="editor-multi-tag-list"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitTag();
+              }
+            }}
+            data-testid="multi-add-tag-input"
+          />
+          <button
+            type="button"
+            title="Add tag"
+            data-testid="multi-add-tag"
+            onClick={submitTag}
+            className="px-2 text-xs rounded border border-gray-200 bg-white hover:bg-gray-100"
+          >
+            Add
+          </button>
+        </div>
+        <datalist id="editor-multi-tag-list">
+          {actorKeys.map(k => <option key={k} value={k} />)}
+        </datalist>
+      </div>
+
+      <div className="space-y-2">
+        <span className={fieldLabel}>Tags by Element</span>
+        <div className="space-y-2 max-h-80 overflow-y-auto pr-0.5">
+          {elementsTagInfo.map(item => (
+            <div
+              key={item.element.key}
+              className="p-2 rounded border border-gray-200 bg-gray-50/60 space-y-1.5"
+              data-testid={`multi-element-${item.element.key}`}
+            >
+              <div className="flex items-center justify-between text-xs font-medium text-gray-700">
+                <span className="truncate mr-1" title={describeElement(item.element)}>
+                  {describeElement(item.element)}
+                </span>
+                <span className="text-[10px] text-gray-400 font-mono flex-shrink-0">
+                  {item.element.key}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {(item.ownTags ?? []).length === 0 && (!item.inheritedTags || item.inheritedTags.length === 0) && (
+                  <span className="text-[11px] text-gray-400 italic">No tags</span>
+                )}
+                {(item.ownTags ?? []).map(tag => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs"
+                  >
+                    {tag}
+                    <button
+                      type="button"
+                      aria-label={`Remove tag ${tag} from ${describeElement(item.element)}`}
+                      data-testid={`remove-tag-${item.element.key}-${tag}`}
+                      onClick={() => onRemoveTag(tag, item.element.key)}
+                      className="ml-1 hover:text-blue-900"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+                {item.inheritedTags?.map(tag => (
+                  <span
+                    key={tag}
+                    title="Inherited"
+                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-xs"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface ComponentFieldsProps {
   element: ParticipantElement | NodeElement;
   config: DiagramConfig | null;
@@ -219,6 +397,7 @@ function ParticipantFields({
   onEditLabel, onSetColor, onAddTag, onRemoveTag, onRequestDelete,
 }: ComponentFieldsProps) {
   const [tagInput, setTagInput] = useState('');
+  const [existingTagSelect, setExistingTagSelect] = useState('');
   const meta = config?.actors?.[element.id];
   const label = element.kind === 'participant' ? (element.alias ?? '') : (element.label ?? '');
   const tags = meta?.keys ?? [];
@@ -227,6 +406,13 @@ function ParticipantFields({
     const tag = tagInput.trim();
     if (tag) onAddTag(tag);
     setTagInput('');
+  };
+
+  const submitExistingTag = () => {
+    if (existingTagSelect) {
+      onAddTag(existingTagSelect);
+      setExistingTagSelect('');
+    }
   };
 
   return (
@@ -281,6 +467,31 @@ function ParticipantFields({
                 </button>
               </span>
             ))}
+          </div>
+        )}
+        {actorKeys.length > 0 && (
+          <div className="flex space-x-1 mb-1">
+            <select
+              className={fieldInput}
+              value={existingTagSelect}
+              onChange={(e) => setExistingTagSelect(e.target.value)}
+              data-testid="participant-select-existing-tag"
+              aria-label="Select existing tag"
+            >
+              <option value="">Select existing tag...</option>
+              {actorKeys.map(k => (
+                <option key={k} value={k}>#{k}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              data-testid="participant-add-existing-tag"
+              disabled={!existingTagSelect}
+              onClick={submitExistingTag}
+              className="px-2 text-xs rounded border border-gray-200 hover:bg-gray-100 disabled:opacity-40"
+            >
+              Add
+            </button>
           </div>
         )}
         <div className="flex space-x-1">
@@ -346,6 +557,7 @@ function ArrowFields({
     ? vocabulary
     : [element.operator, ...vocabulary];
   const [tagInput, setTagInput] = useState('');
+  const [existingTagSelect, setExistingTagSelect] = useState('');
   const ownTags = arrowTags?.keys ?? [];
   const inheritedTags = arrowTags?.inherited ?? [];
   const keyMode: ArrowKeyMode = arrowTags?.keyMode ?? 'merged';
@@ -354,6 +566,13 @@ function ArrowFields({
     const tag = tagInput.trim();
     if (tag) onAddTag(tag);
     setTagInput('');
+  };
+
+  const submitExistingTag = () => {
+    if (existingTagSelect) {
+      onAddTag(existingTagSelect);
+      setExistingTagSelect('');
+    }
   };
 
   return (
@@ -454,6 +673,31 @@ function ArrowFields({
             ))}
           </div>
         ) : null}
+        {actorKeys.length > 0 && (
+          <div className="flex space-x-1 mb-1">
+            <select
+              className={fieldInput}
+              value={existingTagSelect}
+              onChange={(e) => setExistingTagSelect(e.target.value)}
+              data-testid="arrow-select-existing-tag"
+              aria-label="Select existing tag"
+            >
+              <option value="">Select existing tag...</option>
+              {actorKeys.map(k => (
+                <option key={k} value={k}>#{k}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              data-testid="arrow-add-existing-tag"
+              disabled={!existingTagSelect}
+              onClick={submitExistingTag}
+              className="px-2 text-xs rounded border border-gray-200 hover:bg-gray-100 disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+        )}
         <div className="flex space-x-1">
           <input
             type="text"

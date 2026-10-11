@@ -165,6 +165,31 @@ describe('DiagramViewer', () => {
     });
   });
 
+  it('shift-click calls onSelect with shiftKey option', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={onSelect} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('line[data-id="i1"]')).toBeTruthy();
+    });
+    fireEvent.click(container.querySelector('line[data-id="i1"]')!, { shiftKey: true });
+    expect(onSelect).toHaveBeenCalledWith('m:0', { shiftKey: true });
+  });
+
+  it('applies the highlight class to multiple selected elements when selection is an array', async () => {
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={['m:0', 'm:1']} onSelect={() => {}} />
+    );
+    await waitFor(() => {
+      const line1 = container.querySelector('line[data-id="i1"]');
+      const line2 = container.querySelector('line[data-id="i2"]');
+      expect(line1?.classList.contains('editor-selected')).toBe(true);
+      expect(line2?.classList.contains('editor-selected')).toBe(true);
+    });
+    expect(container.querySelectorAll('.editor-selected')).toHaveLength(2);
+  });
+
   it('search highlight still works on the post-processed SVG', async () => {
     const arrowStyles: DiagramConfig = {
       version: 1,

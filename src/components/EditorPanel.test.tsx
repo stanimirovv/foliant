@@ -274,4 +274,86 @@ describe('EditorPanel', () => {
     render(<EditorPanel {...makeProps({ element: note0 })} />);
     expect(screen.getByText('This element is not editable.')).toBeTruthy();
   });
+
+  it('allows adding existing tag from select dropdown in participant view', () => {
+    const props = makeProps({
+      element: participantA,
+      config: {
+        version: 1,
+        actors: {
+          A: { keys: ['backend'] },
+          B: { keys: ['frontend'] },
+        },
+      },
+    });
+    render(<EditorPanel {...props} />);
+
+    const select = screen.getByTestId('participant-select-existing-tag') as HTMLSelectElement;
+    expect(select.value).toBe('');
+    fireEvent.change(select, { target: { value: 'frontend' } });
+    fireEvent.click(screen.getByTestId('participant-add-existing-tag'));
+    expect(props.onAddTag).toHaveBeenCalledWith('frontend');
+  });
+
+  it('renders multi-element selection and supports adding tags to all and removing tags per element', () => {
+    const props = makeProps({
+      selectedElements: [participantA, message0],
+      elementsTagInfo: [
+        {
+          element: participantA,
+          ownTags: ['backend', 'core'],
+          inheritedTags: [],
+        },
+        {
+          element: message0,
+          ownTags: ['v1'],
+          inheritedTags: ['backend'],
+        },
+      ],
+      config: {
+        version: 1,
+        actors: {
+          A: { keys: ['backend', 'core'] },
+          B: { keys: ['database'] },
+        },
+        arrows: [
+          { from: 'A', to: 'B', label: 'Hello', keys: ['v1'] },
+        ],
+      },
+    });
+    render(<EditorPanel {...props} />);
+
+    // Header shows count
+    expect(screen.getByText('Selected Elements (2)')).toBeTruthy();
+
+    // Existing diagram tags are available in dropdown (backend, core, database, v1)
+    const select = screen.getByTestId('multi-select-existing-tag') as HTMLSelectElement;
+    expect(Array.from(select.options).map(o => o.value)).toEqual(['', 'backend', 'core', 'database', 'v1']);
+    fireEvent.change(select, { target: { value: 'database' } });
+    fireEvent.click(screen.getByTestId('multi-add-existing-tag'));
+    expect(props.onAddTag).toHaveBeenCalledWith('database');
+
+    // Free text input adds custom tag to all
+    const tagInput = screen.getByTestId('multi-add-tag-input');
+    fireEvent.change(tagInput, { target: { value: 'critical' } });
+    fireEvent.click(screen.getByTestId('multi-add-tag'));
+    expect(props.onAddTag).toHaveBeenCalledWith('critical');
+
+    // Displays cards for each element with their own tags and inherited tags
+    expect(screen.getByText('participant A (Alice)')).toBeTruthy();
+    expect(screen.getByText('message A ->> B: Hello')).toBeTruthy();
+
+    // Removing tag from a specific element dispatches with element.key
+    fireEvent.click(screen.getByTestId('remove-tag-p:0-core'));
+    expect(props.onRemoveTag).toHaveBeenCalledWith('core', 'p:0');
+
+    fireEvent.click(screen.getByTestId('remove-tag-m:0-v1'));
+    expect(props.onRemoveTag).toHaveBeenCalledWith('v1', 'm:0');
+
+    // Inherited tag on message is read-only (has inherited title, no remove button)
+    const inheritedChips = screen.getAllByText('backend');
+    const inheritedOnMsg = inheritedChips.find(c => c.getAttribute('title')?.includes('Inherited'));
+    expect(inheritedOnMsg).toBeTruthy();
+  });
 });
+

@@ -40,12 +40,16 @@ export default function ClientPage() {
   const [rawCode, setRawCode] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
 
-  // Editing state (EDITING_PLAN.md Steps 7+): `selection` is a RAW element
-  // key. DiagramViewer reports the PROCESSED key on click; it is resolved to
+  // Editing state (EDITING_PLAN.md Steps 7+): `selectedKeys` holds RAW element
+  // keys. DiagramViewer reports the PROCESSED key on click; it is resolved to
   // the raw element through the selection map and the RAW key is stored, so
   // the selection survives transforms that reorder the processed diagram
   // (e.g. colored participants regrouped into box blocks).
-  const [selection, setSelection] = useState<string | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const selection = selectedKeys.length === 1 ? selectedKeys[0] : null;
+  const setSelection = (key: string | null) => {
+    setSelectedKeys(key ? [key] : []);
+  };
   const [editWarning, setEditWarning] = useState<string | null>(null);
   // Two-phase delete (EDITING_PLAN.md Step 8): the transform runs on request
   // so the confirm dialog can list the cascaded elements; the new code is
@@ -406,21 +410,63 @@ export default function ClientPage() {
     selectionMap.forEach((rawEl, processedKey) => { map.set(rawEl.key, processedKey); });
     return map;
   }, [selectionMap]);
-  const processedSelection = selection ? rawToProcessed.get(selection) ?? null : null;
+  const processedSelections = useMemo(() => {
+    return selectedKeys
+      .map(k => rawToProcessed.get(k))
+      .filter((k): k is string => Boolean(k));
+  }, [selectedKeys, rawToProcessed]);
+  const processedSelection = processedSelections.length <= 1 ? (processedSelections[0] ?? null) : processedSelections;
 
-  const selectedRawElement = useMemo(
-    () => (selection ? rawModel.elements.find(e => e.key === selection) ?? null : null),
-    [selection, rawModel]
-  );
+  const selectedRawElements = useMemo(() => {
+    const rawMap = new Map(rawModel.elements.map(e => [e.key, e]));
+    return selectedKeys
+      .map(k => rawMap.get(k))
+      .filter((e): e is ModelElement => Boolean(e));
+  }, [selectedKeys, rawModel]);
+
+  const selectedRawElement = selectedRawElements.length === 1 ? selectedRawElements[0] : null;
+
+  const selectedElementsTagInfo = useMemo(() => {
+    return selectedRawElements.map(el => {
+      let ownTags: string[] = [];
+      let inheritedTags: string[] = [];
+      if (el.kind === 'participant' || el.kind === 'node') {
+        ownTags = viewsData?.actors?.[el.id]?.keys ?? [];
+      } else if (el.kind === 'message' || el.kind === 'edge') {
+        const info = getArrowTags(rawCode, viewsData, el.key);
+        ownTags = info?.keys ?? [];
+        inheritedTags = info?.inherited ?? [];
+      }
+      return {
+        element: el,
+        ownTags,
+        inheritedTags,
+      };
+    });
+  }, [selectedRawElements, rawCode, viewsData]);
 
   // DiagramViewer click: processed key -> raw key.
-  const handleSelect = (processedKey: string | null) => {
+  const handleSelect = (processedKey: string | null, options?: { shiftKey?: boolean }) => {
+    if (options?.shiftKey) {
+      if (!processedKey) return;
+      const raw = selectionMap.get(processedKey);
+      if (!raw) return;
+      setSelectedKeys(prev => {
+        if (prev.includes(raw.key)) {
+          return prev.filter(k => k !== raw.key);
+        } else {
+          return [...prev, raw.key];
+        }
+      });
+      return;
+    }
+
     if (!processedKey) {
-      setSelection(null);
+      setSelectedKeys([]);
       return;
     }
     const raw = selectionMap.get(processedKey);
-    setSelection(raw ? raw.key : null);
+    setSelectedKeys(raw ? [raw.key] : []);
   };
   const resolvedArrowStyles = useMemo(
     () => rewriteArrowStyles(viewsData, actorOptions),
@@ -673,20 +719,39 @@ export default function ClientPage() {
     applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
   };
 
-  const handleAddTag = (tag: string) => {
-    if (selectedComponent) {
-      applyEditResult(addTag(rawCode, viewsData, selectedComponent.key, tag));
-    } else if (selectedArrow) {
-      applyEditResult(addTag(rawCode, viewsData, selectedArrow.key, tag));
+  const handleAddTag = (tag: string, targetKey?: string) => {
+    const keysToAdd = targetKey
+      ? [targetKey]
+      : (selectedRawElements.length > 0
+          ? selectedRawElements.map(e => e.key)
+          : (selectedRawElement ? [selectedRawElement.key] : []));
+    if (keysToAdd.length === 0) return;
+
+    let currentCode = rawCode;
+    let currentConfig = viewsData;
+    let anyWarning: string | undefined;
+
+    for (const key of keysToAdd) {
+      const result = addTag(currentCode, currentConfig, key, tag);
+      if (result.warning) {
+        anyWarning = result.warning;
+        break;
+      }
+      currentCode = result.code;
+      currentConfig = result.config;
     }
+
+    if (anyWarning) {
+      setEditWarning(anyWarning);
+      return;
+    }
+    applyEditResult({ code: currentCode, config: currentConfig });
   };
 
-  const handleRemoveTag = (tag: string) => {
-    if (selectedComponent) {
-      applyEditResult(removeTag(rawCode, viewsData, selectedComponent.key, tag));
-    } else if (selectedArrow) {
-      applyEditResult(removeTag(rawCode, viewsData, selectedArrow.key, tag));
-    }
+  const handleRemoveTag = (tag: string, targetKey?: string) => {
+    const keyToRemove = targetKey ?? selectedRawElement?.key;
+    if (!keyToRemove) return;
+    applyEditResult(removeTag(rawCode, viewsData, keyToRemove, tag));
   };
 
   const handleSetArrowKeyMode = (mode: ArrowKeyMode) => {
@@ -1267,6 +1332,8 @@ export default function ClientPage() {
             <div className="w-72 flex-shrink-0 border-l border-gray-200  bg-white  overflow-y-auto">
               <EditorPanel
                 element={selectedRawElement}
+                selectedElements={selectedRawElements}
+                elementsTagInfo={selectedElementsTagInfo}
                 diagramType={rawModel.type}
                 config={viewsData}
                 arrowStyle={selectedArrowStyle}

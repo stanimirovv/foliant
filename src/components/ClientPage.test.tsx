@@ -34,8 +34,8 @@ vi.mock('./DiagramViewer', () => ({
   default: (props: {
     code: string;
     editMode?: boolean;
-    selection?: string | null;
-    onSelect?: (key: string | null) => void;
+    selection?: string | string[] | null;
+    onSelect?: (key: string | null, options?: { shiftKey?: boolean }) => void;
     onCreateMessageDrag?: (fromKey: string, toKey: string, position: { type: string; key?: string }) => void;
     onMoveParticipant?: (key: string, beforeKey: string | null) => void;
     onMoveMessageEndpoint?: (messageKey: string, end: 'from' | 'to', targetKey: string) => void;
@@ -45,10 +45,14 @@ vi.mock('./DiagramViewer', () => ({
       data-testid="diagram-viewer"
       data-code={props.code}
       data-edit-mode={String(props.editMode ?? false)}
-      data-selection={props.selection ?? ''}
+      data-selection={Array.isArray(props.selection) ? props.selection.join(',') : (props.selection ?? '')}
     >
       {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0', 'n:0', 'n:1', 'e:0', 'e:1'].map(k => (
-        <button key={k} data-testid={`select-${k}`} onClick={() => props.onSelect?.(k)}>
+        <button
+          key={k}
+          data-testid={`select-${k}`}
+          onClick={(e) => props.onSelect?.(k, e.shiftKey ? { shiftKey: true } : undefined)}
+        >
           select {k}
         </button>
       ))}
@@ -1495,5 +1499,64 @@ sequenceDiagram
     await expect(mermaid.parse(copiedCode)).resolves.not.toThrow();
     const model = parseModel(copiedCode);
     expect(model.type).toBe('flowchart');
+  });
+
+  it('shift-clicking multiple elements allows adding tag to all and removing tag from one', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    // 1. Single click selects participant A
+    fireEvent.click(screen.getByTestId('select-p:0'));
+    await screen.findByDisplayValue('Alice');
+
+    // 2. Shift-click message m:0
+    fireEvent.click(screen.getByTestId('select-m:0'), { shiftKey: true });
+
+    // Panel shows multi-element view with 2 elements
+    await screen.findByText('Selected Elements (2)');
+
+    // 3. Add tag "shared" to all selected elements using free text input
+    const tagInput = screen.getByTestId('multi-add-tag-input');
+    fireEvent.change(tagInput, { target: { value: 'shared' } });
+    fireEvent.click(screen.getByTestId('multi-add-tag'));
+
+    // Verify CONFIG persisted the tag for both participant A and message m:0
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const cfg = parseViewsData(code);
+      expect(cfg?.actors?.A?.keys).toContain('shared');
+      const arrow = cfg?.arrows?.find((a: any) => a.from === 'A' && a.to === 'B');
+      expect(arrow?.keys).toContain('shared');
+    }, { timeout: 3000 });
+
+    // 4. Shift-click participant B to add to selection (now 3 elements)
+    fireEvent.click(screen.getByTestId('select-p:1'), { shiftKey: true });
+    await screen.findByText('Selected Elements (3)');
+
+    // 5. Select existing tag "shared" from dropdown and add to all
+    const select = screen.getByTestId('multi-select-existing-tag') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'shared' } });
+    fireEvent.click(screen.getByTestId('multi-add-existing-tag'));
+
+    // Participant B now also has "shared"
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const cfg = parseViewsData(code);
+      expect(cfg?.actors?.B?.keys).toContain('shared');
+    }, { timeout: 3000 });
+
+    // 6. Remove tag "shared" from participant A
+    fireEvent.click(screen.getByTestId('remove-tag-p:0-shared'));
+
+    // Verify participant A lost "shared", but B still has it
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const cfg = parseViewsData(code);
+      expect(cfg?.actors?.A?.keys ?? []).not.toContain('shared');
+      expect(cfg?.actors?.B?.keys).toContain('shared');
+    }, { timeout: 3000 });
+
+    // 7. Shift-click participant B toggles it off
+    fireEvent.click(screen.getByTestId('select-p:1'), { shiftKey: true });
+    await screen.findByText('Selected Elements (2)');
   });
 });
