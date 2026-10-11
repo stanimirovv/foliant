@@ -47,6 +47,7 @@ describe('Visual editing (e2e)', () => {
         cy.get('button[title="Edit diagram"]').click();
         cy.url().should('not.include', 'edit=0');
         cy.get('button[title="Exit edit mode"]').should('exist');
+        cy.get('[data-testid="copy-mermaid"]').should('exist').and('contain.text', 'Copy');
 
         // click the first message -> the panel shows its fields
         // (the message <line> has zero height, so click its text label instead;
@@ -115,13 +116,10 @@ describe('Visual editing (e2e)', () => {
           expect(($el[0] as unknown as SVGElement).style.stroke).to.eq('rgb(225, 29, 72)');
         });
 
-        // delete the merged participant: the cascade confirm appears
+        // delete the merged participant: deleted immediately, cascade included
         cy.get('#diagram-container g[data-et="participant"]').first().click();
         cy.get('[data-testid="panel-delete"]').click();
-        cy.get('[data-testid="delete-dialog"]').should('be.visible')
-          .and('contain.text', 'participant A (Alice)')
-          .and('contain.text', 'referencing elements');
-        cy.get('[data-testid="confirm-delete"]').click();
+        cy.get('[data-testid="delete-dialog"]').should('not.exist');
         cy.get('#diagram-container [data-et="message"]').should('have.length', 0);
 
         // undo reverts the delete

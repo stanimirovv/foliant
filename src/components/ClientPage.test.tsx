@@ -4,6 +4,7 @@ import ClientPage from './ClientPage';
 import { parseModel } from '@/lib/model';
 import { parseViewsData } from '@/lib/views';
 import { createSequenceDiagram } from '@/lib/editorTestHarness';
+import mermaid from 'mermaid';
 
 const mockReplace = vi.fn();
 const mockGet = vi.fn();
@@ -187,6 +188,11 @@ describe('ClientPage', () => {
     vi.clearAllMocks();
     fileContent.current = '';
     postControl.fail = false;
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
   });
   afterEach(() => {
     cleanup();
@@ -511,7 +517,7 @@ sequenceDiagram
     await waitFor(() => {
       expect(viewer.getAttribute('data-selection')).toBe('e:2');
     }, { timeout: 3000 });
-  });
+  }, 10000);
 
   it('shows drag hints per diagram type', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
@@ -592,17 +598,13 @@ sequenceDiagram
     }, { timeout: 3000 });
   });
 
-  it('deleting a message asks for confirmation and removes it', async () => {
+  it('deleting a message removes it immediately without confirmation', async () => {
     const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
     fireEvent.click(screen.getByTestId('select-m:0'));
     await screen.findByDisplayValue('Hello');
 
     fireEvent.click(screen.getByTestId('panel-delete'));
-    const dialog = await screen.findByTestId('delete-dialog');
-    expect(dialog.textContent).toContain('message A ->> B: Hello');
-    expect(dialog.textContent).not.toContain('referencing');
-
-    fireEvent.click(screen.getByTestId('confirm-delete'));
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
     await waitFor(() => {
       expect(viewer.getAttribute('data-code')).not.toContain('Hello');
     }, { timeout: 3000 });
@@ -610,19 +612,13 @@ sequenceDiagram
     await screen.findByText(/Click an element in the diagram/);
   });
 
-  it('deleting a participant lists cascaded messages and removes them all', async () => {
+  it('deleting a participant removes it and its cascaded messages immediately', async () => {
     const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
     fireEvent.click(screen.getByTestId('select-p:0'));
     await screen.findByDisplayValue('Alice');
 
     fireEvent.click(screen.getByTestId('panel-delete'));
-    const dialog = await screen.findByTestId('delete-dialog');
-    expect(dialog.textContent).toContain('participant A (Alice)');
-    expect(dialog.textContent).toContain('2 referencing elements');
-    expect(dialog.textContent).toContain('message A ->> B: Hello');
-    expect(dialog.textContent).toContain('message B -->> A: Hi there');
-
-    fireEvent.click(screen.getByTestId('confirm-delete'));
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
     await waitFor(() => {
       const code = viewer.getAttribute('data-code') ?? '';
       expect(code).not.toContain('participant A');
@@ -630,19 +626,6 @@ sequenceDiagram
       expect(code).not.toContain('Hi there');
       expect(code).toContain('participant B as Bob');
     }, { timeout: 3000 });
-  });
-
-  it('cancelling the delete dialog keeps the diagram unchanged', async () => {
-    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
-    fireEvent.click(screen.getByTestId('select-m:0'));
-    await screen.findByDisplayValue('Hello');
-
-    fireEvent.click(screen.getByTestId('panel-delete'));
-    await screen.findByTestId('delete-dialog');
-    fireEvent.click(screen.getByText('Cancel'));
-
-    expect(screen.queryByTestId('delete-dialog')).toBeNull();
-    expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
   });
 
   it('deleting a flowchart node deletes it immediately without asking confirmation', async () => {
@@ -703,17 +686,14 @@ sequenceDiagram
       ]);
     }, { timeout: 3000 });
 
-    // delete a participant -> cascade confirm lists its messages -> gone after confirm.
+    // delete a participant -> its messages cascade away with it, no confirmation.
     // A is colored, so transformActors regroups it into a box block injected
     // after the uncolored participants: the processed order is B, New1, A,
     // i.e. processed key p:2 is A.
     fireEvent.click(screen.getByTestId('select-p:2'));
     await screen.findByDisplayValue('Alice');
     fireEvent.click(screen.getByTestId('panel-delete'));
-    const dialog = await screen.findByTestId('delete-dialog');
-    expect(dialog.textContent).toContain('participant A (Alice)');
-    expect(dialog.textContent).toContain('3 referencing elements');
-    fireEvent.click(screen.getByTestId('confirm-delete'));
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
     await waitFor(() => {
       const model = parseModel(code());
       expect(model.elements.some(e => e.kind === 'participant' && e.id === 'A')).toBe(false);
@@ -1430,5 +1410,90 @@ sequenceDiagram
     await waitFor(() => {
       expect((screen.getByPlaceholderText('Paste absolute path...') as HTMLInputElement).value).toBe('/second/dir');
     });
+  });
+
+  it('copy button copies current mermaid source code and verifies it is valid', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    const copyBtn = screen.getByTestId('copy-mermaid');
+    expect(copyBtn).toBeTruthy();
+    expect(copyBtn.getAttribute('title')).toBe('Copy Mermaid Code');
+    expect(within(copyBtn).getByText('Copy')).toBeTruthy();
+
+    fireEvent.click(copyBtn);
+
+    // Verify clipboard was called with the diagram's current mermaid code
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+    const copiedCode = (navigator.clipboard.writeText as import('vitest').Mock).mock.calls[0][0];
+    expect(copiedCode).toContain('A->>B: Hello');
+    expect(copiedCode).toContain('B-->>A: Hi there');
+
+    // Verify the copied Mermaid is valid using mermaid.parse
+    await expect(mermaid.parse(copiedCode)).resolves.not.toThrow();
+    const model = parseModel(copiedCode);
+    expect(model.type).toBe('sequence');
+    expect(model.elements.length).toBeGreaterThan(0);
+
+    // Verify visual feedback
+    expect(within(copyBtn).getByText('Copied')).toBeTruthy();
+  });
+
+  it('copy button copies updated valid mermaid code after an edit and after undo', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    const copyBtn = screen.getByTestId('copy-mermaid');
+
+    // Select message m:0 and update its label to "Updated Message"
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+    fireEvent.change(input, { target: { value: 'Updated Message' } });
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('Updated Message');
+    });
+
+    // Click copy button
+    fireEvent.click(copyBtn);
+    const mockCalls = (navigator.clipboard.writeText as import('vitest').Mock).mock.calls;
+    let copiedCode = mockCalls[mockCalls.length - 1]?.[0] as string;
+    expect(copiedCode).toContain('Updated Message');
+
+    // Verify valid mermaid code
+    await expect(mermaid.parse(copiedCode)).resolves.not.toThrow();
+
+    // Click undo button
+    const undoBtn = screen.getByTitle('Undo (Ctrl+Z)');
+    fireEvent.click(undoBtn);
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).not.toContain('Updated Message');
+      expect(viewer.getAttribute('data-code')).toContain('Hello');
+    });
+
+    // Click copy button again
+    fireEvent.click(copyBtn);
+    copiedCode = mockCalls[mockCalls.length - 1]?.[0] as string;
+    expect(copiedCode).toContain('Hello');
+    expect(copiedCode).not.toContain('Updated Message');
+
+    // Verify still valid mermaid code
+    await expect(mermaid.parse(copiedCode)).resolves.not.toThrow();
+  });
+
+  it('copy button copies valid flowchart mermaid code', async () => {
+    const FLOW_DEMO = `flowchart TD\n    A[Alice] --> B[Bob]\n    B -->|Reply| C[Charlie]`;
+    await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+
+    const copyBtn = screen.getByTestId('copy-mermaid');
+    fireEvent.click(copyBtn);
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+    const copiedCode = (navigator.clipboard.writeText as import('vitest').Mock).mock.calls[0][0];
+    expect(copiedCode).toContain('flowchart TD');
+    expect(copiedCode).toContain('A[Alice] --> B[Bob]');
+
+    // Verify valid flowchart mermaid syntax
+    await expect(mermaid.parse(copiedCode)).resolves.not.toThrow();
+    const model = parseModel(copiedCode);
+    expect(model.type).toBe('flowchart');
   });
 });

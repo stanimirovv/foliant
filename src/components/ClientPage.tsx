@@ -6,7 +6,7 @@ import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import {
@@ -568,6 +568,30 @@ export default function ClientPage() {
     setRawCode(next);
   }, [historyPast, historyFuture, rawCode]);
 
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyMermaid = async () => {
+    if (!rawCode) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(rawCode);
+      } else if (typeof document !== 'undefined') {
+        const textarea = document.createElement('textarea');
+        textarea.value = rawCode;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy Mermaid code:', err);
+    }
+  };
+
   // Ctrl+Z / Ctrl+Y (Section 4.11). Inside text fields the native input undo
   // wins; the diagram-level shortcut applies everywhere else.
   useEffect(() => {
@@ -677,8 +701,8 @@ export default function ClientPage() {
       setEditWarning(result.warning);
       return;
     }
-    // Nodes are deleted immediately without asking for confirmation
-    if (selectedRawElement.kind === 'node') {
+    // Actors and arrows are deleted immediately without asking for confirmation
+    if (selectedComponent || selectedArrow) {
       applyEditResult(result);
       setSelection(null);
       return;
@@ -1178,6 +1202,18 @@ export default function ClientPage() {
                 >
                   <Redo2 size={14} />
                   <span>Redo</span>
+                </button>
+                <button
+                  onClick={handleCopyMermaid}
+                  disabled={!rawCode}
+                  title="Copy Mermaid Code"
+                  data-testid="copy-mermaid"
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
+                    !rawCode ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100'
+                  }`}
+                >
+                  {copied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
+                  <span>{copied ? 'Copied' : 'Copy'}</span>
                 </button>
               </>
             )}
