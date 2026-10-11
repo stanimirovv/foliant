@@ -178,20 +178,62 @@ describe('ClientPage', () => {
     });
   });
 
-  it('edit toggle sets the edit URL param', async () => {
-    mockParams({ file: 'demo.mmd' });
+  it('edit mode is on by default when a diagram is opened', async () => {
+    mockParams({ file: 'demo.mmd' }); // no edit param at all
     mockFetchWithFile(DEMO);
 
     render(<ClientPage />);
 
-    const button = await screen.findByTitle('Edit diagram');
+    const viewer = await screen.findByTestId('diagram-viewer');
     await waitFor(() => {
-      expect((button as HTMLButtonElement).disabled).toBe(false);
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
     });
-    fireEvent.click(button);
+    expect(viewer.getAttribute('data-edit-mode')).toBe('true');
+    // the right panel and the edit toolbar are visible without any URL param
+    expect(await screen.findByText('Click an element in the diagram to edit it.')).toBeTruthy();
+    expect(screen.getByTitle('Exit edit mode')).toBeTruthy();
+  });
 
+  it('edit=0 opts out of edit mode', async () => {
+    mockParams({ file: 'demo.mmd', edit: '0' });
+    mockFetchWithFile(DEMO);
+
+    render(<ClientPage />);
+
+    const viewer = await screen.findByTestId('diagram-viewer');
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('edit=1'), { scroll: false });
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    });
+    expect(viewer.getAttribute('data-edit-mode')).toBe('false');
+    expect(screen.queryByText('Click an element in the diagram to edit it.')).toBeNull();
+    expect(screen.getByTitle('Edit diagram')).toBeTruthy();
+  });
+
+  it('the edit toggle opts out with edit=0 and re-enables by removing the param', async () => {
+    mockParams({ file: 'demo.mmd' });
+    mockFetchWithFile(DEMO);
+
+    const { rerender } = render(<ClientPage />);
+
+    // on by default: the toggle exits edit mode
+    const exitButton = await screen.findByTitle('Exit edit mode');
+    await waitFor(() => {
+      expect((exitButton as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(exitButton);
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('edit=0'), { scroll: false });
+    });
+
+    // with edit=0 the toggle re-enables edit mode by dropping the param
+    mockParams({ file: 'demo.mmd', edit: '0' });
+    rerender(<ClientPage />);
+    const editButton = await screen.findByTitle('Edit diagram');
+    fireEvent.click(editButton);
+    await waitFor(() => {
+      const url = mockReplace.mock.calls.at(-1)?.[0] as string;
+      expect(url).toContain('dir=');
+      expect(url).not.toContain('edit');
     });
   });
 

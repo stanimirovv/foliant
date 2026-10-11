@@ -38,9 +38,15 @@ describe('Visual editing (e2e)', () => {
         cy.get('#diagram-container svg').should('exist');
         cy.get('#diagram-container').contains('Hello').should('exist');
 
-        // enable edit mode
+        // edit mode is on by default when a diagram is opened
+        cy.get('button[title="Exit edit mode"]').should('exist');
+        // the toggle opts out (edit=0) and back in (param removed)
+        cy.get('button[title="Exit edit mode"]').click();
+        cy.url().should('include', 'edit=0');
+        cy.get('button[title="Edit diagram"]').should('exist');
         cy.get('button[title="Edit diagram"]').click();
-        cy.url().should('include', 'edit=1');
+        cy.url().should('not.include', 'edit=0');
+        cy.get('button[title="Exit edit mode"]').should('exist');
 
         // click the first message -> the panel shows its fields
         // (the message <line> has zero height, so click its text label instead;
@@ -141,8 +147,8 @@ describe('Visual editing (e2e)', () => {
         cy.get('#diagram-container svg').should('exist');
         cy.get('#diagram-container').contains('Alice').should('exist');
 
-        cy.get('button[title="Edit diagram"]').click();
-        cy.url().should('include', 'edit=1');
+        // edit mode is on by default when a diagram is opened
+        cy.get('button[title="Exit edit mode"]').should('exist');
 
         // node color
         cy.contains('#diagram-container g.node', 'Alice').click();

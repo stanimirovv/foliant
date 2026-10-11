@@ -361,10 +361,11 @@ export default function ClientPage() {
   }, [procWarnings]);
 
   // --- Edit mode (EDITING_PLAN.md Step 7 walking skeleton) ---
-  const editParam = searchParams.get('edit') === '1';
   const rawModel = useMemo(() => parseModel(rawCode), [rawCode]);
   const editSupported = rawModel.type !== 'unknown';  // R-01: sequence + flowchart only
-  const editMode = editParam && editSupported;
+  // Edit mode is ON by default when a diagram is opened; `edit=0` opts out
+  // (the toolbar toggle flips between the two). `edit=1` still works.
+  const editMode = editSupported && searchParams.get('edit') !== '0';
 
   const selectionMap = useMemo(
     () => buildSelectionMap(rawCode, processedCode, viewsData, actorOptions),
@@ -400,9 +401,9 @@ export default function ClientPage() {
   const toggleEditMode = () => {
     const params = new URLSearchParams(searchParams.toString());
     if (editMode) {
-      params.delete('edit');
+      params.set('edit', '0');
     } else {
-      params.set('edit', '1');
+      params.delete('edit');
     }
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };

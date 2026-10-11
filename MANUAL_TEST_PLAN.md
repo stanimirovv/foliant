@@ -38,11 +38,11 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 
 > Stop here: selection feels right and the panel shows the correct fields per element kind.
 
-- [ ] The toolbar shows an Edit (pencil) toggle; clicking it adds `edit=1` to the URL and canvas elements become clickable (cursor changes to pointer).
+- [ ] Edit mode is on by default (no URL param): canvas elements are clickable (cursor changes to pointer) and the side panel is visible.
 - [ ] Clicking a participant selects it: a highlight outline appears; the panel shows Label / Color / Tags / Delete.
 - [ ] Clicking a message selects it: the panel shows Label / Type / Color / Width / Dash / Delete.
 - [ ] Clicking empty canvas clears the selection and hides the panel.
-- [ ] Toggling Edit off removes `edit=1`, the selection, and the panel; the diagram is unchanged.
+- [ ] Toggling Edit off adds `edit=0` to the URL and hides the selection and the panel; the diagram is unchanged. Toggling again removes the param and re-enables edit mode.
 
 ## Increment 2 — Participant editing (sequence)
 
@@ -77,7 +77,7 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 
 > Stop here: nodes and edges are editable with the same panel, and cascade delete keeps the diagram valid.
 
-- [ ] Open `editing-demo-flow.mmd`; enable Edit; nodes and edges are selectable.
+- [ ] Open `editing-demo-flow.mmd` (edit mode is on by default); nodes and edges are selectable.
 - [ ] Select a node → the panel shows Label / Color / Tags / Delete; rename it → the node label updates.
 - [ ] Set a node color → the node fill changes immediately and after F5.
 - [ ] Add tags to two nodes → By Key appears; Merged collapses them into one node on the canvas.
@@ -134,7 +134,7 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 
 > Stop here: editing composes with filters/views without corrupting the raw file.
 
-- [ ] Hide a region (e.g. an edge-case flow) → enable Edit → elements inside the hidden region are not selectable; un-hide → they are.
+- [ ] Hide a region (e.g. an edge-case flow) → elements inside the hidden region are not selectable (edit mode is on by default); un-hide → they are.
 - [ ] Edit something while a region is hidden → `diff` the file: only the edited line and the CONFIG line changed; the hidden region's lines are byte-identical.
 - [ ] Save a named view while in edit mode → it works and does not disturb the current edits.
 - [ ] Load a saved view → filters apply; edit mode still works.
@@ -161,7 +161,7 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 
 > Stop here: editing stays responsive on a large diagram.
 
-- [ ] Open a ~2000-line diagram → enable Edit → select, rename, and style an arrow → each interaction completes within ~1 s; auto-save fires.
+- [ ] Open a ~2000-line diagram (edit mode is on by default) → select, rename, and style an arrow → each interaction completes within ~1 s; auto-save fires.
 - [ ] Merge + style on the large diagram → still responsive.
 
 ## Increment 13 — Error & edge cases
