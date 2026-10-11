@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseViewsData, updateViewsData, DiagramConfig } from './views';
+import { parseViewsData, updateViewsData, DiagramConfig, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from './views';
 import { createSequenceDiagram, createFlowchartDiagram } from './editorTestHarness';
 
 describe('Views parsing and updating', () => {
@@ -147,3 +147,47 @@ describe('CONFIG arrows — create -> change -> verify (harness)', () => {
     expect(parseViewsData(emptied)).toBeNull();
   });
 });
+
+describe('CONFIG notes (StickyNote)', () => {
+  const notes: StickyNote[] = [
+    { id: 'note-1', x: 100, y: 150, text: 'First discussion thought', color: 'yellow' },
+    { id: 'note-2', x: 300, y: 250, text: 'Second thought: **bold**', color: 'blue' },
+  ];
+
+  it('round-trips sticky notes through parse/update', () => {
+    const code = `sequenceDiagram\n  A->>B: Hello`;
+    const config: DiagramConfig = { version: 1, notes };
+    const newCode = updateViewsData(code, config);
+    const parsed = parseViewsData(newCode);
+    expect(parsed?.notes).toEqual(notes);
+  });
+
+  it('adds, updates, and deletes sticky notes using helper functions', () => {
+    const code = `sequenceDiagram\n  A->>B: Hello`;
+    const note1: StickyNote = { id: 'n1', x: 50, y: 80, text: 'Hello note', color: 'green' };
+    
+    // Add
+    const codeWithNote = addStickyNote(code, note1);
+    expect(parseViewsData(codeWithNote)?.notes).toEqual([note1]);
+
+    // Update
+    const codeUpdated = updateStickyNote(codeWithNote, 'n1', { text: 'Updated note', x: 120 });
+    expect(parseViewsData(codeUpdated)?.notes).toEqual([
+      { id: 'n1', x: 120, y: 80, text: 'Updated note', color: 'green' }
+    ]);
+
+    // Delete
+    const codeDeleted = deleteStickyNote(codeUpdated, 'n1');
+    expect(parseViewsData(codeDeleted)).toBeNull();
+    expect(codeDeleted).toBe(code);
+  });
+
+  it('removes the header when views, actors, arrows, and notes are all empty', () => {
+    const code = `%% CONFIG: {"version":1,"notes":[{"id":"n1","x":0,"y":0,"text":"T"}]}\nsequenceDiagram\n  A->>B: Hello`;
+    const config: DiagramConfig = { version: 1, views: [], actors: {}, arrows: [], notes: [] };
+    const newCode = updateViewsData(code, config);
+    expect(newCode).toBe(`sequenceDiagram\n  A->>B: Hello`);
+    expect(parseViewsData(newCode)).toBeNull();
+  });
+});
+

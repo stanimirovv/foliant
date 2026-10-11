@@ -11,8 +11,9 @@ import {
   nearestParticipantAtX,
   ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo,
 } from '@/lib/svgmap';
-import { DiagramConfig } from '@/lib/views';
+import { DiagramConfig, StickyNote as StickyNoteType } from '@/lib/views';
 import { MessageInsertPosition } from '@/lib/editor';
+import StickyNote from './StickyNote';
 
 interface DiagramViewerProps {
   code: string;
@@ -32,6 +33,11 @@ interface DiagramViewerProps {
   onMoveMessageEndpoint?: (messageKey: string, end: 'from' | 'to', targetParticipantKey: string) => void;
   // Move a sequence message vertically up or down to reorder messages.
   onMoveMessage?: (messageKey: string, position: MessageInsertPosition) => void;
+  // Sticky notes:
+  notes?: StickyNoteType[];
+  showNotes?: boolean;
+  onUpdateNote?: (id: string, patch: Partial<Omit<StickyNoteType, 'id'>>) => void;
+  onDeleteNote?: (id: string) => void;
 }
 
 // Minimum mouse movement (px) before a press becomes a drag.
@@ -66,6 +72,7 @@ const PARTICIPANT_PAN_EXCLUSIONS = [
   'g.actor-man',
 ];
 const NODE_PAN_EXCLUSIONS = ['g.node'];
+const STICKY_PAN_EXCLUSIONS = ['sticky-note-card', 'sticky-note-handle'];
 
 interface DragState {
   type: 'reorder' | 'message' | 'node' | 'endpoint';
@@ -336,6 +343,10 @@ export default function DiagramViewer({
   onCreateMessageDrag,
   onMoveMessageEndpoint,
   onMoveMessage,
+  notes = [],
+  showNotes = true,
+  onUpdateNote,
+  onDeleteNote,
 }: DiagramViewerProps) {
   const [svgStr, setSvgStr] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -343,12 +354,15 @@ export default function DiagramViewer({
 
   // In edit mode, dragging a participant (sequence) or a node (flowchart)
   // must not pan the screen — exclude those elements from TransformWrapper
-  // panning.
+  // panning. Sticky notes are always excluded from panning.
   const diagramType = useMemo(() => parseModel(code).type, [code]);
   const isSequenceDiagram = diagramType === 'sequence';
   const isFlowchartDiagram = diagramType === 'flowchart';
   const panExcluded = editMode && (isSequenceDiagram || isFlowchartDiagram) && !!onSelect;
-  const panExclusions = isFlowchartDiagram ? NODE_PAN_EXCLUSIONS : PARTICIPANT_PAN_EXCLUSIONS;
+  const panExclusions = useMemo(() => {
+    const base = isFlowchartDiagram ? NODE_PAN_EXCLUSIONS : PARTICIPANT_PAN_EXCLUSIONS;
+    return [...STICKY_PAN_EXCLUSIONS, ...(panExcluded ? base : [])];
+  }, [isFlowchartDiagram, panExcluded]);
 
   const dragRef = useRef<DragState | null>(null);
   const suppressClickRef = useRef(false);
@@ -502,6 +516,9 @@ export default function DiagramViewer({
   // Capture phase: stopPropagation prevents TransformWrapper from starting a
   // pan when the press is on a participant/node element (or near a lifeline).
   const handleMouseDownCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if ((e.target as Element).closest('.sticky-note-card')) {
+      return;
+    }
     if (!editMode || e.button !== 0) return;
     const ctx = getSvgAndModel();
     if (!ctx || (ctx.model.type !== 'sequence' && ctx.model.type !== 'flowchart')) return;
@@ -968,6 +985,9 @@ export default function DiagramViewer({
       suppressClickRef.current = false;
       return;
     }
+    if ((e.target as Element).closest('.sticky-note-card')) {
+      return;
+    }
     if (!editMode || !onSelect) return;
     const ctx = getSvgAndModel();
     if (!ctx) return;
@@ -993,16 +1013,35 @@ export default function DiagramViewer({
         onMouseDownCapture={handleMouseDownCapture}
       >
         <TransformWrapper
-          panning={panExcluded ? { excluded: panExclusions } : undefined}
+          panning={{ excluded: panExclusions }}
         >
           <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full flex items-center justify-center p-8">
-            {svgStr
-              ? <div dangerouslySetInnerHTML={{ __html: svgStr }} />
-              : !code && !error && (
+            {svgStr ? (
+              <div className="relative inline-block" data-testid="diagram-canvas-root">
+                <div dangerouslySetInnerHTML={{ __html: svgStr }} />
+                {showNotes && notes && notes.length > 0 && (
+                  <div className="absolute inset-0 pointer-events-none" data-testid="sticky-notes-layer">
+                    {notes.map((note) => (
+                      <StickyNote
+                        key={note.id}
+                        note={note}
+                        getZoomScale={zoomScaleOf}
+                        onMove={(id, x, y) => onUpdateNote?.(id, { x, y })}
+                        onUpdateText={(id, text) => onUpdateNote?.(id, { text })}
+                        onUpdateColor={(id, color) => onUpdateNote?.(id, { color })}
+                        onDelete={(id) => onDeleteNote?.(id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              !code && !error && (
                 <div className="text-sm text-gray-400 select-none" data-testid="no-diagram">
                   No diagram selected
                 </div>
-              )}
+              )
+            )}
           </TransformComponent>
         </TransformWrapper>
       </div>

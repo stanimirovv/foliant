@@ -6,8 +6,8 @@ import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check } from 'lucide-react';
-import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode } from '@/lib/views';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon } from 'lucide-react';
+import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
@@ -46,7 +46,6 @@ export default function ClientPage() {
   // the selection survives transforms that reorder the processed diagram
   // (e.g. colored participants regrouped into box blocks).
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const selection = selectedKeys.length === 1 ? selectedKeys[0] : null;
   const setSelection = (key: string | null) => {
     setSelectedKeys(key ? [key] : []);
   };
@@ -596,6 +595,43 @@ export default function ClientPage() {
     // Select a newly created element (e.g. a message created by drag), so the
     // right panel shows it immediately.
     if (result.newKey) setSelection(result.newKey);
+  };
+
+  const [showNotes, setShowNotes] = useState(true);
+  const stickyNotes = useMemo(() => viewsData?.notes || [], [viewsData]);
+
+  const handleAddNote = () => {
+    let x = 120;
+    let y = 80;
+    const container = document.getElementById('diagram-container');
+    if (container) {
+      const svg = container.querySelector('svg');
+      if (svg) {
+        const rect = svg.getBoundingClientRect();
+        const offset = (stickyNotes.length % 6) * 20;
+        x = Math.max(20, Math.round(rect.width / 2 - 65 + offset));
+        y = Math.max(20, Math.round(rect.height / 2 - 55 + offset));
+      }
+    }
+    const newNote: StickyNote = {
+      id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      x,
+      y,
+      text: '',
+      color: 'yellow',
+    };
+    commitEdit(addStickyNote(rawCode, newNote));
+  };
+
+  const handleUpdateNote = (id: string, patch: Partial<Omit<StickyNote, 'id'>>) => {
+    const updated = updateStickyNote(rawCode, id, patch);
+    if (updated !== rawCode) {
+      commitEdit(updated);
+    }
+  };
+
+  const handleDeleteNote = (id: string) => {
+    commitEdit(deleteStickyNote(rawCode, id));
   };
 
   const undo = useCallback(() => {
@@ -1247,6 +1283,30 @@ export default function ClientPage() {
                   <span>Message</span>
                 </button>
                 <button
+                  onClick={handleAddNote}
+                  disabled={!rawCode}
+                  title="Add Sticky Note"
+                  data-testid="add-sticky-note"
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
+                    !rawCode ? 'opacity-40 cursor-not-allowed' : 'hover:bg-amber-50 hover:border-amber-300'
+                  }`}
+                >
+                  <StickyNoteIcon size={14} className="text-amber-600" />
+                  <span>+ Note</span>
+                </button>
+                <button
+                  onClick={() => setShowNotes(!showNotes)}
+                  title={showNotes ? 'Hide sticky notes' : 'Show sticky notes'}
+                  data-testid="toggle-sticky-notes"
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border ${
+                    showNotes
+                      ? 'bg-amber-100 border-amber-300 text-amber-900'
+                      : 'border-gray-200 text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  <span>Notes ({stickyNotes.length})</span>
+                </button>
+                <button
                   onClick={undo}
                   disabled={historyPast.length === 0}
                   title="Undo (Ctrl+Z)"
@@ -1284,7 +1344,7 @@ export default function ClientPage() {
             )}
           </div>
           <div className="flex items-center space-x-3">
-            {editMode && saveStatus !== 'idle' && (
+            {saveStatus !== 'idle' && (
               <span
                 data-testid="save-indicator"
                 className={`text-xs ${
@@ -1326,6 +1386,10 @@ export default function ClientPage() {
               onCreateMessageDrag={handleCreateMessageDrag}
               onMoveMessageEndpoint={handleMoveMessageEndpoint}
               onMoveMessage={handleMoveMessage}
+              notes={stickyNotes}
+              showNotes={showNotes}
+              onUpdateNote={handleUpdateNote}
+              onDeleteNote={handleDeleteNote}
             />
           </div>
           {editMode && (

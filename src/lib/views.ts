@@ -25,11 +25,22 @@ export interface ArrowStyle {
 // arrow's own tags.
 export type ArrowKeyMode = 'merged' | 'clean';
 
+export type StickyNoteColor = 'yellow' | 'green' | 'blue' | 'pink' | 'orange' | 'purple';
+
+export interface StickyNote {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  color?: StickyNoteColor;
+}
+
 export interface DiagramConfig {
   version: number;
   views?: SavedView[];
   actors?: Record<string, ActorMetadata>;
   arrows?: ArrowStyle[];
+  notes?: StickyNote[];
 }
 
 export const VIEWS_PREFIX = '%% VIEWS: ';
@@ -63,7 +74,8 @@ export function updateViewsData(code: string, config: DiagramConfig | null): str
   const emptyViews = !config?.views || config.views.length === 0;
   const emptyActors = !config?.actors || Object.keys(config.actors).length === 0;
   const emptyArrows = !config?.arrows || config.arrows.length === 0;
-  if (!config || (emptyViews && emptyActors && emptyArrows)) {
+  const emptyNotes = !config?.notes || config.notes.length === 0;
+  if (!config || (emptyViews && emptyActors && emptyArrows && emptyNotes)) {
     if (hasConfig) {
       lines.shift();
     }
@@ -79,4 +91,24 @@ export function updateViewsData(code: string, config: DiagramConfig | null): str
   }
   
   return lines.join('\n');
+}
+
+export function addStickyNote(code: string, note: StickyNote): string {
+  const config = parseViewsData(code) || { version: 1 };
+  const notes = [...(config.notes || []), note];
+  return updateViewsData(code, { ...config, notes });
+}
+
+export function updateStickyNote(code: string, id: string, patch: Partial<Omit<StickyNote, 'id'>>): string {
+  const config = parseViewsData(code);
+  if (!config || !config.notes) return code;
+  const notes = config.notes.map(n => n.id === id ? { ...n, ...patch } : n);
+  return updateViewsData(code, { ...config, notes });
+}
+
+export function deleteStickyNote(code: string, id: string): string {
+  const config = parseViewsData(code);
+  if (!config || !config.notes) return code;
+  const notes = config.notes.filter(n => n.id !== id);
+  return updateViewsData(code, { ...config, notes });
 }

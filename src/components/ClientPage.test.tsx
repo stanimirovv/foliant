@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act, within } from '@testing-library/react';
 import ClientPage from './ClientPage';
 import { parseModel } from '@/lib/model';
-import { parseViewsData } from '@/lib/views';
+import { parseViewsData, StickyNote } from '@/lib/views';
 import { createSequenceDiagram } from '@/lib/editorTestHarness';
 import mermaid from 'mermaid';
 
@@ -40,6 +40,10 @@ vi.mock('./DiagramViewer', () => ({
     onMoveParticipant?: (key: string, beforeKey: string | null) => void;
     onMoveMessageEndpoint?: (messageKey: string, end: 'from' | 'to', targetKey: string) => void;
     onMoveMessage?: (messageKey: string, position: { type: string; key?: string }) => void;
+    notes?: StickyNote[];
+    showNotes?: boolean;
+    onUpdateNote?: (id: string, patch: Partial<StickyNote>) => void;
+    onDeleteNote?: (id: string) => void;
   }) => (
     <div
       data-testid="diagram-viewer"
@@ -47,6 +51,17 @@ vi.mock('./DiagramViewer', () => ({
       data-edit-mode={String(props.editMode ?? false)}
       data-selection={Array.isArray(props.selection) ? props.selection.join(',') : (props.selection ?? '')}
     >
+      <div data-testid="mock-notes-info" data-count={props.notes?.length ?? 0} data-show={String(props.showNotes ?? true)} />
+      {props.notes && props.notes.length > 0 && (
+        <>
+          <button data-testid="mock-update-first-note" onClick={() => props.onUpdateNote?.(props.notes![0].id, { text: 'Updated from test' })}>
+            update first note
+          </button>
+          <button data-testid="mock-delete-first-note" onClick={() => props.onDeleteNote?.(props.notes![0].id)}>
+            delete first note
+          </button>
+        </>
+      )}
       {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0', 'n:0', 'n:1', 'e:0', 'e:1'].map(k => (
         <button
           key={k}
@@ -1524,7 +1539,7 @@ sequenceDiagram
       const code = viewer.getAttribute('data-code') ?? '';
       const cfg = parseViewsData(code);
       expect(cfg?.actors?.A?.keys).toContain('shared');
-      const arrow = cfg?.arrows?.find((a: any) => a.from === 'A' && a.to === 'B');
+      const arrow = cfg?.arrows?.find(a => a.from === 'A' && a.to === 'B');
       expect(arrow?.keys).toContain('shared');
     }, { timeout: 3000 });
 
@@ -1559,4 +1574,77 @@ sequenceDiagram
     fireEvent.click(screen.getByTestId('select-p:1'), { shiftKey: true });
     await screen.findByText('Selected Elements (2)');
   });
+
+  it('adds a sticky note via + Note button, updates count, and persists to CONFIG', async () => {
+    const viewer = await renderInEditMode(DEMO, 'Alice');
+
+    const notesInfo = screen.getByTestId('mock-notes-info');
+    expect(notesInfo.getAttribute('data-count')).toBe('0');
+
+    // Click + Note
+    const addNoteBtn = screen.getByTestId('add-sticky-note');
+    fireEvent.click(addNoteBtn);
+
+    await waitFor(() => {
+      expect(notesInfo.getAttribute('data-count')).toBe('1');
+      const parsed = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(parsed?.notes).toHaveLength(1);
+      expect(parsed?.notes?.[0].color).toBe('yellow');
+    });
+  });
+
+  it('toggles sticky notes visibility via toolbar toggle', async () => {
+    await renderInEditMode(DEMO, 'Alice');
+
+    const notesInfo = screen.getByTestId('mock-notes-info');
+    expect(notesInfo.getAttribute('data-show')).toBe('true');
+
+    // Click toggle
+    const toggleBtn = screen.getByTestId('toggle-sticky-notes');
+    fireEvent.click(toggleBtn);
+    expect(notesInfo.getAttribute('data-show')).toBe('false');
+
+    // Click toggle again
+    fireEvent.click(toggleBtn);
+    expect(notesInfo.getAttribute('data-show')).toBe('true');
+  });
+
+  it('updates and deletes a sticky note with undo/redo support', async () => {
+    const viewer = await renderInEditMode(DEMO, 'Alice');
+
+    // 1. Add note
+    fireEvent.click(screen.getByTestId('add-sticky-note'));
+    await screen.findByTestId('mock-update-first-note');
+
+    // 2. Update note text
+    fireEvent.click(screen.getByTestId('mock-update-first-note'));
+    await waitFor(() => {
+      const parsed = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(parsed?.notes?.[0].text).toBe('Updated from test');
+    });
+
+    // 3. Undo reverts text edit
+    const undoBtn = screen.getByTitle('Undo (Ctrl+Z)');
+    fireEvent.click(undoBtn);
+    await waitFor(() => {
+      const parsed = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(parsed?.notes?.[0].text).toBe('');
+    });
+
+    // 4. Redo restores text edit
+    const redoBtn = screen.getByTitle('Redo (Ctrl+Y)');
+    fireEvent.click(redoBtn);
+    await waitFor(() => {
+      const parsed = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(parsed?.notes?.[0].text).toBe('Updated from test');
+    });
+
+    // 5. Delete note
+    fireEvent.click(screen.getByTestId('mock-delete-first-note'));
+    await waitFor(() => {
+      const parsed = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(parsed?.notes ?? []).toHaveLength(0);
+    });
+  });
 });
+

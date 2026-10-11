@@ -1387,3 +1387,59 @@ describe('DiagramViewer transition animation (FLIP)', () => {
     }
   });
 });
+
+describe('DiagramViewer sticky notes overlay', () => {
+  it('renders sticky notes layer when notes are provided and showNotes is true', async () => {
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        notes={[{ id: 'n1', x: 50, y: 50, text: 'Note content', color: 'yellow' }]}
+        showNotes={true}
+      />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="sticky-notes-layer"]')).toBeTruthy();
+      expect(container.querySelector('[data-testid="sticky-note-n1"]')).toBeTruthy();
+      expect(container.textContent).toContain('Note content');
+    });
+  });
+
+  it('hides sticky notes when showNotes is false', async () => {
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        notes={[{ id: 'n1', x: 50, y: 50, text: 'Note content', color: 'yellow' }]}
+        showNotes={false}
+      />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('svg')).toBeTruthy();
+    });
+    expect(container.querySelector('[data-testid="sticky-notes-layer"]')).toBeNull();
+  });
+
+  it('does not trigger onSelect when clicking a sticky note in edit mode', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        editMode={true}
+        onSelect={onSelect}
+        notes={[{ id: 'n1', x: 50, y: 50, text: 'Note content', color: 'yellow' }]}
+        showNotes={true}
+      />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="sticky-note-n1"]')).toBeTruthy();
+    });
+    const noteCard = container.querySelector('[data-testid="sticky-note-n1"]')!;
+    fireEvent.click(noteCard);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
