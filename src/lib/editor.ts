@@ -511,7 +511,14 @@ export function moveParticipant(
   }
 
   lines.splice(insertAt, 0, participantLine);
-  return { code: lines.join('\n'), config };
+  const newCode = lines.join('\n');
+  // Report the moved participant's key in the new code: keys are positional,
+  // so the key changes when the participant changes position. Lets the UI
+  // keep the dragged participant selected after the reorder.
+  const moved = parseModel(newCode).elements.find(
+    e => e.kind === 'participant' && e.id === el.id
+  );
+  return { code: newCode, config, newKey: moved?.key };
 }
 
 export function deleteElement(code: string, config: DiagramConfig | null, key: string): EditResult {

@@ -12,8 +12,9 @@ import { parseModel, ModelElement } from '@/lib/model';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  moveParticipant, EditResult, ArrowStylePatch, MessageInsertPosition,
+  EditResult, ArrowStylePatch, MessageInsertPosition,
 } from '@/lib/editor';
+import { resolveParticipantReorder } from '@/lib/reorder';
 import { buildSelectionMap } from '@/lib/svgmap';
 import { rewriteArrowStyles } from '@/lib/styling';
 import { PendingDelete } from './EditorPanel';
@@ -409,14 +410,22 @@ export default function ClientPage() {
   // --- Drag callbacks (processed keys -> raw keys via the selection map) ---
 
   // DiagramViewer drag: reorder a participant. beforeKey is the processed key
-  // of the participant to insert before, or null to move to the end.
+  // of the participant to insert before, or null to move to the end. The drop
+  // is computed in rendered order, so resolve it against the raw code through
+  // the processing pipeline: transformActors regroups participants into color
+  // boxes, so rendered order is not the raw declaration order.
   const handleMoveParticipant = (processedKey: string, beforeProcessedKey: string | null) => {
-    const raw = selectionMap.get(processedKey);
-    if (!raw) return;
-    const beforeRawKey = beforeProcessedKey
-      ? selectionMap.get(beforeProcessedKey)?.key
-      : undefined;
-    applyEditResult(moveParticipant(rawCode, viewsData, raw.key, beforeRawKey));
+    applyEditResult(resolveParticipantReorder(
+      rawCode,
+      processedCode,
+      processedKey,
+      beforeProcessedKey,
+      {
+        config: viewsData,
+        actorOptions,
+        isRegionVisible: (region) => !hiddenPaths.has(region.path),
+      },
+    ));
   };
 
   // DiagramViewer drag: create a message by dragging from one participant to

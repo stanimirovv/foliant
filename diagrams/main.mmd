@@ -1,9 +1,9 @@
 %% CONFIG: {"version":1,"views":[{"name":"Happy Path","hiddenPaths":["flow=login/edge-case=invalid-password","flow=login/note"]}],"actors":{"Auth":{"color":"red","keys":["backend"]},"DB":{"color":"red","keys":["backend","database"]},"API":{"color":"blue","keys":["backend","gateway"]}}}
 sequenceDiagram
+    participant C as Client
+    participant API as API Gateway
     participant Auth as Auth Service
     participant DB as Database
-    participant API as API Gateway
-    participant C as Client
 
     %% @region-start: flow=login
     C->>API: POST /login
@@ -15,7 +15,6 @@ sequenceDiagram
     
     %% @region-start: edge-case=invalid-password
     Auth-->>API: 401 Unauthorized
-    API-->>DB: New message
     API-->>C: Error: Invalid Credentials
     %% @region-end
     

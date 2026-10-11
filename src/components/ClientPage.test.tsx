@@ -61,6 +61,12 @@ vi.mock('./DiagramViewer', () => ({
       >
         drag move participant
       </button>
+      <button
+        data-testid="drag-move-participant-front"
+        onClick={() => props.onMoveParticipant?.('p:3', 'p:0')}
+      >
+        drag move participant to front
+      </button>
     </div>
   ),
 }));
@@ -297,6 +303,37 @@ describe('ClientPage', () => {
       expect(viewer.getAttribute('data-selection')).toBe('m:2');
     }, { timeout: 3000 });
     const input = await screen.findByDisplayValue('New message');
+    expect(input).toBeTruthy();
+  });
+
+  it('dragging a participant reorders it in the rendered diagram and keeps it selected', async () => {
+    // Actor colors regroup participants into boxes, so the rendered order
+    // (C, Auth, DB, API) differs from the declaration order (Auth, DB, API, C).
+    const COLORED = `%% CONFIG: {"version":1,"actors":{"Auth":{"color":"red"},"DB":{"color":"red"},"API":{"color":"blue"}}}
+sequenceDiagram
+    participant Auth as Auth Service
+    participant DB as Database
+    participant API as API Gateway
+    participant C as Client
+    Auth->>API: ping`;
+    const viewer = await renderInEditMode(COLORED, 'Auth->>API: ping');
+
+    // Drag the rendered-rightmost participant (API, processed p:3) to the front.
+    fireEvent.click(screen.getByTestId('drag-move-participant-front'));
+
+    // Rendered order becomes C, API, Auth, DB (C is uncolored and stays first).
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const ids = [...code.matchAll(/^\s*participant\s+(\S+)/gm)].map(m => m[1]);
+      expect(ids).toEqual(['C', 'API', 'Auth', 'DB']);
+    }, { timeout: 3000 });
+    // The dragged participant stays selected: API is now rendered at index 1,
+    // so its processed key is p:1, and the right panel shows API's editor (not
+    // the participant that previously held the selection).
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-selection')).toBe('p:1');
+    }, { timeout: 3000 });
+    const input = await screen.findByDisplayValue('API Gateway');
     expect(input).toBeTruthy();
   });
 

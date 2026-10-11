@@ -429,6 +429,17 @@ describe('moveParticipant', () => {
     expect(lines[4]).toBe('    A->>B: Hello');
   });
 
+  it('reports the moved participant key (newKey) after a reorder', () => {
+    // Keys are positional: moving A (p:0) to the end makes it p:2.
+    expect(moveParticipant(SEQ3, null, 'p:0').newKey).toBe('p:2');
+    // Moving C (p:2) to the front makes it p:0.
+    expect(moveParticipant(SEQ3, null, 'p:2', 'p:0').newKey).toBe('p:0');
+    // The reported key resolves to the moved participant in the resulting code.
+    const res = moveParticipant(SEQ3, null, 'p:1', 'p:0');
+    const el = parseModel(res.code).elements.find(e => e.key === res.newKey);
+    expect(el).toMatchObject({ kind: 'participant', id: 'B' });
+  });
+
   it('moves a participant before the next one (swap adjacent)', () => {
     // Move A before B is a no-op (A is already before B)
     const res = moveParticipant(SEQ3, null, 'p:0', 'p:1');
