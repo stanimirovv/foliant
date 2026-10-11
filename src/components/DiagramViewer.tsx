@@ -7,8 +7,9 @@ import { parseModel, ParticipantElement } from '@/lib/model';
 import { applyArrowStyles, applyNodeColors } from '@/lib/styling';
 import {
   elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf,
-  getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, nearestParticipantAtX,
-  ParticipantScreenInfo, MessageScreenInfo,
+  getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
+  nearestParticipantAtX,
+  ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo,
 } from '@/lib/svgmap';
 import { DiagramConfig } from '@/lib/views';
 import { MessageInsertPosition } from '@/lib/editor';
@@ -26,6 +27,11 @@ interface DiagramViewerProps {
   // onMoveParticipant moves a participant (sequence) or a node (flowchart).
   onMoveParticipant?: (participantKey: string, beforeKey: string | null) => void;
   onCreateMessageDrag?: (fromKey: string, toKey: string, position: MessageInsertPosition) => void;
+  // Retarget a sequence message: end 'to' drags the arrow head (recipient),
+  // 'from' drags the tail (origin) onto the participant with the given key.
+  onMoveMessageEndpoint?: (messageKey: string, end: 'from' | 'to', targetParticipantKey: string) => void;
+  // Move a sequence message vertically up or down to reorder messages.
+  onMoveMessage?: (messageKey: string, position: MessageInsertPosition) => void;
 }
 
 // Minimum mouse movement (px) before a press becomes a drag.
@@ -34,6 +40,20 @@ const DRAG_THRESHOLD = 5;
 // How close (px) the cursor must be to a participant's center X to grab its
 // lifeline from empty space (the rendered lifeline stroke is only 1–2 px).
 const LIFELINE_HIT_THRESHOLD = 20;
+
+// How close (px) the cursor must be to a message's arrow head or tail to grab
+// it for an endpoint retarget drag. Deliberately small: messages sit ~20px
+// apart on a lifeline, and an 8px radius still leaves a pressable gap between
+// two adjacent endpoint zones for lifeline message creation (the insertion
+// point comes from the drop position, so the press only needs one clear spot
+// on the lifeline).
+const ENDPOINT_GRAB_RADIUS = 8;
+
+// When that message is already selected, its endpoint grab zones grow to this
+// radius: the user has committed to the arrow, so its head/tail become easy to
+// grab. Unselected messages keep the small radius so message creation on the
+// lifelines stays easy.
+const ENDPOINT_GRAB_RADIUS_SELECTED = 24;
 
 // SVG selectors for every element that resolves to a participant (the same
 // set elementKeyAtTarget checks). Excluded from TransformWrapper panning in
@@ -48,7 +68,7 @@ const PARTICIPANT_PAN_EXCLUSIONS = [
 const NODE_PAN_EXCLUSIONS = ['g.node'];
 
 interface DragState {
-  type: 'reorder' | 'message' | 'node';
+  type: 'reorder' | 'message' | 'node' | 'endpoint';
   participantKey: string;   // processed key of the dragged participant/node
   participantId: string;
   startX: number;
@@ -65,11 +85,18 @@ interface DragState {
   // Flowchart node drags: 'connect' while the cursor is over another node
   // (drop creates an edge), 'move' otherwise (drop reorders the node).
   flowMode: 'move' | 'connect' | null;
+  // Endpoint drag (sequence messages): retarget a message's origin ('from')
+  // or recipient ('to') onto another participant.
+  messageKey: string | null;         // processed key of the message
+  endpointEnd: 'from' | 'to' | null;  // which end is dragged
+  endpointCurrentId: string | null;   // participant id currently at that end (drop on it = no-op)
+  endpointFixedX: number;            // screen point of the endpoint that stays put
+  endpointFixedY: number;
 }
 
 // Visual overlay data (screen coordinates, rendered in a fixed SVG).
 interface DragOverlay {
-  type: 'reorder' | 'message';
+  type: 'reorder' | 'message' | 'endpoint';
   // Reorder: dashed insertion line — vertical for horizontal layouts
   // (sequence diagrams, flowchart TD/BT), horizontal for LR/RL flowcharts.
   reorderX: number | null;
@@ -79,6 +106,7 @@ interface DragOverlay {
   reorderX1: number;
   reorderX2: number;
   // Message: drag line from source to cursor + horizontal insertion indicator.
+  // Endpoint: drag line from the fixed endpoint to the cursor.
   lineX1: number;
   lineY1: number;
   lineX2: number;
@@ -87,6 +115,8 @@ interface DragOverlay {
   insertX1: number;
   insertX2: number;
   hasTarget: boolean;
+  // Endpoint: dashed highlight rect around the participant the drop would land on.
+  targetRect: { left: number; top: number; width: number; height: number } | null;
 }
 
 // The layout axis of a flowchart: TD/BT stack nodes vertically (same-rank
@@ -133,6 +163,34 @@ function computeReorderDrop(
     };
   }
   return { beforeKey: null, indicator: endEdge(last) + 15 };
+}
+
+// The message endpoint (arrow head = 'to', tail = 'from') nearest to the
+// cursor, within the grab radius. A selected message's endpoints get the much
+// larger ENDPOINT_GRAB_RADIUS_SELECTED zone. Candidates are checked head-first
+// and only a strictly closer point replaces the best, so a self-message (head
+// and tail coincide on the lifeline) resolves to the head.
+function endpointHitAt(
+  endpoints: MessageEndpointScreenInfo[],
+  x: number,
+  y: number,
+  selectedKey: string | null,
+): { key: string; end: 'from' | 'to'; fixedX: number; fixedY: number } | null {
+  let best: { key: string; end: 'from' | 'to'; fixedX: number; fixedY: number; d: number } | null = null;
+  for (const ep of endpoints) {
+    const radius = ep.key === selectedKey ? ENDPOINT_GRAB_RADIUS_SELECTED : ENDPOINT_GRAB_RADIUS;
+    const candidates = [
+      { end: 'to' as const, x: ep.toX, y: ep.toY, fixedX: ep.fromX, fixedY: ep.fromY },
+      { end: 'from' as const, x: ep.fromX, y: ep.fromY, fixedX: ep.toX, fixedY: ep.toY },
+    ];
+    for (const c of candidates) {
+      const d = Math.hypot(c.x - x, c.y - y);
+      if (d <= radius && (!best || d < best.d)) {
+        best = { key: ep.key, end: c.end, fixedX: c.fixedX, fixedY: c.fixedY, d };
+      }
+    }
+  }
+  return best;
 }
 
 // --- Transition animation (FLIP) --------------------------------------------
@@ -274,6 +332,8 @@ export default function DiagramViewer({
   onSelect,
   onMoveParticipant,
   onCreateMessageDrag,
+  onMoveMessageEndpoint,
+  onMoveMessage,
 }: DiagramViewerProps) {
   const [svgStr, setSvgStr] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -409,6 +469,12 @@ export default function DiagramViewer({
   //     message: drag to another participant and release to connect. A drag
   //     line follows the cursor and a green horizontal indicator shows the
   //     vertical insertion point (top / between messages / bottom).
+  //   - Message arrow head / tail (within ENDPOINT_GRAB_RADIUS px of the
+  //     endpoint — ENDPOINT_GRAB_RADIUS_SELECTED px when that message is
+  //     selected) → retarget: drag the head to change the recipient, the tail
+  //     to change the origin. The unselected grab zones are small and sit on
+  //     the lifelines, so lifeline presses away from an endpoint still create
+  //     a message. Takes precedence over a lifeline press at the same point.
   // Flowchart diagrams:
   //   - Node box (g.node) → node drag: release over another node to connect
   //     them (a drag line follows the cursor), release over empty space to
@@ -433,11 +499,35 @@ export default function DiagramViewer({
     const target = e.target as Element;
     const key = elementKeyAtTarget(target, ctx.svgRoot, ctx.model);
 
-    let dragType: 'reorder' | 'message' | 'node' | null = null;
+    let dragType: 'reorder' | 'message' | 'node' | 'endpoint' | null = null;
     let participantKey: string | null = null;
     let cachedParticipants: ParticipantScreenInfo[] | null = null;
+    // Endpoint drag (sequence): grabbing a message's arrow head or tail.
+    let endpointHit: { key: string; end: 'from' | 'to'; fixedX: number; fixedY: number } | null = null;
+    let endpointCurrentId: string | null = null;
 
-    if (key) {
+    if (ctx.model.type === 'sequence') {
+      endpointHit = endpointHitAt(
+        getMessageEndpointScreenInfo(ctx.svgRoot, ctx.model),
+        e.clientX,
+        e.clientY,
+        selection,
+      );
+      if (endpointHit) {
+        const msgEl = ctx.model.elements.find(e2 => e2.key === endpointHit!.key);
+        endpointCurrentId = msgEl && msgEl.kind === 'message'
+          ? (endpointHit.end === 'from' ? msgEl.from : msgEl.to)
+          : null;
+      }
+    }
+
+    if (endpointHit) {
+      // Precise grab zones around the endpoints win over a lifeline press at
+      // the same point; message creation keeps the rest of the lifeline.
+      dragType = 'endpoint';
+      participantKey = endpointHit.key;
+      cachedParticipants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
+    } else if (key) {
       const el = ctx.model.elements.find(e2 => e2.key === key);
       if (el?.kind === 'participant') {
         // Actor box → reorder; lifeline → message.
@@ -506,10 +596,15 @@ export default function DiagramViewer({
       toParticipantId: null,
       insertPosition: null,
       flowMode: null,
+      messageKey: endpointHit ? endpointHit.key : null,
+      endpointEnd: endpointHit ? endpointHit.end : null,
+      endpointCurrentId,
+      endpointFixedX: endpointHit ? endpointHit.fixedX : 0,
+      endpointFixedY: endpointHit ? endpointHit.fixedY : 0,
     };
     suppressClickRef.current = false;
 
-    // Select the participant/node on press.
+    // Select the participant/node (or the grabbed message) on press.
     onSelect(participantKey);
   };
 
@@ -517,6 +612,95 @@ export default function DiagramViewer({
   const computeOverlay = (drag: DragState): DragOverlay | null => {
     const cache = screenCacheRef.current;
     if (!cache) return null;
+
+    if (drag.type === 'endpoint') {
+      // Drag line from the fixed endpoint to the cursor.
+      // If cursor moves over another participant: retarget the endpoint (change actor).
+      // If cursor stays near the same participant (or dragged vertically): reorder the message!
+      const target = nearestParticipantAtX(cache.participants, drag.currentX);
+      const isDifferentActor = target && target.id !== drag.endpointCurrentId;
+      const validTarget = isDifferentActor ? target : null;
+      drag.toParticipantKey = validTarget ? validTarget.key : null;
+      drag.toParticipantId = validTarget ? validTarget.id : null;
+
+      if (validTarget) {
+        drag.insertPosition = null;
+        return {
+          type: 'endpoint',
+          reorderX: null,
+          reorderY1: 0,
+          reorderY2: 0,
+          reorderY: null,
+          reorderX1: 0,
+          reorderX2: 0,
+          lineX1: drag.endpointFixedX,
+          lineY1: drag.endpointFixedY,
+          lineX2: drag.currentX,
+          lineY2: drag.currentY,
+          insertY: null,
+          insertX1: 0,
+          insertX2: 0,
+          hasTarget: true,
+          targetRect: {
+            left: validTarget.left - 4,
+            top: validTarget.top - 4,
+            width: validTarget.right - validTarget.left + 8,
+            height: validTarget.bottom - validTarget.top + 8,
+          },
+        };
+      }
+
+      // Dragging vertically: reorder the message among the other messages.
+      const otherMsgs = [...cache.messages]
+        .filter(m => m.key !== drag.messageKey)
+        .sort((a, b) => a.y - b.y);
+
+      let insertPosition: MessageInsertPosition | null = null;
+      let insertY: number | null = null;
+
+      if (otherMsgs.length === 0) {
+        insertPosition = { type: 'top' };
+        insertY = drag.startY;
+      } else if (drag.currentY < otherMsgs[0].y) {
+        insertPosition = { type: 'before', key: otherMsgs[0].key };
+        insertY = otherMsgs[0].y - 8;
+      } else if (drag.currentY > otherMsgs[otherMsgs.length - 1].y) {
+        insertPosition = { type: 'after', key: otherMsgs[otherMsgs.length - 1].key };
+        insertY = otherMsgs[otherMsgs.length - 1].y + 12;
+      } else {
+        for (let i = 0; i < otherMsgs.length - 1; i++) {
+          if (drag.currentY >= otherMsgs[i].y && drag.currentY <= otherMsgs[i + 1].y) {
+            insertPosition = { type: 'after', key: otherMsgs[i].key };
+            insertY = (otherMsgs[i].y + otherMsgs[i + 1].y) / 2;
+            break;
+          }
+        }
+      }
+      drag.insertPosition = insertPosition;
+
+      const minX = Math.min(...cache.participants.map(p => p.left));
+      const maxX = Math.max(...cache.participants.map(p => p.right));
+
+      return {
+        type: 'endpoint',
+        reorderX: null,
+        reorderY1: 0,
+        reorderY2: 0,
+        reorderY: null,
+        reorderX1: 0,
+        reorderX2: 0,
+        lineX1: drag.endpointFixedX,
+        lineY1: drag.endpointFixedY,
+        lineX2: drag.currentX,
+        lineY2: drag.currentY,
+        insertY,
+        insertX1: minX - 10,
+        insertX2: maxX + 10,
+        hasTarget: false,
+        targetRect: null,
+      };
+    }
+
     const source = cache.participants.find(p => p.key === drag.participantKey);
     if (!source) return null;
 
@@ -541,6 +725,7 @@ export default function DiagramViewer({
         lineX1: 0, lineY1: 0, lineX2: 0, lineY2: 0,
         insertY: null, insertX1: 0, insertX2: 0,
         hasTarget: true,
+        targetRect: null,
       };
     }
 
@@ -574,6 +759,7 @@ export default function DiagramViewer({
           insertX1: 0,
           insertX2: 0,
           hasTarget: true,
+          targetRect: null,
         };
       }
       // Move: dashed insertion indicator along the layout axis.
@@ -600,6 +786,7 @@ export default function DiagramViewer({
           lineX1: 0, lineY1: 0, lineX2: 0, lineY2: 0,
           insertY: null, insertX1: 0, insertX2: 0,
           hasTarget: true,
+          targetRect: null,
         };
       }
       // Horizontal extent: from left of the node boxes to right of the SVG.
@@ -616,6 +803,7 @@ export default function DiagramViewer({
         lineX1: 0, lineY1: 0, lineX2: 0, lineY2: 0,
         insertY: null, insertX1: 0, insertX2: 0,
         hasTarget: true,
+        targetRect: null,
       };
     }
 
@@ -680,6 +868,7 @@ export default function DiagramViewer({
       insertX1: insX1,
       insertX2: insX2,
       hasTarget: validTarget !== null,
+      targetRect: null,
     };
   };
 
@@ -731,6 +920,14 @@ export default function DiagramViewer({
             onMoveParticipant(drag.participantKey, drag.targetBeforeKey);
           }
         }
+      } else if (drag.type === 'endpoint') {
+        // Retarget the message's endpoint when released over a different participant.
+        // Otherwise, reorder the message vertically if dragged up/down.
+        if (onMoveMessageEndpoint && drag.messageKey && drag.endpointEnd && drag.toParticipantKey) {
+          onMoveMessageEndpoint(drag.messageKey, drag.endpointEnd, drag.toParticipantKey);
+        } else if (onMoveMessage && drag.messageKey && drag.insertPosition) {
+          onMoveMessage(drag.messageKey, drag.insertPosition);
+        }
       } else {
         // Message drag: only create when released over a different participant.
         if (onCreateMessageDrag && drag.toParticipantKey && drag.insertPosition) {
@@ -746,7 +943,7 @@ export default function DiagramViewer({
       window.removeEventListener('mouseup', onMouseUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode, code, selection, onMoveParticipant, onCreateMessageDrag]);
+  }, [editMode, code, selection, onMoveParticipant, onCreateMessageDrag, onMoveMessageEndpoint, onMoveMessage]);
 
   // Click delegation: in edit mode, resolve the target to a processed element
   // key (null = empty space -> deselect). Suppressed after a drag.
@@ -830,6 +1027,43 @@ export default function DiagramViewer({
                 stroke={dragOverlay.hasTarget ? '#3b82f6' : '#9ca3af'}
                 strokeWidth={2}
               />
+              {dragOverlay.insertY !== null && (
+                <line
+                  data-testid="message-insert-indicator"
+                  x1={dragOverlay.insertX1}
+                  y1={dragOverlay.insertY}
+                  x2={dragOverlay.insertX2}
+                  y2={dragOverlay.insertY}
+                  stroke="#22c55e"
+                  strokeWidth={3}
+                />
+              )}
+            </>
+          )}
+          {dragOverlay.type === 'endpoint' && (
+            <>
+              <line
+                data-testid="endpoint-drag-line"
+                x1={dragOverlay.lineX1}
+                y1={dragOverlay.lineY1}
+                x2={dragOverlay.lineX2}
+                y2={dragOverlay.lineY2}
+                stroke={dragOverlay.hasTarget ? '#3b82f6' : '#9ca3af'}
+                strokeWidth={2}
+              />
+              {dragOverlay.targetRect && (
+                <rect
+                  data-testid="endpoint-snap-rect"
+                  x={dragOverlay.targetRect.left}
+                  y={dragOverlay.targetRect.top}
+                  width={dragOverlay.targetRect.width}
+                  height={dragOverlay.targetRect.height}
+                  fill="none"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  strokeDasharray="4 3"
+                />
+              )}
               {dragOverlay.insertY !== null && (
                 <line
                   data-testid="message-insert-indicator"

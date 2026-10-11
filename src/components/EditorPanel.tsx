@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
 import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, DiagramType } from '@/lib/model';
-import { ArrowStylePatch } from '@/lib/editor';
-import { DiagramConfig } from '@/lib/views';
+import { ArrowStylePatch, ArrowTagInfo } from '@/lib/editor';
+import { DiagramConfig, ArrowKeyMode } from '@/lib/views';
 
 // Operator vocabularies (EDITING_PLAN.md Section 4.8); keep in sync with
 // editor.ts (setArrowType validates against the same sets).
@@ -23,6 +23,7 @@ interface EditorPanelProps {
   diagramType: DiagramType;
   config: DiagramConfig | null;   // current CONFIG (field values + datalists)
   arrowStyle: ArrowStylePatch | null;  // current style of the selected message/edge
+  arrowTags: ArrowTagInfo | null; // tags of the selected message/edge (own + behavior)
   warning?: string | null;
   pendingDelete: PendingDelete | null; // delete confirmation state
   onEditLabel: (newLabel: string) => void;
@@ -32,6 +33,7 @@ interface EditorPanelProps {
   onSetDash: (dash: Dash) => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
+  onSetKeyMode: (mode: ArrowKeyMode) => void;
   onRequestDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
@@ -68,6 +70,7 @@ export default function EditorPanel({
   diagramType,
   config,
   arrowStyle,
+  arrowTags,
   warning,
   pendingDelete,
   onEditLabel,
@@ -77,6 +80,7 @@ export default function EditorPanel({
   onSetDash,
   onAddTag,
   onRemoveTag,
+  onSetKeyMode,
   onRequestDelete,
   onConfirmDelete,
   onCancelDelete,
@@ -93,6 +97,7 @@ export default function EditorPanel({
   if (config?.arrows) {
     for (const a of config.arrows) {
       if (a.color && !arrowColors.includes(a.color)) arrowColors.push(a.color);
+      if (a.keys) for (const k of a.keys) if (!actorKeys.includes(k)) actorKeys.push(k);
     }
   }
 
@@ -131,12 +136,17 @@ export default function EditorPanel({
           element={element}
           diagramType={diagramType}
           arrowStyle={arrowStyle}
+          arrowTags={arrowTags}
           arrowColors={arrowColors}
+          actorKeys={actorKeys}
           onEditLabel={onEditLabel}
           onSetColor={onSetColor}
           onSetType={onSetType}
           onSetWidth={onSetWidth}
           onSetDash={onSetDash}
+          onAddTag={onAddTag}
+          onRemoveTag={onRemoveTag}
+          onSetKeyMode={onSetKeyMode}
           onRequestDelete={onRequestDelete}
         />
       )}
@@ -312,23 +322,39 @@ interface ArrowFieldsProps {
   element: MessageElement | EdgeElement;
   diagramType: DiagramType;
   arrowStyle: ArrowStylePatch | null;
+  arrowTags: ArrowTagInfo | null;
   arrowColors: string[];
+  actorKeys: string[];
   onEditLabel: (newLabel: string) => void;
   onSetColor: (color: string) => void;
   onSetType: (operator: string) => void;
   onSetWidth: (width: number | '') => void;
   onSetDash: (dash: Dash) => void;
+  onAddTag: (tag: string) => void;
+  onRemoveTag: (tag: string) => void;
+  onSetKeyMode: (mode: ArrowKeyMode) => void;
   onRequestDelete: () => void;
 }
 
 function ArrowFields({
-  element, diagramType, arrowStyle, arrowColors,
-  onEditLabel, onSetColor, onSetType, onSetWidth, onSetDash, onRequestDelete,
+  element, diagramType, arrowStyle, arrowTags, arrowColors, actorKeys,
+  onEditLabel, onSetColor, onSetType, onSetWidth, onSetDash,
+  onAddTag, onRemoveTag, onSetKeyMode, onRequestDelete,
 }: ArrowFieldsProps) {
   const vocabulary = diagramType === 'flowchart' ? FLOWCHART_OPERATORS : SEQUENCE_OPERATORS;
   const operators = vocabulary.includes(element.operator)
     ? vocabulary
     : [element.operator, ...vocabulary];
+  const [tagInput, setTagInput] = useState('');
+  const ownTags = arrowTags?.keys ?? [];
+  const inheritedTags = arrowTags?.inherited ?? [];
+  const keyMode: ArrowKeyMode = arrowTags?.keyMode ?? 'merged';
+
+  const submitTag = () => {
+    const tag = tagInput.trim();
+    if (tag) onAddTag(tag);
+    setTagInput('');
+  };
 
   return (
     <div className="space-y-3">
@@ -396,6 +422,91 @@ function ArrowFields({
           {DASH_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
       </label>
+
+      <div>
+        <span className={fieldLabel}>Tags</span>
+        {ownTags.length > 0 || inheritedTags.length > 0 ? (
+          <div className="flex flex-wrap gap-1 mb-1">
+            {ownTags.map(tag => (
+              <span
+                key={tag}
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs"
+              >
+                {tag}
+                <button
+                  type="button"
+                  aria-label={`Remove tag ${tag}`}
+                  onClick={() => onRemoveTag(tag)}
+                  className="ml-1 hover:text-blue-900"
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+            {inheritedTags.map(tag => (
+              <span
+                key={tag}
+                title={`Inherited from ${element.from}`}
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-xs"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex space-x-1">
+          <input
+            type="text"
+            className={fieldInput}
+            placeholder="Add tag..."
+            list="editor-arrow-tag-list"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitTag();
+              }
+            }}
+          />
+          <button
+            type="button"
+            title="Add tag"
+            data-testid="add-arrow-tag"
+            onClick={submitTag}
+            className="px-2 text-xs rounded border border-gray-200 hover:bg-gray-100"
+          >
+            Add
+          </button>
+        </div>
+        <datalist id="editor-arrow-tag-list">
+          {actorKeys.map(k => <option key={k} value={k} />)}
+        </datalist>
+      </div>
+
+      <div>
+        <span className={fieldLabel}>Inherit service tags</span>
+        <div className="flex border border-gray-200 rounded overflow-hidden text-[10px] w-full bg-gray-50">
+          <button
+            type="button"
+            data-testid="arrow-inherit-on"
+            title="Merged: the message also carries the tags of the service it originates from"
+            onClick={() => onSetKeyMode('merged')}
+            className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${keyMode === 'merged' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+          >
+            On
+          </button>
+          <button
+            type="button"
+            data-testid="arrow-inherit-off"
+            title="Clean: only the message's own tags"
+            onClick={() => onSetKeyMode('clean')}
+            className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${keyMode === 'clean' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+          >
+            Off
+          </button>
+        </div>
+      </div>
 
       <DeleteButton onRequestDelete={onRequestDelete} />
     </div>

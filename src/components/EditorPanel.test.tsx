@@ -43,6 +43,7 @@ const makeProps = (overrides: Partial<Props> = {}): Props => ({
   diagramType: 'sequence',
   config: null,
   arrowStyle: null,
+  arrowTags: null,
   warning: null,
   pendingDelete: null,
   onEditLabel: vi.fn(),
@@ -52,6 +53,7 @@ const makeProps = (overrides: Partial<Props> = {}): Props => ({
   onSetDash: vi.fn(),
   onAddTag: vi.fn(),
   onRemoveTag: vi.fn(),
+  onSetKeyMode: vi.fn(),
   onRequestDelete: vi.fn(),
   onConfirmDelete: vi.fn(),
   onCancelDelete: vi.fn(),
@@ -167,6 +169,53 @@ describe('EditorPanel', () => {
 
     fireEvent.click(screen.getByTestId('panel-delete'));
     expect(props.onRequestDelete).toHaveBeenCalled();
+  });
+
+  it('message fields dispatch tags and the inherit-tags toggle', () => {
+    const props = makeProps({
+      element: message0,
+      config: {
+        version: 1,
+        actors: { A: { keys: ['backend'] } },
+        arrows: [{ from: 'A', to: 'B', label: 'Hello', keys: ['critical'] }],
+      },
+      arrowTags: { keys: ['critical'], keyMode: 'merged', inherited: ['backend'] },
+    });
+    render(<EditorPanel {...props} />);
+
+    // own tag renders as a removable chip; the inherited service tag is a
+    // read-only chip (no remove button)
+    expect(screen.getByText('critical')).toBeTruthy();
+    const inheritedChip = screen.getByText('backend');
+    expect(inheritedChip.title).toBe('Inherited from A');
+    expect(screen.queryByLabelText('Remove tag backend')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Remove tag critical'));
+    expect(props.onRemoveTag).toHaveBeenCalledWith('critical');
+
+    // typing + Enter adds a tag; the datalist offers keys from actors and arrows
+    const tagInput = screen.getByPlaceholderText('Add tag...');
+    fireEvent.change(tagInput, { target: { value: 'retry' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+    expect(props.onAddTag).toHaveBeenCalledWith('retry');
+    expect(optionValues('editor-arrow-tag-list')).toEqual(['backend', 'critical']);
+
+    // the inherit toggle defaults to On (merged) and dispatches the mode
+    fireEvent.click(screen.getByTestId('arrow-inherit-off'));
+    expect(props.onSetKeyMode).toHaveBeenCalledWith('clean');
+    fireEvent.click(screen.getByTestId('arrow-inherit-on'));
+    expect(props.onSetKeyMode).toHaveBeenCalledWith('merged');
+  });
+
+  it('message fields show no inherited chips in clean mode', () => {
+    const props = makeProps({
+      element: message0,
+      arrowTags: { keys: [], keyMode: 'clean', inherited: [] },
+    });
+    render(<EditorPanel {...props} />);
+    expect(screen.queryByTitle(/Inherited from/)).toBeNull();
+    // Off is the active toggle state
+    const off = screen.getByTestId('arrow-inherit-off');
+    expect(off.className).toContain('bg-blue-500');
   });
 
   it('edge type dropdown lists the 4.8 flowchart operator vocabulary', () => {

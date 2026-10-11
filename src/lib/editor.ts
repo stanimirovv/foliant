@@ -4,8 +4,8 @@
 // (NFR-02), and malformed input is a no-op with a warning, never a
 // corruption (NFR-01).
 
-import { parseModel, parseShapeToken, SHAPE_DELIMITERS, ModelElement } from './model';
-import { ArrowStyle, DiagramConfig, updateViewsData } from './views';
+import { parseModel, parseShapeToken, SHAPE_DELIMITERS, ModelElement, MessageElement } from './model';
+import { ArrowStyle, ArrowKeyMode, DiagramConfig, updateViewsData } from './views';
 
 export interface EditResult {
   code: string;
@@ -52,8 +52,14 @@ function cloneConfig(config: DiagramConfig | null): DiagramConfig | null {
     actors: config.actors
       ? Object.fromEntries(Object.entries(config.actors).map(([k, v]) => [k, { ...v, keys: v.keys ? [...v.keys] : undefined }]))
       : undefined,
-    arrows: config.arrows?.map(a => ({ ...a })),
+    arrows: config.arrows?.map(a => ({ ...a, keys: a.keys ? [...a.keys] : undefined })),
   };
+}
+
+// An arrow entry with no style, no tags and no explicit 'clean' mode carries no
+// state ('merged' is the default and is stored as absent).
+function arrowEntryIsEmpty(a: ArrowStyle): boolean {
+  return !a.color && !a.width && !a.dash && (!a.keys || a.keys.length === 0) && a.keyMode !== 'clean';
 }
 
 // Drop actor entries that carry no state, and empty containers.
@@ -66,7 +72,10 @@ function pruneConfig(config: DiagramConfig): void {
     }
     if (Object.keys(config.actors).length === 0) delete config.actors;
   }
-  if (config.arrows && config.arrows.length === 0) delete config.arrows;
+  if (config.arrows) {
+    config.arrows = config.arrows.filter(a => !arrowEntryIsEmpty(a));
+    if (config.arrows.length === 0) delete config.arrows;
+  }
 }
 
 function replaceLines(code: string, lineStart: number, lineEnd: number, newLines: string[]): string {
@@ -284,6 +293,17 @@ function rewriteSequenceMessageOperator(line: string, operator: string): string 
   return `${m[1]}${m[2]}${m[3]}${operator}${m[5]}${m[6]}${tail}`;
 }
 
+// Replace one endpoint id on a sequence message line ('from' = origin/tail,
+// 'to' = recipient/arrow head), preserving the operator, label and
+// whitespace.
+function rewriteSequenceMessageEndpoint(line: string, end: 'from' | 'to', newId: string): string | null {
+  const m = line.match(SEQ_MSG_V);
+  if (!m) return null;
+  const tail = m[9] !== undefined ? `${m[7]}:${m[8]}${m[9]}` : '';
+  if (end === 'from') return `${m[1]}${newId}${m[3]}${m[4]}${m[5]}${m[6]}${tail}`;
+  return `${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}${newId}${tail}`;
+}
+
 export function renameParticipant(code: string, config: DiagramConfig | null, key: string, newAlias: string): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
@@ -347,6 +367,49 @@ export function setArrowType(code: string, config: DiagramConfig | null, key: st
     : rewriteFlowchartEdgeOperator(line, operator);
   if (newLine === undefined || newLine === null) return fail(code, config, `Cannot parse message line: ${line.trim()}`);
   return { code: replaceLines(code, el.lineStart, el.lineEnd, [newLine]), config };
+}
+
+// Retarget one endpoint of a sequence message (sequence diagrams only):
+// 'to' changes the recipient (the arrow head), 'from' the origin (the tail).
+// The operator and label are untouched. Arrow style/tag entries are keyed by
+// (from, to, label, occurrence), so the entries that styled this message
+// follow the retargeted endpoint instead of being orphaned. Occurrences are
+// not renumbered after the move — the same trade-off deleteElement makes.
+export function moveMessageEndpoint(
+  code: string,
+  config: DiagramConfig | null,
+  key: string,
+  end: 'from' | 'to',
+  newParticipantKey: string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'message') return fail(code, config, `Element ${key} is not a message`);
+  const target = findElement(model, newParticipantKey);
+  if (!target || target.kind !== 'participant') {
+    return fail(code, config, `Unknown participant key: ${newParticipantKey}`);
+  }
+  const newId = target.id;
+  if (newId === (end === 'from' ? el.from : el.to)) return { code, config }; // no-op
+
+  const line = code.split('\n')[el.lineStart];
+  const newLine = rewriteSequenceMessageEndpoint(line, end, newId);
+  if (newLine === null) return fail(code, config, `Cannot parse message line: ${line.trim()}`);
+  const newCode = replaceLines(code, el.lineStart, el.lineEnd, [newLine]);
+
+  const occurrence = elementOccurrence(model, el);
+  const newConfig = cloneConfig(config);
+  let configChanged = false;
+  if (newConfig?.arrows) {
+    newConfig.arrows = newConfig.arrows.map(a => {
+      if (!arrowsMatchEntry(a, el.from, el.to, el.label, occurrence)) return a;
+      configChanged = true;
+      return end === 'from' ? { ...a, from: newId } : { ...a, to: newId };
+    });
+  }
+  if (!configChanged || !newConfig) return { code: newCode, config, newKey: el.key };
+  return { code: updateViewsData(newCode, newConfig), config: newConfig, newKey: el.key };
 }
 
 export function addParticipant(code: string, config: DiagramConfig | null, afterKey?: string): EditResult {
@@ -452,6 +515,109 @@ export function addMessage(
     e => e.lineStart === insertAt && (e.kind === 'message' || e.kind === 'edge')
   );
   return { code: newCode, config, newKey: created?.key };
+}
+
+// Move a message to a new position among the messages (sequence diagrams only).
+// The message line is relocated to the specified position (top, bottom,
+// before another element, after another element). Any occurrence-keyed style or
+// tag entries in CONFIG are updated to follow the message in its new order.
+export function moveMessage(
+  code: string,
+  config: DiagramConfig | null,
+  key: string,
+  position: MessageInsertPosition,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'message') return fail(code, config, `Element ${key} is not a message`);
+
+  // Target element (for 'before' / 'after')
+  let targetEl: ModelElement | undefined;
+  if (position.type === 'before' || position.type === 'after') {
+    if (position.key === key) return { code, config, newKey: key };
+    targetEl = findElement(model, position.key);
+    if (!targetEl) return fail(code, config, `Unknown target key: ${position.key}`);
+  }
+
+  const lines = code.split('\n');
+  const messageLines = lines.slice(el.lineStart, el.lineEnd + 1);
+  const spanCount = el.lineEnd - el.lineStart + 1;
+
+  // Remove the message lines
+  lines.splice(el.lineStart, spanCount);
+
+  // Line numbers after el.lineStart shift down by spanCount
+  const adjust = (lineNo: number) => lineNo > el.lineStart ? lineNo - spanCount : lineNo;
+
+  let insertAt: number;
+  switch (position.type) {
+    case 'top': {
+      const lastParticipant = [...model.elements].filter(e => e.kind === 'participant').reverse()[0];
+      insertAt = lastParticipant
+        ? adjust(lastParticipant.lineEnd) + 1
+        : lines.findIndex(l => /^\s*sequenceDiagram\b/.test(l)) + 1;
+      break;
+    }
+    case 'bottom': {
+      insertAt = lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length;
+      break;
+    }
+    case 'before': {
+      insertAt = adjust(targetEl!.lineStart);
+      break;
+    }
+    case 'after': {
+      insertAt = adjust(targetEl!.lineEnd) + 1;
+      break;
+    }
+  }
+
+  // If the target position is the original position, it's a no-op
+  if (insertAt === el.lineStart) {
+    return { code, config, newKey: key };
+  }
+
+  lines.splice(insertAt, 0, ...messageLines);
+  const newCode = lines.join('\n');
+
+  const oldOcc = elementOccurrence(model, el);
+  const newModel = parseModel(newCode);
+  const moved = newModel.elements.find(
+    e => e.lineStart === insertAt && e.kind === 'message'
+  ) as MessageElement | undefined;
+  const newKey = moved?.key ?? key;
+
+  let newConfig = config;
+  if (config?.arrows && moved) {
+    const newOcc = elementOccurrence(newModel, moved);
+    if (oldOcc !== newOcc) {
+      newConfig = cloneConfig(config);
+      if (newConfig?.arrows) {
+        newConfig.arrows = newConfig.arrows.map(a => {
+          if (a.from !== el.from || a.to !== el.to || (a.label ?? undefined) !== (el.label ?? undefined)) {
+            return a;
+          }
+          const occ = a.occurrence ?? 0;
+          if (occ === oldOcc) return { ...a, occurrence: newOcc === 0 ? undefined : newOcc };
+          if (oldOcc < newOcc && occ > oldOcc && occ <= newOcc) {
+            const shifted = occ - 1;
+            return { ...a, occurrence: shifted === 0 ? undefined : shifted };
+          } else if (oldOcc > newOcc && occ >= newOcc && occ < oldOcc) {
+            const shifted = occ + 1;
+            return { ...a, occurrence: shifted === 0 ? undefined : shifted };
+          }
+          return a;
+        });
+      }
+    }
+  }
+
+  return {
+    code: newConfig ? updateViewsData(newCode, newConfig) : newCode,
+    config: newConfig,
+    newKey,
+  };
 }
 
 // Move a participant's declaration to a new position among the participants
@@ -786,16 +952,39 @@ export function addTag(code: string, config: DiagramConfig | null, key: string, 
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
-  if (!el || !isComponent(el)) return fail(code, config, `Element ${key} is not a component`);
+  if (!el || (!isComponent(el) && !isArrow(el))) {
+    return fail(code, config, `Element ${key} is not a component or message`);
+  }
   const t = tag.trim();
   if (!TAG_RE.test(t)) return fail(code, config, `Invalid tag: ${tag}`);
 
+  if (isComponent(el)) {
+    const newConfig = cloneConfig(config) ?? { version: 1 };
+    newConfig.actors = newConfig.actors ?? {};
+    const meta = newConfig.actors[el.id] ?? {};
+    newConfig.actors[el.id] = meta;
+    meta.keys = meta.keys ?? [];
+    if (!meta.keys.includes(t)) meta.keys.push(t);
+    return { code: updateViewsData(code, newConfig), config: newConfig };
+  }
+
+  // Arrow: the tag rides on the arrow's CONFIG.arrows entry (same
+  // (from, to, label, occurrence) keying as arrow styles).
+  const occurrence = elementOccurrence(model, el);
   const newConfig = cloneConfig(config) ?? { version: 1 };
-  newConfig.actors = newConfig.actors ?? {};
-  const meta = newConfig.actors[el.id] ?? {};
-  newConfig.actors[el.id] = meta;
-  meta.keys = meta.keys ?? [];
-  if (!meta.keys.includes(t)) meta.keys.push(t);
+  const arrows = newConfig.arrows ? [...newConfig.arrows] : [];
+  const idx = arrows.findIndex(a => arrowsMatchEntry(a, el.from, el.to, el.label, occurrence));
+  if (idx >= 0) {
+    if (arrows[idx].keys?.includes(t)) return { code, config }; // already there
+    arrows[idx] = { ...arrows[idx], keys: [...(arrows[idx].keys ?? []), t] };
+  } else {
+    const entry: ArrowStyle = { from: el.from, to: el.to };
+    if (el.label !== undefined) entry.label = el.label;
+    if (occurrence > 0) entry.occurrence = occurrence;
+    entry.keys = [t];
+    arrows.push(entry);
+  }
+  newConfig.arrows = arrows;
   return { code: updateViewsData(code, newConfig), config: newConfig };
 }
 
@@ -803,13 +992,91 @@ export function removeTag(code: string, config: DiagramConfig | null, key: strin
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
-  if (!el || !isComponent(el)) return fail(code, config, `Element ${key} is not a component`);
-  const existing = config?.actors?.[el.id];
-  if (!existing?.keys?.includes(tag)) return { code, config }; // nothing to remove
+  if (!el || (!isComponent(el) && !isArrow(el))) {
+    return fail(code, config, `Element ${key} is not a component or message`);
+  }
 
+  if (isComponent(el)) {
+    const existing = config?.actors?.[el.id];
+    if (!existing?.keys?.includes(tag)) return { code, config }; // nothing to remove
+    const newConfig = cloneConfig(config) ?? { version: 1 };
+    const meta = newConfig.actors![el.id];
+    meta.keys = meta.keys!.filter(k => k !== tag);
+    pruneConfig(newConfig);
+    return { code: updateViewsData(code, newConfig), config: newConfig };
+  }
+
+  const occurrence = elementOccurrence(model, el);
+  const existing = config?.arrows?.find(a => arrowsMatchEntry(a, el.from, el.to, el.label, occurrence));
+  if (!existing?.keys?.includes(tag)) return { code, config }; // nothing to remove
   const newConfig = cloneConfig(config) ?? { version: 1 };
-  const meta = newConfig.actors![el.id];
-  meta.keys = meta.keys!.filter(k => k !== tag);
+  const arrows = newConfig.arrows ? [...newConfig.arrows] : [];
+  const idx = arrows.findIndex(a => arrowsMatchEntry(a, el.from, el.to, el.label, occurrence));
+  const kept = (arrows[idx].keys ?? []).filter(k => k !== tag);
+  const entry = { ...arrows[idx] };
+  if (kept.length > 0) entry.keys = kept; else delete entry.keys;
+  arrows[idx] = entry;
+  newConfig.arrows = arrows;
+  pruneConfig(newConfig);
+  return { code: updateViewsData(code, newConfig), config: newConfig };
+}
+
+// Tag info of an arrow element: its own tags, its tag behavior ('merged' by
+// default: the arrow also carries the tags of the service it originates from;
+// 'clean': only its own tags), and the inherited tags (own excluded).
+export interface ArrowTagInfo {
+  keys: string[];
+  keyMode: ArrowKeyMode;
+  inherited: string[];
+}
+
+export function getArrowTags(code: string, config: DiagramConfig | null, key: string): ArrowTagInfo | null {
+  const model = parseModel(code);
+  const el = findElement(model, key);
+  if (!el || !isArrow(el)) return null;
+  const occurrence = elementOccurrence(model, el);
+  const entry = config?.arrows?.find(a => arrowsMatchEntry(a, el.from, el.to, el.label, occurrence));
+  const keys = entry?.keys ?? [];
+  const keyMode: ArrowKeyMode = entry?.keyMode === 'clean' ? 'clean' : 'merged';
+  const originKeys = keyMode === 'merged' ? (config?.actors?.[el.from]?.keys ?? []) : [];
+  return { keys, keyMode, inherited: originKeys.filter(k => !keys.includes(k)) };
+}
+
+// Set an arrow's tag behavior. 'merged' is the default and is stored as absent;
+// 'clean' is stored explicitly (it is the only non-default state).
+export function setArrowKeyMode(code: string, config: DiagramConfig | null, key: string, mode: ArrowKeyMode): EditResult {
+  const model = parseModel(code);
+  if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || !isArrow(el)) return fail(code, config, `Element ${key} is not a message or edge`);
+  if (mode !== 'merged' && mode !== 'clean') return fail(code, config, `Invalid tag behavior: ${mode}`);
+
+  const occurrence = elementOccurrence(model, el);
+  const newConfig = cloneConfig(config) ?? { version: 1 };
+  const arrows = newConfig.arrows ? [...newConfig.arrows] : [];
+  const idx = arrows.findIndex(a => arrowsMatchEntry(a, el.from, el.to, el.label, occurrence));
+  let changed = false;
+  if (idx >= 0) {
+    const prev = arrows[idx];
+    if (mode === 'clean' && prev.keyMode !== 'clean') {
+      arrows[idx] = { ...prev, keyMode: 'clean' };
+      changed = true;
+    } else if (mode === 'merged' && prev.keyMode !== undefined) {
+      const entry = { ...prev };
+      delete entry.keyMode;
+      arrows[idx] = entry;
+      changed = true;
+    }
+  } else if (mode === 'clean') {
+    const entry: ArrowStyle = { from: el.from, to: el.to };
+    if (el.label !== undefined) entry.label = el.label;
+    if (occurrence > 0) entry.occurrence = occurrence;
+    entry.keyMode = 'clean';
+    arrows.push(entry);
+    changed = true;
+  }
+  if (!changed) return { code, config };
+  newConfig.arrows = arrows;
   pruneConfig(newConfig);
   return { code: updateViewsData(code, newConfig), config: newConfig };
 }
@@ -841,6 +1108,10 @@ export function setArrowStyle(code: string, config: DiagramConfig | null, key: s
     if (color !== undefined) entry.color = color;
     if (width !== undefined) entry.width = width;
     if (dash !== undefined) entry.dash = dash;
+    // Tags and tag behavior live on the same entry: carry them over.
+    const prev = idx >= 0 ? arrows[idx] : undefined;
+    if (prev?.keys) entry.keys = prev.keys;
+    if (prev?.keyMode) entry.keyMode = prev.keyMode;
     if (idx >= 0) {
       if (JSON.stringify(arrows[idx]) !== JSON.stringify(entry)) {
         arrows[idx] = entry;
@@ -851,7 +1122,18 @@ export function setArrowStyle(code: string, config: DiagramConfig | null, key: s
       changed = true;
     }
   } else if (idx >= 0) {
-    arrows.splice(idx, 1);
+    // Clearing the style must not drop the arrow's tags or tag behavior.
+    const prev = arrows[idx];
+    if ((prev.keys && prev.keys.length > 0) || prev.keyMode === 'clean') {
+      const entry: ArrowStyle = { from: prev.from, to: prev.to };
+      if (prev.label !== undefined) entry.label = prev.label;
+      if (prev.occurrence !== undefined) entry.occurrence = prev.occurrence;
+      if (prev.keys) entry.keys = prev.keys;
+      if (prev.keyMode) entry.keyMode = prev.keyMode;
+      arrows[idx] = entry;
+    } else {
+      arrows.splice(idx, 1);
+    }
     changed = true;
   }
 

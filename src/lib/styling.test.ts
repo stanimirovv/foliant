@@ -63,6 +63,22 @@ describe('rewriteArrowStyles', () => {
     expect(res2).toBe(baseConfig);
   });
 
+  it('preserves arrow tags and key mode when rewriting endpoints for merging', () => {
+    const config: DiagramConfig = {
+      version: 1,
+      actors: { A: { keys: ['backend'] }, B: { keys: ['backend'] } },
+      arrows: [
+        { from: 'A', to: 'B', label: 'Fetch', keys: ['critical'], keyMode: 'clean' },
+        { from: 'A', to: 'B', label: 'Fetch', color: 'red', keys: ['retry'] },
+      ],
+    };
+    const res = rewriteArrowStyles(config, { mergeByKeys: ['backend'] });
+    expect(res?.arrows).toEqual([
+      { from: 'MergedKey_backend', to: 'MergedKey_backend', label: 'Fetch', keys: ['critical'], keyMode: 'clean' },
+      { from: 'MergedKey_backend', to: 'MergedKey_backend', label: 'Fetch', color: 'red', keys: ['retry'] },
+    ]);
+  });
+
   it('combines merge and hide', () => {
     const res = rewriteArrowStyles(baseConfig, { mergeByColor: ['red'], hideKeys: ['internal'] });
     expect(res?.arrows).toEqual([

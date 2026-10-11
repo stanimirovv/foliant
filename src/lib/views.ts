@@ -16,7 +16,14 @@ export interface ArrowStyle {
   color?: string;               // stroke color, any CSS color
   width?: number;               // stroke width, 1–10
   dash?: 'solid' | 'dashed' | 'dotted';
+  keys?: string[];              // the arrow's own tags (merge/hide keys)
+  keyMode?: ArrowKeyMode;       // how tags are computed: 'merged' (own + origin's, default) | 'clean' (own only)
 }
+
+// Tag behavior of an arrow: 'merged' inherits the tags of the service the arrow
+// originates from (the default when keyMode is absent); 'clean' keeps only the
+// arrow's own tags.
+export type ArrowKeyMode = 'merged' | 'clean';
 
 export interface DiagramConfig {
   version: number;

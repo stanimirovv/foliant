@@ -17,6 +17,7 @@ A full-stack Next.js application designed to manage, visualize, and filter massi
 Sequence and flowchart diagrams can be edited directly in the app:
 
 - Edit mode is **on by default** when a diagram is opened: click a participant/node or a message/edge on the canvas. The side panel shows the fields for the selected element (Label, Type, Color, Width, Dash, Tags, Delete). The pencil toggle in the toolbar exits edit mode (adds `edit=0` to the URL) and re-enables it.
+- Messages/edges support **tags** too: they inherit the tags of the service they originate from by default (the **Inherit service tags** toggle in the message panel switches between merged and clean). Hiding a tag in the sidebar **By Key** list also hides the messages/edges carrying it.
 - Use the toolbar to **Add Participant** / **Add Message**, or click **New** in the Files list to create a new diagram — you choose the file name and the diagram type (sequence or flowchart).
 - Every edit **auto-saves** to the `.mmd` file; the toolbar shows a Saving… / Saved indicator. External file changes are adopted live (SSE) with a "Reloaded from disk" notice.
 - **Undo** (`Ctrl+Z`) and **redo** (`Ctrl+Y`) step through edits; the history is capped at 15 entries.

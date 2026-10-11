@@ -310,7 +310,8 @@ describe('zip + click against real mermaid renders', () => {
 // --- Screen-coordinate helpers for drag interactions ------------------------
 
 import {
-  getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, nearestParticipantAtX,
+  getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
+  nearestParticipantAtX,
   ParticipantScreenInfo,
 } from './svgmap';
 
@@ -412,6 +413,49 @@ describe('getMessageScreenInfo', () => {
     expect(info.map(m => m.key)).toEqual(['m:0', 'm:1', 'm:2', 'm:3']);
     // Y is the vertical center: top + height/2
     expect(info.map(m => m.y)).toEqual([101, 151, 201, 251]);
+  });
+});
+
+describe('getMessageEndpointScreenInfo', () => {
+  // Mock the same layout as mockSeqScreenRects: participants A(0), B(150),
+  // C(300) at the top; messages at Y=100,150,200,250 (height 2 -> center +1).
+  const mockLayout = (svg: Element) => {
+    const groups = svg.querySelectorAll('g[data-et="participant"]');
+    const byId = new Map<string, Element>();
+    groups.forEach(g => { const id = g.getAttribute('data-id'); if (id) byId.set(id, g); });
+    mockRect(byId.get('A')!, 0, 10, 100, 40);
+    mockRect(byId.get('B')!, 150, 10, 100, 40);
+    mockRect(byId.get('C')!, 300, 10, 100, 40);
+    const lines = svg.querySelectorAll('[data-et="message"]');
+    const ys = [100, 150, 200, 250];
+    lines.forEach((el, i) => { if (i < ys.length) mockRect(el, 0, ys[i], 200, 2); });
+  };
+
+  it('returns tail/head points on the participants lifelines at the message Y', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    mockLayout(svg);
+
+    const info = getMessageEndpointScreenInfo(svg, model);
+    expect(info).toHaveLength(4);
+    // m:0 A->B: tail at A's centerX, head at B's centerX
+    expect(info[0]).toEqual({ key: 'm:0', fromX: 50, fromY: 101, toX: 200, toY: 101 });
+    // m:1 B->A: the head is on the LEFT (A's lifeline)
+    expect(info[1]).toEqual({ key: 'm:1', fromX: 200, fromY: 151, toX: 50, toY: 151 });
+    // m:2 A->A (self-message): both ends on A's lifeline
+    expect(info[2]).toEqual({ key: 'm:2', fromX: 50, fromY: 201, toX: 50, toY: 201 });
+    // m:3 A->C
+    expect(info[3]).toEqual({ key: 'm:3', fromX: 50, fromY: 251, toX: 350, toY: 251 });
+  });
+
+  it('skips messages whose endpoints have no SVG counterpart', () => {
+    const svg = parseSvg(SEQ_SVG);
+    // Model claims a 4th participant and a message to it; the SVG has neither
+    const model = parseModel(SEQ_CODE + '\n    participant D\n    A->>D: to missing');
+    mockLayout(svg);
+
+    const info = getMessageEndpointScreenInfo(svg, model);
+    expect(info.map(m => m.key)).toEqual(['m:0', 'm:1', 'm:2', 'm:3']); // m:4 skipped
   });
 });
 

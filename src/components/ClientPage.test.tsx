@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act, within } from '@testing-library/react';
 import ClientPage from './ClientPage';
 import { parseModel } from '@/lib/model';
 import { parseViewsData } from '@/lib/views';
@@ -37,6 +37,8 @@ vi.mock('./DiagramViewer', () => ({
     onSelect?: (key: string | null) => void;
     onCreateMessageDrag?: (fromKey: string, toKey: string, position: { type: string; key?: string }) => void;
     onMoveParticipant?: (key: string, beforeKey: string | null) => void;
+    onMoveMessageEndpoint?: (messageKey: string, end: 'from' | 'to', targetKey: string) => void;
+    onMoveMessage?: (messageKey: string, position: { type: string; key?: string }) => void;
   }) => (
     <div
       data-testid="diagram-viewer"
@@ -78,6 +80,30 @@ vi.mock('./DiagramViewer', () => ({
         onClick={() => props.onCreateMessageDrag?.('n:0', 'n:1', { type: 'bottom' })}
       >
         drag create connection
+      </button>
+      <button
+        data-testid="drag-retarget-head"
+        onClick={() => props.onMoveMessageEndpoint?.('m:0', 'to', 'p:2')}
+      >
+        drag retarget head
+      </button>
+      <button
+        data-testid="drag-retarget-tail"
+        onClick={() => props.onMoveMessageEndpoint?.('m:0', 'from', 'p:1')}
+      >
+        drag retarget tail
+      </button>
+      <button
+        data-testid="drag-retarget-head-same"
+        onClick={() => props.onMoveMessageEndpoint?.('m:0', 'to', 'p:1')}
+      >
+        drag retarget head onto current
+      </button>
+      <button
+        data-testid="drag-move-message"
+        onClick={() => props.onMoveMessage?.('m:0', { type: 'after', key: 'm:1' })}
+      >
+        drag move message
       </button>
     </div>
   ),
@@ -391,6 +417,62 @@ sequenceDiagram
     expect(input).toBeTruthy();
   });
 
+  it('dragging an arrow head retargets the message recipient', async () => {
+    const DEMO3 = `sequenceDiagram
+    participant A
+    participant B
+    participant C
+    A->>B: Hello
+    B-->>A: Hi there`;
+    const viewer = await renderInEditMode(DEMO3, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('drag-retarget-head')); // m:0 head -> C (p:2)
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('A->>C: Hello');
+      expect(code).not.toContain('A->>B: Hello');
+      // the other message is untouched
+      expect(code).toContain('B-->>A: Hi there');
+    }, { timeout: 3000 });
+  });
+
+  it('dragging an arrow tail retargets the message origin', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('drag-retarget-tail')); // m:0 tail -> B (p:1)
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('B->>B: Hello');
+      expect(code).toContain('B-->>A: Hi there');
+    }, { timeout: 3000 });
+  });
+
+  it('a retarget onto the participant already at the endpoint is a no-op (no save)', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockClear();
+
+    // m:0 is A->>B; dragging its head onto B (p:1) changes nothing
+    fireEvent.click(screen.getByTestId('drag-retarget-head-same'));
+
+    await new Promise(r => setTimeout(r, 1000)); // past the 800 ms debounce
+    expect(postCalls()).toHaveLength(0);
+  });
+
+  it('dragging a message vertically reorders it and keeps it selected', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('drag-move-message')); // m:0 after m:1
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code.indexOf('B-->>A: Hi there')).toBeLessThan(code.indexOf('A->>B: Hello'));
+      expect(viewer.getAttribute('data-selection')).toBe('m:1');
+    }, { timeout: 3000 });
+  });
+
   it('dragging a node reorders it in a flowchart diagram and keeps it selected', async () => {
     const FLOW_DEMO = `flowchart TD
     A[Alice] --> B[Bob]
@@ -561,6 +643,22 @@ sequenceDiagram
 
     expect(screen.queryByTestId('delete-dialog')).toBeNull();
     expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+  });
+
+  it('deleting a flowchart node deletes it immediately without asking confirmation', async () => {
+    const FLOW_DEMO = `flowchart TD
+    A[Alice] --> B[Bob]
+    B -->|Reply| C[Charlie]`;
+    const viewer = await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+    fireEvent.click(screen.getByTestId('select-n:0'));
+    await screen.findByDisplayValue('Alice');
+
+    fireEvent.click(screen.getByTestId('panel-delete'));
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).not.toContain('A[Alice]');
+    }, { timeout: 3000 });
   });
 
   it('end to end (create -> change -> verify): drive the panel on a newly created diagram', async () => {
@@ -1008,6 +1106,77 @@ sequenceDiagram
     expect(screen.getByText('#e11d48')).toBeTruthy(); // By Color item
     // the panel tag chip and the sidebar By Key item both render the key
     expect(screen.getAllByText('backend').length).toBeGreaterThanOrEqual(2);
+  }, 10000);
+
+  it('message tags set in the panel land in CONFIG.arrows and the sidebar By Key controls', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+    const tagInput = screen.getByPlaceholderText('Add tag...');
+    fireEvent.change(tagInput, { target: { value: 'critical' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+
+    // the panel chip and the sidebar By Key item both render the key
+    await waitFor(() => {
+      expect(screen.getAllByText('critical').length).toBeGreaterThanOrEqual(2);
+    }, { timeout: 3000 });
+    // and it persists in the CONFIG header on the file
+    await waitFor(() => {
+      expect(fileContent.current).toContain('"arrows":[{"from":"A","to":"B","label":"Hello","keys":["critical"]}]');
+    }, { timeout: 3000 });
+  }, 10000);
+
+  it('the inherit toggle stores keyMode clean on the selected message and back', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+    fireEvent.click(screen.getByTestId('arrow-inherit-off'));
+    await waitFor(() => {
+      expect(fileContent.current).toContain('"keyMode":"clean"');
+    }, { timeout: 3000 });
+
+    // back to On (merged, the default): the field is gone again
+    fireEvent.click(screen.getByTestId('arrow-inherit-on'));
+    await waitFor(() => {
+      expect(fileContent.current).not.toContain('keyMode');
+    }, { timeout: 3000 });
+  }, 10000);
+
+  it('hiding a message-only key in the sidebar filters the message out of the diagram', async () => {
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DEMO);
+    const { rerender } = render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+
+    // tag the message, then hide its key through the sidebar Off button
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+    const tagInput = screen.getByPlaceholderText('Add tag...');
+    fireEvent.change(tagInput, { target: { value: 'critical' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+    await waitFor(() => {
+      expect(screen.getAllByText('critical').length).toBeGreaterThanOrEqual(2);
+    }, { timeout: 3000 });
+
+    const keyItem = screen.getAllByText('critical').find(el => el.closest('li'))!.closest('li')!;
+    fireEvent.click(within(keyItem).getByText('Off'));
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('hide_key=critical'), { scroll: false });
+
+    // simulate the URL change taking effect: the message line is dropped
+    params.hide_key = 'critical';
+    rerender(<ClientPage />);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).not.toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+    // the other message and both participants survive
+    expect(viewer.getAttribute('data-code')).toContain('B-->>A: Hi there');
+    expect(viewer.getAttribute('data-code')).toContain('participant A as Alice');
   }, 10000);
 
   it('a broken diagram (unclosed region) still renders, shows a warning, and recognized elements stay editable (NFR-01)', async () => {

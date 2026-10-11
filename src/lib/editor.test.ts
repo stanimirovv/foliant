@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  moveParticipant, moveNode, MessageInsertPosition,
+  getArrowTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
@@ -240,6 +240,245 @@ describe('setArrowType', () => {
     expect(setArrowType(SEQ, SEQ_CFG, 'm:0', '==>').code).toBe(SEQ);
     expect(setArrowType(FLOW, FLOW_CFG, 'e:0', '->>').warning).toBeTruthy();
     expect(setArrowType(SEQ, SEQ_CFG, 'p:0', '-->').warning).toBeTruthy();
+  });
+});
+
+describe('moveMessageEndpoint', () => {
+  const SEQ3 = `sequenceDiagram
+    participant A
+    participant B
+    participant C
+    A->>B: Hello
+    B-->>A: Hi
+    A->>A: Loop`;
+
+  it('retargets the recipient (arrow head), preserving operator, label and spacing', () => {
+    const res = moveMessageEndpoint(SEQ3, null, 'm:0', 'to', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(SEQ3, res.code, 4, '    A->>C: Hello');
+  });
+
+  it('retargets the origin (tail)', () => {
+    const res = moveMessageEndpoint(SEQ3, null, 'm:0', 'from', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(SEQ3, res.code, 4, '    C->>B: Hello');
+  });
+
+  it('retargets the head of a right-to-left message', () => {
+    const res = moveMessageEndpoint(SEQ3, null, 'm:1', 'to', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(SEQ3, res.code, 5, '    B-->>C: Hi');
+  });
+
+  it('retargets a self-message head into a regular message', () => {
+    const res = moveMessageEndpoint(SEQ3, null, 'm:2', 'to', 'p:1');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(SEQ3, res.code, 6, '    A->>B: Loop');
+  });
+
+  it('retargets the tail onto the recipient, making a self-message', () => {
+    const res = moveMessageEndpoint(SEQ3, null, 'm:0', 'from', 'p:1');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(SEQ3, res.code, 4, '    B->>B: Hello');
+  });
+
+  it('preserves unusual whitespace around the endpoints', () => {
+    const code = `sequenceDiagram\n    participant A\n    participant B\n    participant C\n    A  ->>  B :  spaced`;
+    const res = moveMessageEndpoint(code, null, 'm:0', 'to', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code.split('\n')[4]).toBe('    A  ->>  C :  spaced');
+    const res2 = moveMessageEndpoint(code, null, 'm:0', 'from', 'p:2');
+    expect(res2.code.split('\n')[4]).toBe('    C  ->>  B :  spaced');
+  });
+
+  it('retargets a message inside a block, preserving the indent', () => {
+    const code = `sequenceDiagram\n    participant A\n    participant B\n    participant C\n    alt ok\n        A->>B: Hello\n    end`;
+    const res = moveMessageEndpoint(code, null, 'm:0', 'to', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code.split('\n')[5]).toBe('        A->>C: Hello');
+  });
+
+  it('is a no-op when the target is the participant already at that end', () => {
+    const res = moveMessageEndpoint(SEQ3, null, 'm:0', 'to', 'p:1');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(SEQ3);
+    const res2 = moveMessageEndpoint(SEQ3, null, 'm:0', 'from', 'p:0');
+    expect(res2.warning).toBeUndefined();
+    expect(res2.code).toBe(SEQ3);
+  });
+
+  it('preserves the CONFIG block and every other line byte-for-byte', () => {
+    // SEQ: m:0 is line 7 (A->>B: Hello); only that line may change.
+    const res = moveMessageEndpoint(SEQ, SEQ_CFG, 'm:0', 'from', 'p:1');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(SEQ, res.code, 7, '    B->>B: Hello');
+  });
+
+  it('retargets a message whose endpoint is an undeclared (implicit) actor', () => {
+    const code = `sequenceDiagram\n    participant A\n    A->>B: Hi`;
+    const res = moveMessageEndpoint(code, null, 'm:0', 'to', 'p:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    participant A\n    A->>A: Hi`);
+  });
+
+  it('soft-fails when the target is not a declared participant', () => {
+    const code = `sequenceDiagram\n    participant A\n    A->>B: Hi`;
+    // B is an implicit actor: it has no participant element, hence no key.
+    expect(parseModel(code).elements.some(e => e.kind === 'participant' && (e as { id: string }).id === 'B')).toBe(false);
+    const res = moveMessageEndpoint(code, null, 'm:0', 'to', 'm:0');
+    expect(res.warning).toBeTruthy();
+    expect(res.code).toBe(code);
+  });
+
+  it('soft-fails on unknown keys, non-messages and flowcharts', () => {
+    expect(moveMessageEndpoint(SEQ3, null, 'm:99', 'to', 'p:2').warning).toBeTruthy();
+    expect(moveMessageEndpoint(SEQ3, null, 'm:99', 'to', 'p:2').code).toBe(SEQ3);
+    expect(moveMessageEndpoint(SEQ3, null, 'p:0', 'to', 'p:2').warning).toBeTruthy();
+    expect(moveMessageEndpoint(SEQ3, null, 'm:0', 'to', 'p:99').warning).toBeTruthy();
+    expect(moveMessageEndpoint(SEQ3, null, 'm:0', 'to', 'm:1').warning).toBeTruthy();
+    const flow = moveMessageEndpoint(FLOW, FLOW_CFG, 'e:0', 'to', 'n:1');
+    expect(flow.warning).toBeTruthy();
+    expect(flow.code).toBe(FLOW);
+  });
+
+  it('moves the arrow CONFIG entry (style, tags, mode) to the new recipient', () => {
+    const code = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","label":"Hello","color":"#e11d48","keys":["backend"],"keyMode":"clean"}]}
+sequenceDiagram
+    participant A
+    participant B
+    participant C
+    A->>B: Hello`;
+    const res = moveMessageEndpoint(code, parseConfig(code), 'm:0', 'to', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('    A->>C: Hello');
+    expect(parseConfig(res.code)?.arrows).toEqual([
+      { from: 'A', to: 'C', label: 'Hello', color: '#e11d48', keys: ['backend'], keyMode: 'clean' },
+    ]);
+  });
+
+  it('moves the arrow CONFIG entry to the new origin when the tail is dragged', () => {
+    const code = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","label":"Hello","color":"#e11d48"}]}
+sequenceDiagram
+    participant A
+    participant B
+    participant C
+    A->>B: Hello`;
+    const res = moveMessageEndpoint(code, parseConfig(code), 'm:0', 'from', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expect(parseConfig(res.code)?.arrows).toEqual([
+      { from: 'C', to: 'B', label: 'Hello', color: '#e11d48' },
+    ]);
+  });
+
+  it('leaves unrelated arrows entries untouched', () => {
+    const code = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","label":"Hello","color":"#e11d48"},{"from":"B","to":"A","label":"Hi","color":"#22c55e"}]}
+sequenceDiagram
+    participant A
+    participant B
+    participant C
+    A->>B: Hello
+    B-->>A: Hi`;
+    const res = moveMessageEndpoint(code, parseConfig(code), 'm:0', 'to', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expect(parseConfig(res.code)?.arrows).toEqual([
+      { from: 'A', to: 'C', label: 'Hello', color: '#e11d48' },
+      { from: 'B', to: 'A', label: 'Hi', color: '#22c55e' },
+    ]);
+  });
+
+  it('moves only the occurrence-keyed entry of the retargeted message', () => {
+    const code = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","label":"Hi","occurrence":0,"color":"#e11d48"},{"from":"A","to":"B","label":"Hi","occurrence":1,"color":"#22c55e"}]}
+sequenceDiagram
+    participant A
+    participant B
+    participant C
+    A->>B: Hi
+    A->>B: Hi`;
+    const res = moveMessageEndpoint(code, parseConfig(code), 'm:0', 'to', 'p:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code.split('\n')[5]).toBe('    A->>C: Hi');
+    expect(res.code.split('\n')[6]).toBe('    A->>B: Hi');
+    expect(parseConfig(res.code)?.arrows).toEqual([
+      { from: 'A', to: 'C', label: 'Hi', occurrence: 0, color: '#e11d48' },
+      { from: 'A', to: 'B', label: 'Hi', occurrence: 1, color: '#22c55e' },
+    ]);
+  });
+
+  it('leaves the CONFIG block untouched when no arrows entry matches', () => {
+    // SEQ_CFG has actors only; retargeting m:2 (line 10) must not rewrite it.
+    const res = moveMessageEndpoint(SEQ, SEQ_CFG, 'm:2', 'to', 'p:0');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(SEQ, res.code, 10, '    A->>A: Again');
+  });
+});
+
+describe('moveMessage', () => {
+  const SEQ_MSGS = `sequenceDiagram
+    participant A
+    participant B
+    participant C
+    A->>B: First
+    B->>C: Second
+    C->>A: Third`;
+
+  it('moves a message up before another message (swaps order)', () => {
+    const res = moveMessage(SEQ_MSGS, null, 'm:2', { type: 'before', key: 'm:1' });
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[4]).toBe('    A->>B: First');
+    expect(lines[5]).toBe('    C->>A: Third');
+    expect(lines[6]).toBe('    B->>C: Second');
+  });
+
+  it('moves a message down after another message', () => {
+    const res = moveMessage(SEQ_MSGS, null, 'm:0', { type: 'after', key: 'm:1' });
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[4]).toBe('    B->>C: Second');
+    expect(lines[5]).toBe('    A->>B: First');
+    expect(lines[6]).toBe('    C->>A: Third');
+  });
+
+  it('moves a message to the top', () => {
+    const res = moveMessage(SEQ_MSGS, null, 'm:2', { type: 'top' });
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[4]).toBe('    C->>A: Third');
+    expect(lines[5]).toBe('    A->>B: First');
+    expect(lines[6]).toBe('    B->>C: Second');
+  });
+
+  it('moves a message to the bottom', () => {
+    const res = moveMessage(SEQ_MSGS, null, 'm:0', { type: 'bottom' });
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[4]).toBe('    B->>C: Second');
+    expect(lines[5]).toBe('    C->>A: Third');
+    expect(lines[6]).toBe('    A->>B: First');
+  });
+
+  it('is a no-op when moving before or after itself', () => {
+    const res1 = moveMessage(SEQ_MSGS, null, 'm:1', { type: 'before', key: 'm:1' });
+    expect(res1.code).toBe(SEQ_MSGS);
+    const res2 = moveMessage(SEQ_MSGS, null, 'm:1', { type: 'after', key: 'm:1' });
+    expect(res2.code).toBe(SEQ_MSGS);
+  });
+
+  it('is a no-op when moving after the preceding message (same position)', () => {
+    const res = moveMessage(SEQ_MSGS, null, 'm:1', { type: 'after', key: 'm:0' });
+    expect(res.code).toBe(SEQ_MSGS);
+  });
+
+  it('preserves CONFIG header byte-for-byte outside modified lines', () => {
+    const res = moveMessage(SEQ, SEQ_CFG, 'm:1', { type: 'top' });
+    expect(res.warning).toBeUndefined();
+    expect(parseConfig(res.code)).toEqual(SEQ_CFG);
+  });
+
+  it('soft-fails on unknown keys, non-messages, and flowcharts', () => {
+    expect(moveMessage(SEQ_MSGS, null, 'm:99', { type: 'top' }).warning).toBeTruthy();
+    expect(moveMessage(SEQ_MSGS, null, 'p:0', { type: 'top' }).warning).toBeTruthy();
+    expect(moveMessage(FLOW, FLOW_CFG, 'e:0', { type: 'top' }).warning).toBeTruthy();
   });
 });
 
@@ -853,7 +1092,8 @@ sequenceDiagram
     expect(addTag(SEQ, SEQ_CFG, 'p:0', 'has space').warning).toBeTruthy();
     expect(addTag(SEQ, SEQ_CFG, 'p:0', 'has,comma').warning).toBeTruthy();
     expect(addTag(SEQ, SEQ_CFG, 'p:0', '').warning).toBeTruthy();
-    expect(addTag(SEQ, SEQ_CFG, 'm:0', 'ok').warning).toBeTruthy();
+    expect(addTag(SEQ, SEQ_CFG, 'r:0', 'ok').warning).toBeTruthy();  // regions are not taggable
+    expect(addTag(SEQ, SEQ_CFG, 'm:0', 'has space').warning).toBeTruthy();
     expect(removeTag(SEQ, SEQ_CFG, 'p:0', 'nope').code).toBe(SEQ);
   });
 
@@ -864,6 +1104,145 @@ sequenceDiagram
     addTag(SEQ, config, 'p:1', 'backend');
     setArrowStyle(SEQ, config, 'm:0', { color: 'red' });
     deleteElement(SEQ, config, 'm:0');
+    expect(JSON.stringify(config)).toBe(snapshot);
+  });
+});
+
+describe('arrow tags (messages/edges)', () => {
+  // A has the 'backend' tag, so message inheritance can be observed.
+  const SEQ2 = `%% CONFIG: {"version":1,"actors":{"A":{"keys":["backend"]}}}
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    B-->>A: Hi`;
+  const SEQ2_CFG = parseConfig(SEQ2);
+
+  it('adds and removes tags on a message via CONFIG.arrows, body byte-identical', () => {
+    const added = addTag(SEQ2, SEQ2_CFG, 'm:0', 'critical');
+    expect(added.warning).toBeUndefined();
+    expectBodyIdentical(SEQ2, added.code);
+    expect(added.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', keys: ['critical'] }]);
+    expect(parseConfig(added.code)?.arrows?.[0].keys).toEqual(['critical']);
+    // idempotent
+    const again = addTag(added.code, added.config, 'm:0', 'critical');
+    expect(again.config?.arrows?.[0].keys).toEqual(['critical']);
+    // a second tag, then removals prune the entry and finally the arrows field
+    const two = addTag(added.code, added.config, 'm:0', 'retry');
+    expect(two.config?.arrows?.[0].keys).toEqual(['critical', 'retry']);
+    const one = removeTag(two.code, two.config, 'm:0', 'critical');
+    expect(one.config?.arrows?.[0].keys).toEqual(['retry']);
+    const none = removeTag(one.code, one.config, 'm:0', 'retry');
+    expect(none.config?.arrows).toBeUndefined();
+    expect(none.config?.actors).toEqual({ A: { keys: ['backend'] } }); // actor tags untouched
+    // removing a tag the arrow does not have is a no-op
+    expect(removeTag(SEQ2, SEQ2_CFG, 'm:0', 'nope').code).toBe(SEQ2);
+  });
+
+  it('creates the header on the first message tag edit and drops it when empty', () => {
+    const code = createSequenceDiagram();
+    const added = addTag(code, null, 'm:0', 'critical');
+    expect(parseConfig(added.code)?.arrows?.[0].keys).toEqual(['critical']);
+    const removed = removeTag(added.code, added.config, 'm:0', 'critical');
+    expect(removed.code).toBe(code);
+    expect(parseConfig(removed.code)).toBeNull();
+  });
+
+  it('tags a flowchart edge', () => {
+    const added = addTag(FLOW, FLOW_CFG, 'e:0', 'critical');
+    expect(added.warning).toBeUndefined();
+    expect(added.config?.arrows).toEqual([{ from: 'A', to: 'B', keys: ['critical'] }]);
+  });
+
+  it('disambiguates same-endpoint messages by occurrence', () => {
+    const code = `%% CONFIG: {"version":1}
+sequenceDiagram
+    participant A
+    participant B
+    A->>B: Ping
+    A->>B: Ping`;
+    const cfg = parseConfig(code);
+    const second = addTag(code, cfg, 'm:1', 'critical');
+    expect(second.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Ping', occurrence: 1, keys: ['critical'] }]);
+    const first = addTag(code, cfg, 'm:0', 'other');
+    expect(first.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Ping', keys: ['other'] }]);
+  });
+
+  it('preserves tags and key mode when setting or clearing an arrow style', () => {
+    const tagged = addTag(SEQ2, SEQ2_CFG, 'm:0', 'critical');
+    const styled = setArrowStyle(tagged.code, tagged.config, 'm:0', { color: 'red' });
+    expect(styled.config?.arrows?.[0]).toEqual(
+      { from: 'A', to: 'B', label: 'Hello', color: 'red', keys: ['critical'] });
+    // clearing the style keeps the tags
+    const cleared = setArrowStyle(styled.code, styled.config, 'm:0', {});
+    expect(cleared.config?.arrows?.[0]).toEqual({ from: 'A', to: 'B', label: 'Hello', keys: ['critical'] });
+    // and keeps an explicit 'clean' mode
+    const modeSet = setArrowKeyMode(cleared.code, cleared.config, 'm:0', 'clean');
+    expect(modeSet.config?.arrows?.[0]).toEqual(
+      { from: 'A', to: 'B', label: 'Hello', keys: ['critical'], keyMode: 'clean' });
+    const clearedStyle = setArrowStyle(modeSet.code, modeSet.config, 'm:0', {});
+    expect(clearedStyle.config?.arrows?.[0]).toEqual(
+      { from: 'A', to: 'B', label: 'Hello', keys: ['critical'], keyMode: 'clean' });
+    // removing the last tag drops the empty keys array; the explicit 'clean'
+    // mode survives (it still means "do not inherit")
+    const removed = removeTag(clearedStyle.code, clearedStyle.config, 'm:0', 'critical');
+    expect(removed.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', keyMode: 'clean' }]);
+  });
+
+  it('setArrowKeyMode stores only the non-default (clean) state', () => {
+    const clean = setArrowKeyMode(SEQ2, SEQ2_CFG, 'm:0', 'clean');
+    expect(clean.warning).toBeUndefined();
+    expect(clean.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', keyMode: 'clean' }]);
+    // back to merged (the default): the entry carries no state and is pruned
+    const back = setArrowKeyMode(clean.code, clean.config, 'm:0', 'merged');
+    expect(back.config?.arrows).toBeUndefined();
+    expect(back.config?.actors).toEqual({ A: { keys: ['backend'] } });
+    // soft-fails
+    expect(setArrowKeyMode(SEQ2, SEQ2_CFG, 'm:0', 'bogus' as 'clean').warning).toBeTruthy();
+    expect(setArrowKeyMode(SEQ2, SEQ2_CFG, 'p:0', 'clean').warning).toBeTruthy();
+  });
+
+  it('getArrowTags reports own tags, the mode and the inherited service tags', () => {
+    // default: merged, no entry — inherits A's tags
+    expect(getArrowTags(SEQ2, SEQ2_CFG, 'm:0'))
+      .toEqual({ keys: [], keyMode: 'merged', inherited: ['backend'] });
+    // an own tag overlapping the inherited one is not duplicated
+    const tagged = addTag(SEQ2, SEQ2_CFG, 'm:0', 'backend');
+    expect(getArrowTags(tagged.code, tagged.config, 'm:0'))
+      .toEqual({ keys: ['backend'], keyMode: 'merged', inherited: [] });
+    // clean: no inheritance
+    const clean = setArrowKeyMode(tagged.code, tagged.config, 'm:0', 'clean');
+    expect(getArrowTags(clean.code, clean.config, 'm:0'))
+      .toEqual({ keys: ['backend'], keyMode: 'clean', inherited: [] });
+    // flowchart edge inherits from its source node; non-arrows return null
+    const flowTagged = addTag(FLOW, FLOW_CFG, 'e:0', 'critical');
+    expect(getArrowTags(flowTagged.code, flowTagged.config, 'e:0'))
+      .toEqual({ keys: ['critical'], keyMode: 'merged', inherited: [] });
+    expect(getArrowTags(SEQ2, SEQ2_CFG, 'p:0')).toBeNull();
+    expect(getArrowTags(SEQ2, SEQ2_CFG, 'nope')).toBeNull();
+  });
+
+  it('deleting an element removes its arrow tag entries', () => {
+    const tagged = addTag(SEQ2, SEQ2_CFG, 'm:0', 'critical');
+    const del = deleteElement(tagged.code, tagged.config, 'm:0');
+    expect(del.config?.arrows).toBeUndefined();
+    // deleting the actor cascades to its messages and drops their tag entries
+    const delActor = deleteElement(tagged.code, tagged.config, 'p:0');
+    expect(delActor.config?.arrows).toBeUndefined();
+    expect(delActor.config?.actors?.A).toBeUndefined();
+  });
+
+  it('does not mutate the input config on arrow tag edits', () => {
+    const config: DiagramConfig = {
+      version: 1,
+      actors: { A: { keys: ['backend'] } },
+      arrows: [{ from: 'A', to: 'B', label: 'Hello', keys: ['x'] }],
+    };
+    const snapshot = JSON.stringify(config);
+    addTag(SEQ, config, 'm:0', 'y');
+    removeTag(SEQ, config, 'm:0', 'x');
+    setArrowKeyMode(SEQ, config, 'm:0', 'clean');
+    setArrowStyle(SEQ, config, 'm:0', { color: 'red' });
     expect(JSON.stringify(config)).toBe(snapshot);
   });
 });
@@ -1127,6 +1506,32 @@ describe('create -> change -> verify (harness)', () => {
     expect(parseConfig(flowColored.code)?.actors?.A.color).toBe('blue');
     const flowStyled = setArrowStyle(flowColored.code, flowColored.config, 'e:0', { width: 2, dash: 'dotted' });
     expect(parseConfig(flowStyled.code)?.arrows).toEqual([{ from: 'A', to: 'B', width: 2, dash: 'dotted' }]);
+  });
+
+  it('retargets message endpoints on a newly created sequence diagram', () => {
+    // createSequenceDiagram: A->>B: Hello, B-->>A: Hi there; add a third
+    // participant, then drag the arrow head / tail onto it.
+    const code = createSequenceDiagram();
+    const withC = addParticipant(code, null); // New1 = p:2
+    const head = moveMessageEndpoint(withC.code, withC.config, 'm:0', 'to', 'p:2');
+    expect(head.warning).toBeUndefined();
+    expect(parseModel(head.code).elements.find(e => e.key === 'm:0')).toMatchObject({ from: 'A', to: 'New1', label: 'Hello' });
+    const tail = moveMessageEndpoint(head.code, head.config, 'm:1', 'from', 'p:2');
+    expect(tail.warning).toBeUndefined();
+    expect(parseModel(tail.code).elements.find(e => e.key === 'm:1')).toMatchObject({ from: 'New1', to: 'A', label: 'Hi there' });
+    // the other message is untouched
+    expect(parseModel(tail.code).elements.find(e => e.key === 'm:0')).toMatchObject({ from: 'A', to: 'New1', label: 'Hello' });
+  });
+
+  it('keeps the arrow style when retargeting a styled message endpoint', () => {
+    const code = createSequenceDiagram();
+    const styled = setArrowStyle(code, null, 'm:0', { color: '#e11d48' });
+    const withC = addParticipant(styled.code, styled.config);
+    const moved = moveMessageEndpoint(withC.code, withC.config, 'm:0', 'to', 'p:2');
+    expect(moved.warning).toBeUndefined();
+    expect(parseConfig(moved.code)?.arrows).toEqual([{ from: 'A', to: 'New1', label: 'Hello', color: '#e11d48' }]);
+    // and the style still resolves against the retargeted endpoints
+    expect(getArrowStyle(moved.code, moved.config, 'm:0')).toEqual({ color: '#e11d48', width: undefined, dash: 'solid' });
   });
 });
 

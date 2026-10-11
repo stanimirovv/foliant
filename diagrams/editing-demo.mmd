@@ -6,7 +6,9 @@ sequenceDiagram
     participant DB as Database
 
     C->>API: POST /login
+    New1->>API: AAAA
     API->>Auth: Validate Credentials
+    New1->>API: New message
     Auth->>DB: Fetch User Data
     DB-->>Auth: User Record
     Auth-->>API: JWT Token

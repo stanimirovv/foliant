@@ -55,6 +55,7 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Add a tag (e.g. `backend`) → it appears in the sidebar under Actors → By Key.
 - [ ] Add a second tag, then remove one → the By Key list updates immediately.
 - [ ] Add Participant (toolbar) → a new actor appears at the right end with a default label; rename it and send it a message.
+- [ ] Drag an actor box horizontally → a dashed line shows the target insertion position; releasing reorders the participant and keeps it selected.
 - [ ] Delete a participant that has messages → a confirm dialog lists the messages/notes that will also be removed; cancelling changes nothing; confirming removes all of them.
 - [ ] Delete a participant with no messages → removed immediately, no dialog.
 
@@ -71,7 +72,24 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Combine color + width + dash on one arrow → all three apply together.
 - [ ] Reset an arrow's style → it returns to default rendering.
 - [ ] Add Message (toolbar) → a new message appears; with a message selected it is inserted after it; with a participant selected, that participant is the sender.
+- [ ] Drag between lifelines (press on a lifeline and drag to another participant) → a new message connects them; the horizontal line shows the insertion position; the message is selected.
+- [ ] Drag an arrow head (`to`) onto another participant → reconnects the recipient; styles and tags follow.
+- [ ] Drag an arrow tail (`from`) onto another participant → reconnects the origin; styles and tags follow.
 - [ ] Delete a message → it disappears; undo brings it back.
+
+## Increment 3b — Message/edge tags (inheritance + filtering)
+
+> Stop here: messages/edges carry their own tags, inherit the origin service's tags by default, and follow the by-key filter as on/off only.
+
+- [ ] Select a message → the panel shows a Tags section (plus Label / Type / Color / Width / Dash / Delete).
+- [ ] Add a tag (e.g. `critical`) to the message → a chip appears in the panel and the tag appears in the sidebar under Actors → By Key; persists after F5 in `%% CONFIG:` under `arrows[].keys`.
+- [ ] Tag a participant (e.g. `backend`) → a message originating from it shows `backend` as a read-only "inherited" chip (Inherit service tags = On, the default).
+- [ ] Toggle **Inherit service tags** Off → the inherited chip disappears and `"keyMode":"clean"` persists in CONFIG; toggle back On → the field is gone again.
+- [ ] With a message tagged `critical`, set `critical` to **Off** in By Key → the message disappears from the canvas (its participants stay); set it back **On** → the message returns.
+- [ ] Set a message's tag to **Merged** / **Clean** in By Key → the message is unaffected (only actors merge; messages respond to keys as on/off only).
+- [ ] Style the tagged message (color/width/dash) and clear the style → the tag survives both.
+- [ ] Delete a tagged message → its CONFIG entry is gone; undo restores both the message and its tag.
+- [ ] Flowchart: tag an edge → same behaviors (panel chip, By Key list, Off hides the edge).
 
 ## Increment 4 — Flowchart editing
 
@@ -84,6 +102,8 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Select an edge → the panel shows Label / Type / Color / Width / Dash / Delete.
 - [ ] Edit an edge label; change Type (`---`, `-->`, `==>`, `-.->`, `<-->`), Color, Width, Dash → all apply to the rendered edge.
 - [ ] Add a node and an edge via the toolbar.
+- [ ] Drag a node onto another node → connects them with an edge.
+- [ ] Drag a node into empty space → a dashed indicator shows the target insertion position; releasing moves the node along the layout axis.
 - [ ] Delete a node that has edges → the cascade confirm lists the edges → confirming removes them; the surviving nodes keep their labels (check the `.mmd` file: surviving endpoint declarations are kept, not eaten).
 
 ## Increment 5 — New Diagram dialog

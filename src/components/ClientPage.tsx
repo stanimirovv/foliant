@@ -7,12 +7,13 @@ import EditorPanel from './EditorPanel';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus } from 'lucide-react';
-import { parseViewsData, updateViewsData, DiagramConfig, SavedView } from '@/lib/views';
+import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  moveNode, EditResult, ArrowStylePatch, MessageInsertPosition,
+  getArrowTags, setArrowKeyMode,
+  moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
 import { buildSelectionMap } from '@/lib/svgmap';
@@ -353,9 +354,17 @@ export default function ClientPage() {
   }, [viewsData]);
 
   const availableKeys = useMemo(() => {
-    if (!viewsData?.actors) return [];
     const keys = new Set<string>();
-    Object.values(viewsData.actors).forEach(a => { if (a.keys) a.keys.forEach(k => keys.add(k)); });
+    if (viewsData?.actors) {
+      Object.values(viewsData.actors).forEach(a => { if (a.keys) a.keys.forEach(k => keys.add(k)); });
+    }
+    // Messages/edges carry their own tags too (their inherited tags are the
+    // origin service's, already listed via the actors).
+    if (viewsData?.arrows) {
+      for (const a of viewsData.arrows) {
+        if (a.keys) a.keys.forEach(k => keys.add(k));
+      }
+    }
     return Array.from(keys);
   }, [viewsData]);
 
@@ -488,6 +497,37 @@ export default function ClientPage() {
     applyEditResult(addMessage(rawCode, viewsData, fromRaw.key, toRaw.key, rawPosition));
   };
 
+  // DiagramViewer drag: retarget a sequence message's endpoint — drag the
+  // arrow head to change the recipient ('to'), the tail to change the origin
+  // ('from'). All keys are processed; resolved to raw keys here.
+  const handleMoveMessageEndpoint = (
+    messageProcessedKey: string,
+    end: 'from' | 'to',
+    targetProcessedKey: string,
+  ) => {
+    const rawMessage = selectionMap.get(messageProcessedKey);
+    const rawTarget = selectionMap.get(targetProcessedKey);
+    if (!rawMessage || !rawTarget) return;
+    applyEditResult(moveMessageEndpoint(rawCode, viewsData, rawMessage.key, end, rawTarget.key));
+  };
+
+  // DiagramViewer drag: reorder a sequence message vertically up or down.
+  const handleMoveMessage = (
+    messageProcessedKey: string,
+    position: MessageInsertPosition,
+  ) => {
+    const rawMessage = selectionMap.get(messageProcessedKey);
+    if (!rawMessage || rawMessage.kind !== 'message') return;
+    const rawPosition: MessageInsertPosition =
+      position.type === 'before' || position.type === 'after'
+        ? (() => {
+            const el = selectionMap.get(position.key);
+            return el ? { type: position.type, key: el.key } : { type: 'bottom' };
+          })()
+        : position;
+    applyEditResult(moveMessage(rawCode, viewsData, rawMessage.key, rawPosition));
+  };
+
   // --- Edit dispatch (EDITING_PLAN.md Steps 7-8): every panel action runs a
   // pure transform over (rawCode, viewsData) and applies the result. ---
 
@@ -557,6 +597,11 @@ export default function ClientPage() {
     [selectedArrow, rawCode, viewsData]
   );
 
+  const selectedArrowTags = useMemo(
+    () => (selectedArrow ? getArrowTags(rawCode, viewsData, selectedArrow.key) : null),
+    [selectedArrow, rawCode, viewsData]
+  );
+
   // Current arrow style as a complete patch (setArrowStyle replaces the whole
   // entry, so single-field edits must carry the other fields along).
   const currentArrowPatch = (): ArrowStylePatch => {
@@ -605,13 +650,24 @@ export default function ClientPage() {
   };
 
   const handleAddTag = (tag: string) => {
-    if (!selectedComponent) return;
-    applyEditResult(addTag(rawCode, viewsData, selectedComponent.key, tag));
+    if (selectedComponent) {
+      applyEditResult(addTag(rawCode, viewsData, selectedComponent.key, tag));
+    } else if (selectedArrow) {
+      applyEditResult(addTag(rawCode, viewsData, selectedArrow.key, tag));
+    }
   };
 
   const handleRemoveTag = (tag: string) => {
-    if (!selectedComponent) return;
-    applyEditResult(removeTag(rawCode, viewsData, selectedComponent.key, tag));
+    if (selectedComponent) {
+      applyEditResult(removeTag(rawCode, viewsData, selectedComponent.key, tag));
+    } else if (selectedArrow) {
+      applyEditResult(removeTag(rawCode, viewsData, selectedArrow.key, tag));
+    }
+  };
+
+  const handleSetArrowKeyMode = (mode: ArrowKeyMode) => {
+    if (!selectedArrow) return;
+    applyEditResult(setArrowKeyMode(rawCode, viewsData, selectedArrow.key, mode));
   };
 
   const handleRequestDelete = () => {
@@ -619,6 +675,12 @@ export default function ClientPage() {
     const result = deleteElement(rawCode, viewsData, selectedRawElement.key);
     if (result.warning) {
       setEditWarning(result.warning);
+      return;
+    }
+    // Nodes are deleted immediately without asking for confirmation
+    if (selectedRawElement.kind === 'node') {
+      applyEditResult(result);
+      setSelection(null);
       return;
     }
     const cascaded = (result.cascaded ?? [])
@@ -1161,6 +1223,8 @@ export default function ClientPage() {
               onSelect={handleSelect}
               onMoveParticipant={handleMoveParticipant}
               onCreateMessageDrag={handleCreateMessageDrag}
+              onMoveMessageEndpoint={handleMoveMessageEndpoint}
+              onMoveMessage={handleMoveMessage}
             />
           </div>
           {editMode && (
@@ -1170,6 +1234,7 @@ export default function ClientPage() {
                 diagramType={rawModel.type}
                 config={viewsData}
                 arrowStyle={selectedArrowStyle}
+                arrowTags={selectedArrowTags}
                 warning={editWarning}
                 pendingDelete={pendingDelete}
                 onEditLabel={handleEditLabel}
@@ -1179,6 +1244,7 @@ export default function ClientPage() {
                 onSetDash={handleSetDash}
                 onAddTag={handleAddTag}
                 onRemoveTag={handleRemoveTag}
+                onSetKeyMode={handleSetArrowKeyMode}
                 onRequestDelete={handleRequestDelete}
                 onConfirmDelete={handleConfirmDelete}
                 onCancelDelete={handleCancelDelete}

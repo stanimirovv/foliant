@@ -245,3 +245,102 @@ describe('transformActors', () => {
   MergedKey_backend[Merged backend] --> C[Client]`);
   });
 });
+
+describe('transformActors message/edge tags', () => {
+  // Messages follow the by-key filter, but only as on/off: an own tag (or an
+  // inherited one, unless keyMode is 'clean') hides the message line when the
+  // key is hidden; merging never applies to messages.
+  const code = `sequenceDiagram
+  participant A
+  participant B
+  participant C
+  A->>B: Call
+  B->>C: Forward
+  C->>A: Back`;
+  const config = {
+    version: 1,
+    actors: { A: { keys: ['backend'] } },
+    arrows: [
+      { from: 'B', to: 'C', label: 'Forward', keys: ['flaky'] },
+      { from: 'C', to: 'A', label: 'Back', keys: ['internal'], keyMode: 'clean' as const },
+    ],
+  };
+
+  it('hides a message carrying a hidden key, keeping the rest', () => {
+    const result = transformActors(code, config, { hideKeys: ['flaky'] });
+    expect(result).toBe(`sequenceDiagram
+  participant A
+  participant B
+  participant C
+  A->>B: Call
+  C->>A: Back`);
+  });
+
+  it('a hidden actor key still hides the service and its messages', () => {
+    const result = transformActors(code, config, { hideKeys: ['backend'] });
+    expect(result).toBe(`sequenceDiagram
+  participant B
+  participant C
+  B->>C: Forward`);
+  });
+
+  it('hides a message by its own tag even when no actors are in CONFIG', () => {
+    const code2 = `sequenceDiagram
+  participant A
+  participant B
+  A->>B: Call
+  A->>B: Note`;
+    const cfg2 = {
+      version: 1,
+      arrows: [{ from: 'A', to: 'B', label: 'Note', keys: ['draft'] }],
+    };
+    const result = transformActors(code2, cfg2, { hideKeys: ['draft'] });
+    expect(result).toBe(`sequenceDiagram
+  participant A
+  participant B
+  A->>B: Call`);
+  });
+
+  it('hides flowchart edges carrying a hidden key', () => {
+    const flow = `flowchart TD
+    A[App] --> B[API]
+    B --> C[DB]
+    A --> D[Cache]`;
+    const cfg = {
+      version: 1,
+      actors: { B: { keys: ['backend'] } },
+      arrows: [{ from: 'B', to: 'C', keys: ['flaky'] }],
+    };
+    const result = transformActors(flow, cfg, { hideKeys: ['flaky'] });
+    expect(result).toBe(`flowchart TD
+    A[App] --> B[API]
+    A --> D[Cache]`);
+  });
+
+  it('colors never hide messages by themselves (tags respond to keys only)', () => {
+    const cfg = {
+      version: 1,
+      actors: { A: { color: 'red' } },
+      arrows: [{ from: 'B', to: 'C', label: 'Forward', keys: ['flaky'] }],
+    };
+    const result = transformActors(code, cfg, { hideColors: ['red'] });
+    expect(result).toBe(`sequenceDiagram
+  participant B
+  participant C
+  B->>C: Forward`);
+  });
+
+  it('does not hide messages for keys that are only merged (on/off only)', () => {
+    // 'flaky' exists only on a message: merging cannot apply to it, the line stays
+    const result = transformActors(code, config, { mergeByKeys: ['flaky'] });
+    expect(result).toBe(code);
+  });
+
+  it('is a no-op when no key is hidden, even with arrow tags present', () => {
+    expect(transformActors(code, config, {})).toBe(code);
+    // merging an actor key renames endpoints but never drops tagged messages
+    const merged = transformActors(code, config, { mergeByKeys: ['backend'] });
+    expect(merged).toContain('MergedKey_backend->>B: Call');
+    expect(merged).toContain('B->>C: Forward');
+  });
+});

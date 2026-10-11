@@ -451,6 +451,32 @@ export function getMessageScreenInfo(svg: Element, model: DiagramModel): Message
   return result;
 }
 
+export interface MessageEndpointScreenInfo {
+  key: string;
+  fromX: number; fromY: number;  // screen point of the tail (origin lifeline)
+  toX: number; toY: number;      // screen point of the arrow head (recipient lifeline)
+}
+
+// Screen points of each message's two endpoints. Mermaid draws sequence
+// messages lifeline-to-lifeline at the message's Y: the tail starts at the
+// origin participant's center X, the head (arrowhead marker-end) touches the
+// recipient's. For self-messages both ends sit on the same lifeline.
+export function getMessageEndpointScreenInfo(svg: Element, model: DiagramModel): MessageEndpointScreenInfo[] {
+  const participants = getParticipantScreenInfo(svg, model);
+  const messages = getMessageScreenInfo(svg, model);
+  const yByKey = new Map(messages.map(m => [m.key, m.y]));
+  const pById = new Map(participants.map(p => [p.id, p]));
+  const result: MessageEndpointScreenInfo[] = [];
+  ofKind<MessageElement>(model, 'message').forEach(m => {
+    const y = yByKey.get(m.key);
+    const from = pById.get(m.from);
+    const to = pById.get(m.to);
+    if (y === undefined || !from || !to) return;
+    result.push({ key: m.key, fromX: from.centerX, fromY: y, toX: to.centerX, toY: y });
+  });
+  return result;
+}
+
 // The participant nearest to the given screen X (by center distance). Used as
 // the drop target when creating a message by dragging between participants.
 export function nearestParticipantAtX(

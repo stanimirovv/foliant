@@ -130,6 +130,30 @@ describe('Visual editing (e2e)', () => {
         cy.get('#diagram-container [data-et="message"]').first().should(($el) => {
           expect(($el[0] as unknown as SVGElement).style.stroke).to.eq('rgb(225, 29, 72)');
         });
+
+        // message tags & inheritance (Increment 3b)
+        cy.get('#diagram-container text.messageText').first().click();
+        cy.contains('span[title="Inherited from A"]', 'backend').should('exist');
+        cy.get('input[placeholder="Add tag..."]').type('critical{enter}');
+        cy.get('button[aria-label="Remove tag critical"]').should('exist');
+        saved();
+
+        // toggle inherit service tags to Off -> inherited chip disappears
+        cy.get('[data-testid="arrow-inherit-off"]').click();
+        cy.contains('span[title="Inherited from A"]', 'backend').should('not.exist');
+        saved();
+
+        // toggle inherit service tags back to On
+        cy.get('[data-testid="arrow-inherit-on"]').click();
+        cy.contains('span[title="Inherited from A"]', 'backend').should('exist');
+        saved();
+
+        // hiding the message's tag 'critical' hides the message
+        cy.contains('By Key').parent().contains('li', 'critical').contains('button', 'Off').click();
+        cy.get('#diagram-container text.messageText').contains('Greetings').should('not.exist');
+        // un-hiding restores it
+        cy.contains('By Key').parent().contains('li', 'critical').contains('button', 'On').click();
+        cy.get('#diagram-container text.messageText').contains('Greetings').should('exist');
       });
   });
 
@@ -193,13 +217,10 @@ describe('Visual editing (e2e)', () => {
         cy.get('button[title="Add Message"]').click();
         cy.get('#diagram-container path[data-et="edge"]').should('have.length', 3);
 
-        // delete node A: the cascade confirm lists its edges
+        // delete node A: deleted immediately without asking confirmation
         cy.contains('#diagram-container g.node', 'Alice').click();
         cy.get('[data-testid="panel-delete"]').click();
-        cy.get('[data-testid="delete-dialog"]').should('be.visible')
-          .and('contain.text', 'node A [Alice]')
-          .and('contain.text', 'referencing elements');
-        cy.get('[data-testid="confirm-delete"]').click();
+        cy.get('[data-testid="delete-dialog"]').should('not.exist');
         cy.get('#diagram-container g.node').should('have.length', 2);
         cy.get('#diagram-container path[data-et="edge"]').should('have.length', 0);
       });
