@@ -360,10 +360,42 @@ function injectShockwaveBurst(
   return shockwave;
 }
 
+interface ArrowEndpoints {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+function extractArrowEndpoints(target: Element): ArrowEndpoints | null {
+  const tagName = target.tagName.toLowerCase();
+  if (tagName === 'line') {
+    const x1 = parseFloat(target.getAttribute('x1') || '0');
+    const y1 = parseFloat(target.getAttribute('y1') || '0');
+    const x2 = parseFloat(target.getAttribute('x2') || '0');
+    const y2 = parseFloat(target.getAttribute('y2') || '0');
+    return { x1, y1, x2, y2 };
+  }
+  if (tagName === 'path') {
+    const d = target.getAttribute('d');
+    if (!d) return null;
+    const coordPairs = Array.from(d.matchAll(/(-?[\d.]+)[ ,]+(-?[\d.]+)/g));
+    if (coordPairs.length < 2) return null;
+    const first = coordPairs[0];
+    const last = coordPairs[coordPairs.length - 1];
+    return {
+      x1: parseFloat(first[1]),
+      y1: parseFloat(first[2]),
+      x2: parseFloat(last[1]),
+      y2: parseFloat(last[2]),
+    };
+  }
+  return null;
+}
+
 function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color: string, width?: number) {
   const doc = target.ownerDocument;
   if (!doc) return;
-  const isLine = target.tagName.toLowerCase() === 'line';
 
   if (anim === 'pulse') {
     // Glowing Orb: target remains the full solid line rail; runner carries the glowing orb from start to end
@@ -381,115 +413,118 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
     return;
   }
 
-  if (isLine) {
-    const x1 = parseFloat(target.getAttribute('x1') || '0');
-    const y1 = parseFloat(target.getAttribute('y1') || '0');
-    const x2 = parseFloat(target.getAttribute('x2') || '0');
-    const y2 = parseFloat(target.getAttribute('y2') || '0');
-    const dx = x2 >= x1 ? 1 : -1;
-    const len = Math.abs(x2 - x1);
+  const coords = extractArrowEndpoints(target);
+  if (!coords) return;
 
-    if (anim === 'broken-sender' || anim === 'stutter') {
-      // 1. Origin barrier wall at sender lifeline
-      const barrier = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
-      barrier.setAttribute('class', 'arrow-barrier-wall');
-      barrier.setAttribute('x1', String(x1));
-      barrier.setAttribute('y1', String(y1 - 12));
-      barrier.setAttribute('x2', String(x1));
-      barrier.setAttribute('y2', String(y1 + 12));
-      barrier.setAttribute('stroke', color);
-      barrier.setAttribute('stroke-width', '3');
-      barrier.setAttribute('stroke-linecap', 'round');
-      const bStyle = barrier as Styleable;
-      bStyle.style.stroke = color;
-      bStyle.style.color = color;
-      bStyle.style.strokeWidth = '3px';
-      target.parentNode?.insertBefore(barrier, target.nextSibling);
+  const { x1, y1, x2, y2 } = coords;
+  const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+  const ux = (x2 - x1) / len;
+  const uy = (y2 - y1) / len;
+  const nx = -uy;
+  const ny = ux;
 
-      // 2. Expanding neon shockwave burst circle at sender origin (identical to receiver!)
-      const shockwave = injectShockwaveBurst(doc, x1, y1, color, 'arrow-sender-burst');
-      target.parentNode?.insertBefore(shockwave, target.nextSibling);
+  if (anim === 'broken-sender' || anim === 'stutter') {
+    // 1. Origin barrier wall at sender lifeline / node
+    const barrier = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+    barrier.setAttribute('class', 'arrow-barrier-wall');
+    barrier.setAttribute('x1', String(x1 - nx * 12));
+    barrier.setAttribute('y1', String(y1 - ny * 12));
+    barrier.setAttribute('x2', String(x1 + nx * 12));
+    barrier.setAttribute('y2', String(y1 + ny * 12));
+    barrier.setAttribute('stroke', color);
+    barrier.setAttribute('stroke-width', '3');
+    barrier.setAttribute('stroke-linecap', 'round');
+    const bStyle = barrier as Styleable;
+    bStyle.style.stroke = color;
+    bStyle.style.color = color;
+    bStyle.style.strokeWidth = '3px';
+    target.parentNode?.insertBefore(barrier, target.nextSibling);
 
-      // 3. Sender origin error mark badge
-      const cx = x1 + dx * 14;
-      const cy = y1;
-      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-sender', 'badge');
-      target.parentNode?.insertBefore(xMark, target.nextSibling);
-    } else if (anim === 'broken-network' || anim === 'ricochet') {
-      const midX = (x1 + x2) / 2;
-      const midY = (y1 + y2) / 2;
-      const gap = Math.min(46, Math.max(24, len * 0.38));
-      const halfSeg = Math.max(0, (len - gap) / 2);
-      const xCut1 = midX - dx * (gap / 2);
-      const xCut2 = midX + dx * (gap / 2);
+    // 2. Expanding neon shockwave burst circle at sender origin (identical to receiver!)
+    const shockwave = injectShockwaveBurst(doc, x1, y1, color, 'arrow-sender-burst');
+    target.parentNode?.insertBefore(shockwave, target.nextSibling);
 
-      // Physically sever the line in the center using dash pattern
-      const targetStyle = target as Styleable;
-      targetStyle.style.strokeDasharray = `${halfSeg} ${gap} ${len + 100}`;
-      targetStyle.style.strokeDashoffset = '0';
+    // 3. Sender origin error mark badge
+    const cx = x1 + ux * 14;
+    const cy = y1 + uy * 14;
+    const xMark = createXMark(doc, cx, cy, color, 'arrow-x-sender', 'badge');
+    target.parentNode?.insertBefore(xMark, target.nextSibling);
+  } else if (anim === 'broken-network' || anim === 'ricochet') {
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    const gap = Math.min(46, Math.max(24, len * 0.38));
+    const halfSeg = Math.max(0, (len - gap) / 2);
+    const xCut1 = midX - ux * (gap / 2);
+    const yCut1 = midY - uy * (gap / 2);
+    const xCut2 = midX + ux * (gap / 2);
+    const yCut2 = midY + uy * (gap / 2);
 
-      // Left cutoff breaker cap
-      const cap1 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
-      cap1.setAttribute('class', 'arrow-breaker-cap');
-      cap1.setAttribute('x1', String(xCut1));
-      cap1.setAttribute('y1', String(midY - 7));
-      cap1.setAttribute('x2', String(xCut1));
-      cap1.setAttribute('y2', String(midY + 7));
-      cap1.setAttribute('stroke', color);
-      cap1.setAttribute('stroke-width', '2.8');
-      cap1.setAttribute('stroke-linecap', 'round');
-      const cap1Style = cap1 as Styleable;
-      cap1Style.style.stroke = color;
-      cap1Style.style.color = color;
-      cap1Style.style.strokeWidth = '2.8px';
-      target.parentNode?.insertBefore(cap1, target.nextSibling);
+    // Physically sever the line or path in the center using dash pattern
+    const targetStyle = target as Styleable;
+    targetStyle.style.strokeDasharray = `${halfSeg} ${gap} ${len + 100}`;
+    targetStyle.style.strokeDashoffset = '0';
 
-      // Right cutoff breaker cap
-      const cap2 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
-      cap2.setAttribute('class', 'arrow-breaker-cap');
-      cap2.setAttribute('x1', String(xCut2));
-      cap2.setAttribute('y1', String(midY - 7));
-      cap2.setAttribute('x2', String(xCut2));
-      cap2.setAttribute('y2', String(midY + 7));
-      cap2.setAttribute('stroke', color);
-      cap2.setAttribute('stroke-width', '2.8');
-      cap2.setAttribute('stroke-linecap', 'round');
-      const cap2Style = cap2 as Styleable;
-      cap2Style.style.stroke = color;
-      cap2Style.style.color = color;
-      cap2Style.style.strokeWidth = '2.8px';
-      target.parentNode?.insertBefore(cap2, target.nextSibling);
+    // Left/start cutoff breaker cap
+    const cap1 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+    cap1.setAttribute('class', 'arrow-breaker-cap');
+    cap1.setAttribute('x1', String(xCut1 - nx * 7));
+    cap1.setAttribute('y1', String(yCut1 - ny * 7));
+    cap1.setAttribute('x2', String(xCut1 + nx * 7));
+    cap1.setAttribute('y2', String(yCut1 + ny * 7));
+    cap1.setAttribute('stroke', color);
+    cap1.setAttribute('stroke-width', '2.8');
+    cap1.setAttribute('stroke-linecap', 'round');
+    const cap1Style = cap1 as Styleable;
+    cap1Style.style.stroke = color;
+    cap1Style.style.color = color;
+    cap1Style.style.strokeWidth = '2.8px';
+    target.parentNode?.insertBefore(cap1, target.nextSibling);
 
-      // Central floating broken connection badge
-      const xMark = createXMark(doc, midX, midY, color, 'arrow-x-network', 'badge');
-      target.parentNode?.insertBefore(xMark, target.nextSibling);
-    } else if (anim === 'broken-receiver' || anim === 'hesitate') {
-      // Rejection barrier wall at target lifeline
-      const barrier = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
-      barrier.setAttribute('class', 'arrow-barrier-wall');
-      barrier.setAttribute('x1', String(x2));
-      barrier.setAttribute('y1', String(y2 - 12));
-      barrier.setAttribute('x2', String(x2));
-      barrier.setAttribute('y2', String(y2 + 12));
-      barrier.setAttribute('stroke', color);
-      barrier.setAttribute('stroke-width', '3');
-      barrier.setAttribute('stroke-linecap', 'round');
-      const bStyle = barrier as Styleable;
-      bStyle.style.stroke = color;
-      bStyle.style.color = color;
-      bStyle.style.strokeWidth = '3px';
-      target.parentNode?.insertBefore(barrier, target.nextSibling);
+    // Right/end cutoff breaker cap
+    const cap2 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+    cap2.setAttribute('class', 'arrow-breaker-cap');
+    cap2.setAttribute('x1', String(xCut2 - nx * 7));
+    cap2.setAttribute('y1', String(yCut2 - ny * 7));
+    cap2.setAttribute('x2', String(xCut2 + nx * 7));
+    cap2.setAttribute('y2', String(yCut2 + ny * 7));
+    cap2.setAttribute('stroke', color);
+    cap2.setAttribute('stroke-width', '2.8');
+    cap2.setAttribute('stroke-linecap', 'round');
+    const cap2Style = cap2 as Styleable;
+    cap2Style.style.stroke = color;
+    cap2Style.style.color = color;
+    cap2Style.style.strokeWidth = '2.8px';
+    target.parentNode?.insertBefore(cap2, target.nextSibling);
 
-      // Expanding neon shockwave burst ring on collision
-      const shockwave = injectShockwaveBurst(doc, x2, y2, color);
-      target.parentNode?.insertBefore(shockwave, target.nextSibling);
+    // Central floating broken connection badge
+    const xMark = createXMark(doc, midX, midY, color, 'arrow-x-network', 'badge');
+    target.parentNode?.insertBefore(xMark, target.nextSibling);
+  } else if (anim === 'broken-receiver' || anim === 'hesitate') {
+    // Rejection barrier wall at target lifeline / node
+    const barrier = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+    barrier.setAttribute('class', 'arrow-barrier-wall');
+    barrier.setAttribute('x1', String(x2 - nx * 12));
+    barrier.setAttribute('y1', String(y2 - ny * 12));
+    barrier.setAttribute('x2', String(x2 + nx * 12));
+    barrier.setAttribute('y2', String(y2 + ny * 12));
+    barrier.setAttribute('stroke', color);
+    barrier.setAttribute('stroke-width', '3');
+    barrier.setAttribute('stroke-linecap', 'round');
+    const bStyle = barrier as Styleable;
+    bStyle.style.stroke = color;
+    bStyle.style.color = color;
+    bStyle.style.strokeWidth = '3px';
+    target.parentNode?.insertBefore(barrier, target.nextSibling);
 
-      // Rejection crosshead badge
-      const cx = x2 - dx * 14;
-      const cy = y2;
-      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-receiver', 'badge');
-      target.parentNode?.insertBefore(xMark, target.nextSibling);
-    }
+    // Expanding neon shockwave burst ring on collision
+    const shockwave = injectShockwaveBurst(doc, x2, y2, color);
+    target.parentNode?.insertBefore(shockwave, target.nextSibling);
+
+    // Rejection crosshead badge
+    const cx = x2 - ux * 14;
+    const cy = y2 - uy * 14;
+    const xMark = createXMark(doc, cx, cy, color, 'arrow-x-receiver', 'badge');
+    target.parentNode?.insertBefore(xMark, target.nextSibling);
   }
 }
 

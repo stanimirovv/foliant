@@ -338,6 +338,57 @@ describe('applyArrowStyles (sequence fixture)', () => {
     expect(rootReceiver.querySelector('.arrow-shockwave-burst animate[attributeName="r"]')).toBeTruthy();
   });
 
+  it('injects decorations on SVG path elements (flowchart edges and self-calls)', () => {
+    // Flowchart edge path with d attribute
+    const flowSvgWithD = FLOW_SVG.replace(
+      'id="fx-flow-L_B_C_0" class="flowchart-link"',
+      'id="fx-flow-L_B_C_0" class="flowchart-link" d="M 50 100 L 50 220"'
+    );
+    const flowModel = parseModel(FLOW_CODE);
+    const outFlow = applyArrowStyles(flowSvgWithD, flowModel, {
+      version: 1,
+      arrows: [{ from: 'B', to: 'C', label: 'Reply', color: '#ff2a85', animation: 'broken-sender' }],
+    });
+    const rootFlow = parseSvgRoot(outFlow);
+    expect(rootFlow.querySelector('.arrow-x-sender')).toBeTruthy();
+    expect(rootFlow.querySelector('.arrow-barrier-wall')).toBeTruthy();
+    expect(rootFlow.querySelector('.arrow-shockwave-burst')).toBeTruthy();
+    expect(rootFlow.querySelector('.arrow-sender-burst')).toBeTruthy();
+
+    // Sequence self-call path with d attribute (m3: A -> A)
+    const seqSvgWithD = SEQ_SVG.replace(
+      'data-from="A" data-to="A"',
+      'data-from="A" data-to="A" d="M 100 200 C 140 180, 140 240, 100 220"'
+    );
+    const outSelf = applyArrowStyles(seqSvgWithD, model, {
+      version: 1,
+      arrows: [{ from: 'A', to: 'A', label: 'm3', color: '#ff1744', animation: 'broken-receiver' }],
+    });
+    const rootSelf = parseSvgRoot(outSelf);
+    expect(rootSelf.querySelector('.arrow-x-receiver')).toBeTruthy();
+    expect(rootSelf.querySelector('.arrow-barrier-wall')).toBeTruthy();
+    expect(rootSelf.querySelector('.arrow-shockwave-burst')).toBeTruthy();
+  });
+
+  it('recognizes and styles native circle and star sequence arrow operators', () => {
+    const circleModel = parseModel(`sequenceDiagram
+    participant A
+    participant B
+    A->oB: circle arrow
+    B-->oA: dashed circle arrow
+    A->*B: star arrow
+    B-->*A: dashed star arrow`);
+    expect(circleModel.elements.filter(e => e.kind === 'message')).toHaveLength(4);
+    const m1 = circleModel.elements[2] as MessageElement;
+    expect(m1.operator).toBe('->o');
+    const m2 = circleModel.elements[3] as MessageElement;
+    expect(m2.operator).toBe('-->o');
+    const m3 = circleModel.elements[4] as MessageElement;
+    expect(m3.operator).toBe('->*');
+    const m4 = circleModel.elements[5] as MessageElement;
+    expect(m4.operator).toBe('-->*');
+  });
+
   it('exports 6 animated arrow presets and 10 base colors (5 positive, 5 error)', () => {
     expect(ANIMATED_ARROW_PRESETS).toHaveLength(6);
     expect(ANIMATED_ARROW_COLORS.positive).toHaveLength(5);

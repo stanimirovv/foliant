@@ -269,3 +269,24 @@ body {
   animation: diff-gutter-fade 5s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
 }
 
+/* Default Mermaid Actor styling for Dark Mode to match main blue and dark background */
+.theme-dark rect.actor {
+  stroke: #3b82f6 !important;
+  fill: #1e293b !important;
+}
+
+.theme-dark line.actor-line {
+  stroke: #334155 !important;
+}
+
+.theme-dark text.actor > tspan,
+.theme-dark text.actor {
+  fill: #f8fafc !important;
+}
+
+.theme-dark .actor-man circle,
+.theme-dark .actor-man line {
+  stroke: #3b82f6 !important;
+  fill: #1e293b !important;
+}
+

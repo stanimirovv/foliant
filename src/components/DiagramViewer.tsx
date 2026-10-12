@@ -413,7 +413,37 @@ export default function DiagramViewer({
   } | null>(null);
 
   useEffect(() => {
-    mermaid.initialize({ startOnLoad: false, theme });
+    mermaid.initialize({
+      startOnLoad: false,
+      theme,
+      themeVariables: theme === 'dark' ? {
+        darkMode: true,
+        background: '#090d16',
+        mainBkg: '#0f172a',
+        actorBkg: '#1e293b',
+        actorBorder: '#3b82f6',
+        actorTextColor: '#f8fafc',
+        actorLineColor: '#334155',
+        signalColor: '#94a3b8',
+        signalTextColor: '#f8fafc',
+        labelBoxBkgColor: '#1e293b',
+        labelBoxBorderColor: '#334155',
+        labelTextColor: '#f8fafc',
+        loopTextColor: '#f8fafc',
+        noteBkgColor: '#1e293b',
+        noteBorderColor: '#334155',
+        noteTextColor: '#f8fafc',
+        activationBorderColor: '#3b82f6',
+        activationBkgColor: '#1e293b',
+        sequenceNumberColor: '#f8fafc',
+        rectBorder: '#334155',
+        nodeBorder: '#3b82f6',
+        primaryColor: '#1e293b',
+        primaryBorderColor: '#3b82f6',
+        primaryTextColor: '#f8fafc',
+        lineColor: '#334155',
+      } : undefined,
+    });
   }, [theme]);
 
   useEffect(() => {
@@ -1089,7 +1119,7 @@ export default function DiagramViewer({
     <div
       className={`w-full h-full relative overflow-hidden rounded border transition-colors ${
         theme === 'dark'
-          ? 'bg-slate-950 border-slate-800/80 text-slate-100'
+          ? 'bg-slate-950 border-slate-800/80 text-slate-100 theme-dark'
           : 'bg-white border-gray-200 text-gray-900'
       }`}
     >

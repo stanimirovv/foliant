@@ -102,6 +102,10 @@ describe('EditorPanel', () => {
     // datalist offers the colors already present in CONFIG
     expect(optionValues('editor-actor-color-list')).toEqual(['#e11d48', '#2563eb']);
 
+    // clicking a preset actor color swatch dispatches onSetColor
+    fireEvent.click(screen.getByTestId('actor-color-preset-#213b5e'));
+    expect(props.onSetColor).toHaveBeenCalledWith('#213b5e');
+
     // existing tag renders as a chip; its remove button dispatches
     fireEvent.click(screen.getByLabelText('Remove tag backend'));
     expect(props.onRemoveTag).toHaveBeenCalledWith('backend');
@@ -151,7 +155,7 @@ describe('EditorPanel', () => {
     const type = screen.getByLabelText('Type') as HTMLSelectElement;
     expect(type.value).toBe('->>');
     expect(Array.from(type.options).map(o => o.value)).toEqual(
-      ['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '-', '--']
+      ['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '->o', '-->o', '->*', '-->*', '-', '--']
     );
     fireEvent.change(type, { target: { value: '-->>' } });
     expect(props.onSetType).toHaveBeenCalledWith('-->>');

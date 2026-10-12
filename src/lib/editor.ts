@@ -23,7 +23,7 @@ const ID = '[A-Za-z0-9_-]+';
 const SHAPE = String.raw`(?:\[.*?\]|\(\(.*?\)\)|\(.*?\)|\{.*?\}|>.*?\])`;
 const FC_OPS = '<-->|<==>|x--x|o--o|-->|==>|-\\.->|---|--';
 
-const SEQUENCE_OPERATORS = new Set(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '-', '--']);
+const SEQUENCE_OPERATORS = new Set(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '->o', '-->o', '->*', '-->*', '-', '--']);
 const FLOWCHART_OPERATORS = new Set(['---', '-->', '==>', '-.->', '<-->', '<==>', 'x--x', 'o--o']);
 const TAG_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -32,7 +32,7 @@ const UNSUPPORTED = 'Unsupported diagram type (editing supports sequence and flo
 // Verbose line regexes: capture every whitespace segment so rebuilt lines
 // preserve the original spacing byte-for-byte outside the edited span.
 const SEQ_PARTICIPANT_V = /^(\s*)(participant|actor)\s+([A-Za-z0-9_-]+)(?:\s+as\s+(.*))?$/;
-const SEQ_MSG_V = /^(\s*)([A-Za-z0-9_-]+?)(\s*)(-->>|->>|--x|-x|--\)|-\)|-->|->|--|-)([+-]?)(\s*)([A-Za-z0-9_-]+?)(\s*)(?::([ \t]*)(.*))?$/;
+const SEQ_MSG_V = /^(\s*)([A-Za-z0-9_-]+?)(\s*)(-->>|->>|--x|-x|-->o|->o|-->\*|->\*|--\)|-\)|-->|->|--|-)([+-]?)(\s*)([A-Za-z0-9_-]+?)(\s*)(?::([ \t]*)(.*))?$/;
 const FC_EDGE_PIPE_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)(${FC_OPS})(\\s*)(\\|([^|]*)\\|)?(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
 const FC_EDGE_TEXT_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)(--|---|-\\.)(\\s+)(.+?)(\\s+)(\\.->|\\.-|${FC_OPS})(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
 const FC_NODE_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
@@ -414,14 +414,14 @@ export function moveMessageEndpoint(
 }
 
 export const PRESET_ACTOR_COLORS: string[] = [
-  '#dbbfb3', '#c6e6db', '#e4bee4', '#d3e3b5', '#acbce2',
-  '#e5c9c8', '#bfe3ce', '#d7b7e1', '#dbe0ae', '#c3d8ea',
-  '#e2c1c7', '#b8e0be', '#c7afde', '#e9e3c4', '#bbdee7',
-  '#debaca', '#b5ddb1', '#cec5e7', '#e6d5bc', '#b4e4e2',
-  '#dbb3cf', '#d1e6c6', '#bebee4', '#e3c5b5', '#ace2d2',
-  '#e5c8e3', '#d5e3bf', '#b7c1e1', '#e0b3ae', '#c3ead4',
-  '#dbc1e2', '#dae0b8', '#afc7de', '#e9c4c9', '#bbe7c4',
-  '#cebade', '#ddd8b1', '#c5dfe7', '#e6bccd', '#b6e4b4',
+  '#213b5e', '#621d26', '#194821', '#3d1d62', '#584a1f',
+  '#1a5557', '#5e214a', '#2b4c17', '#21265e', '#622c1d',
+  '#1a4b33', '#541d62', '#4d511d', '#1c465f', '#5e2135',
+  '#184b16', '#31215e', '#61421d', '#1c5047', '#621d59',
+  '#374c1b', '#1d3162', '#5e2121', '#174c26', '#45215e',
+  '#59511b', '#1e4d57', '#621d42', '#254819', '#201d62',
+  '#5e3621', '#18503b', '#5a215e', '#465219', '#213f5e',
+  '#621d2b', '#19481d', '#371d62', '#5a4720', '#1a5653',
 ];
 
 export function getNextFreeActorColor(config: DiagramConfig | null): string {

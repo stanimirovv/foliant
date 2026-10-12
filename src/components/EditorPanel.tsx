@@ -3,13 +3,13 @@
 import { useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
 import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, DiagramType } from '@/lib/model';
-import { ArrowStylePatch, ArrowTagInfo } from '@/lib/editor';
+import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS } from '@/lib/editor';
 import { DiagramConfig, ArrowKeyMode, ArrowAnimationType } from '@/lib/views';
 import AnimatedArrowSelector from './AnimatedArrowSelector';
 
 // Operator vocabularies (EDITING_PLAN.md Section 4.8); keep in sync with
 // editor.ts (setArrowType validates against the same sets).
-const SEQUENCE_OPERATORS = ['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '-', '--'];
+const SEQUENCE_OPERATORS = ['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '->o', '-->o', '->*', '-->*', '-', '--'];
 const FLOWCHART_OPERATORS = ['---', '-->', '==>', '-.->', '<-->', '<==>', 'x--x', 'o--o'];
 const DASH_OPTIONS = ['solid', 'dashed', 'dotted'] as const;
 type Dash = (typeof DASH_OPTIONS)[number];
@@ -347,7 +347,7 @@ function MultiElementFields({
             <input
               type="text"
               className={fieldInput}
-              placeholder="Color (e.g. LightBlue, #e0f2fe)"
+              placeholder="Color (e.g. #213b5e, #1e293b)"
               value={boxColor}
               onChange={(e) => setBoxColor(e.target.value)}
               data-testid="group-box-color"
@@ -587,6 +587,29 @@ function ParticipantFields({
         <datalist id="editor-actor-color-list">
           {actorColors.map(c => <option key={c} value={c} />)}
         </datalist>
+        <div className="mt-2">
+          <span className="text-[11px] text-gray-500 dark:text-slate-400 block mb-1">Preset Tones</span>
+          <div className="flex flex-wrap gap-1.5" data-testid="actor-color-presets">
+            {PRESET_ACTOR_COLORS.slice(0, 10).map((c) => {
+              const isSelected = meta?.color?.toLowerCase() === c.toLowerCase();
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  data-testid={`actor-color-preset-${c}`}
+                  onClick={() => onSetColor(c)}
+                  style={{ backgroundColor: c }}
+                  title={c}
+                  className={`w-5 h-5 rounded border transition-all ${
+                    isSelected
+                      ? 'ring-2 ring-blue-500 border-white scale-110 shadow-sm'
+                      : 'border-slate-700/80 hover:scale-105 hover:border-slate-500'
+                  }`}
+                />
+              );
+            })}
+          </div>
+        </div>
       </label>
 
       <div>

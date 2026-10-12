@@ -183,9 +183,13 @@ export default function AnimatedArrowSelector({
                         />
                         {/* Origin barrier wall and shockwave burst circle at sender (matching receiver) */}
                         <line x1="4" y1="2" x2="4" y2="16" stroke={previewColor} strokeWidth="2.8" strokeLinecap="round" className="arrow-barrier-wall" />
-                        <circle cx="4" cy="9" r="3" fill="none" stroke={previewColor} strokeWidth="1.8" className="arrow-shockwave-burst" />
+                        <circle cx="4" cy="9" r="3" fill="none" stroke={previewColor} strokeWidth="1.8" className="arrow-shockwave-burst">
+                          <animate attributeName="r" values="3;16" dur="2.6s" repeatCount="indefinite" />
+                          <animate attributeName="opacity" values="0.9;0" dur="2.6s" repeatCount="indefinite" />
+                          <animate attributeName="stroke-width" values="1.8;0.5" dur="2.6s" repeatCount="indefinite" />
+                        </circle>
                         <g className="arrow-x-mark" transform="translate(14, 9)">
-                          <circle r="5.5" fill="#ffffff" stroke={previewColor} strokeWidth="1.4" />
+                          <circle r="5.5" fill="var(--background, #090d16)" stroke={previewColor} strokeWidth="1.4" />
                           <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                           <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                         </g>
@@ -212,9 +216,13 @@ export default function AnimatedArrowSelector({
                           strokeLinecap="round"
                           className="arrow-barrier-wall"
                         />
-                        <circle cx="68" cy="9" r="3" fill="none" stroke={previewColor} strokeWidth="1.8" className="arrow-shockwave-burst" />
+                        <circle cx="68" cy="9" r="3" fill="none" stroke={previewColor} strokeWidth="1.8" className="arrow-shockwave-burst">
+                          <animate attributeName="r" values="3;16" dur="2.6s" repeatCount="indefinite" />
+                          <animate attributeName="opacity" values="0.9;0" dur="2.6s" repeatCount="indefinite" />
+                          <animate attributeName="stroke-width" values="1.8;0.5" dur="2.6s" repeatCount="indefinite" />
+                        </circle>
                         <g className="arrow-x-mark" transform="translate(54, 9)">
-                          <circle r="5.5" fill="#090d16" stroke={previewColor} strokeWidth="1.4" />
+                          <circle r="5.5" fill="var(--background, #090d16)" stroke={previewColor} strokeWidth="1.4" />
                           <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                           <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                         </g>

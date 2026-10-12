@@ -91,7 +91,7 @@ const REGION_START_RE = /^%%\s*@region-start:\s*([a-zA-Z0-9_-]+)(?:=([a-zA-Z0-9_
 const PARTICIPANT_RE = new RegExp(`^(\\s*)(participant|actor)\\s+(${ID})(?:\\s+as\\s+(.*))?$`);
 const NOTE_RE = new RegExp(`^\\s*Note\\s+(over|left of|right of)\\s+(${ID}(?:\\s*,\\s*${ID})*)\\s*:\\s*(.*)$`);
 // Full operator set of Section 4.8, including bare `-` / `--` lines and activation +/-.
-const MESSAGE_RE = new RegExp(`^\\s*([A-Za-z0-9_-]+?)\\s*(-->>|->>|--x|-x|--\\)|-\\)|-->|->|--|-)([+-]?)\\s*([A-Za-z0-9_-]+?)(?:\\s*:\\s*(.*))?$`);
+const MESSAGE_RE = new RegExp(`^\\s*([A-Za-z0-9_-]+?)\\s*(-->>|->>|--x|-x|-->o|->o|-->\\*|->\\*|--\\)|-\\)|-->|->|--|-)([+-]?)\\s*([A-Za-z0-9_-]+?)(?:\\s*:\\s*(.*))?$`);
 
 // Blocks (both diagram types). `box` is emitted by transformActors in
 // processed sequence code, so it must be tracked for end-matching.
