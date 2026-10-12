@@ -8,7 +8,7 @@ import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
@@ -764,6 +764,40 @@ export default function ClientPage() {
     }
   };
 
+  const handleExportSvg = useCallback(() => {
+    const container = document.getElementById('diagram-container');
+    if (!container) return;
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+
+    const clone = svg.cloneNode(true) as SVGElement;
+
+    if (!clone.getAttribute('xmlns')) {
+      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    }
+    if (!clone.getAttribute('xmlns:xlink')) {
+      clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    }
+
+    const serializer = new XMLSerializer();
+    let source = serializer.serializeToString(clone);
+
+    if (!source.match(/^<\?xml/)) {
+      source = '<?xml version="1.0" standalone="no"?>\r\n' + source;
+    }
+
+    const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const baseName = currentFile ? currentFile.replace(/\.[^/.]+$/, '') : 'diagram';
+    link.href = url;
+    link.download = `${baseName}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [currentFile]);
+
   // Ctrl+Z / Ctrl+Y (Section 4.11). Inside text fields the native input undo
   // wins; the diagram-level shortcut applies everywhere else.
   useEffect(() => {
@@ -1468,6 +1502,20 @@ export default function ClientPage() {
                 </button>
               </>
             )}
+            <button
+              onClick={handleExportSvg}
+              disabled={!rawCode}
+              title="Export to SVG"
+              data-testid="export-svg-btn"
+              className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+              } ${
+                !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
+              }`}
+            >
+              <Download size={14} />
+              <span>Export SVG</span>
+            </button>
           </div>
           <div className="flex items-center space-x-3">
             {saveStatus !== 'idle' && (

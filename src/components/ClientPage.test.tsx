@@ -48,11 +48,13 @@ vi.mock('./DiagramViewer', () => ({
   }) => (
     <div
       data-testid="diagram-viewer"
+      id="diagram-container"
       data-code={props.code}
       data-edit-mode={String(props.editMode ?? false)}
       data-visual-locked={String(props.isVisualLocked ?? false)}
       data-selection={Array.isArray(props.selection) ? props.selection.join(',') : (props.selection ?? '')}
     >
+      <svg data-testid="mock-diagram-svg" viewBox="0 0 100 100"><text>Diagram</text></svg>
       {props.isVisualLocked && <div data-testid="visual-locked-banner">Visual edits locked (editing source code)</div>}
       <div data-testid="mock-notes-info" data-count={props.notes?.length ?? 0} data-show={String(props.showNotes ?? true)} />
       {props.notes && props.notes.length > 0 && (
@@ -1819,6 +1821,21 @@ sequenceDiagram
     // Both panels are visible simultaneously
     expect(screen.getByTestId('source-code-panel')).toBeTruthy();
     expect(screen.getByText('Click an element in the diagram to edit it.')).toBeTruthy();
+  });
+
+  it('Export to SVG button exports SVG with download link', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    const exportBtn = screen.getByTestId('export-svg-btn');
+    expect(exportBtn).toBeTruthy();
+
+    const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL');
+    const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL');
+
+    fireEvent.click(exportBtn);
+
+    expect(createObjectURLSpy).toHaveBeenCalled();
+    expect(revokeObjectURLSpy).toHaveBeenCalled();
   });
 });
 
