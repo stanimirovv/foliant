@@ -302,19 +302,27 @@ describe('applyArrowStyles (sequence fixture)', () => {
       version: 1,
       arrows: [{ from: 'A', to: 'B', label: 'm1', color: '#ef4444', animation: 'broken-sender' }],
     });
-    expect(parseSvgRoot(outSender).querySelector('.arrow-x-sender')).toBeTruthy();
+    const rootSender = parseSvgRoot(outSender);
+    expect(rootSender.querySelector('.arrow-x-sender')).toBeTruthy();
+    expect(rootSender.querySelector('.arrow-alarm-ping')).toBeTruthy();
 
     const outNetwork = applyArrowStyles(SEQ_SVG, model, {
       version: 1,
       arrows: [{ from: 'A', to: 'B', label: 'm1', color: '#f97316', animation: 'broken-network' }],
     });
-    expect(parseSvgRoot(outNetwork).querySelector('.arrow-x-network circle')).toBeTruthy();
+    const rootNetwork = parseSvgRoot(outNetwork);
+    expect(rootNetwork.querySelector('.arrow-x-network circle')).toBeTruthy();
+    expect(rootNetwork.querySelector('.arrow-breaker-cap')).toBeTruthy();
+    expect(rootNetwork.querySelector('.arrow-zap-spark')).toBeTruthy();
 
     const outReceiver = applyArrowStyles(SEQ_SVG, model, {
       version: 1,
       arrows: [{ from: 'A', to: 'B', label: 'm1', color: '#dc2626', animation: 'broken-receiver' }],
     });
-    expect(parseSvgRoot(outReceiver).querySelector('.arrow-x-receiver')).toBeTruthy();
+    const rootReceiver = parseSvgRoot(outReceiver);
+    expect(rootReceiver.querySelector('.arrow-x-receiver')).toBeTruthy();
+    expect(rootReceiver.querySelector('.arrow-barrier-wall')).toBeTruthy();
+    expect(rootReceiver.querySelector('.arrow-shockwave-burst')).toBeTruthy();
   });
 
   it('exports 6 animated arrow presets and 10 base colors (5 positive, 5 error)', () => {

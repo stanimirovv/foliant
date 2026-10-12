@@ -43,82 +43,159 @@ body {
   to { stroke-dashoffset: 0; }
 }
 
+/* HTTP 500 Panic Glitch - Erratic stroboscopic jitter directly inspired by prototype */
 @keyframes mermaid-broken-sender {
-  0%, 100% { opacity: 1; stroke-dashoffset: 24; }
-  25% { opacity: 0.25; }
-  50% { opacity: 0.9; stroke-dashoffset: 12; }
-  75% { opacity: 0.2; }
+  0%, 100% {
+    opacity: 0.95;
+    stroke-dashoffset: 0;
+    transform: translateY(0);
+    filter: drop-shadow(0 0 3px #ffffff) drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px currentColor);
+  }
+  10% { opacity: 0.2; transform: translateY(-1.5px); }
+  25% { opacity: 1; transform: translateY(1.5px); stroke-dashoffset: 8; }
+  40% { opacity: 0.15; }
+  55% { opacity: 0.85; transform: translateY(0); stroke-dashoffset: 16; }
+  70% { opacity: 0.3; }
+  85% { opacity: 1; stroke-dashoffset: 24; }
 }
 
+/* Circuit Breaker Voltage Flicker on severed line stubs */
 @keyframes mermaid-broken-network {
-  0% { stroke-dashoffset: 28; opacity: 0.9; }
-  40% { stroke-dashoffset: 0; opacity: 1; }
-  55% { stroke-dashoffset: -4; opacity: 0.3; }
-  70% { stroke-dashoffset: 14; opacity: 0.2; }
-  100% { stroke-dashoffset: 28; opacity: 0.9; }
+  0%, 100% { opacity: 0.9; }
+  25% { opacity: 0.7; }
+  50% { opacity: 0.3; }
+  75% { opacity: 0.85; }
 }
 
-@keyframes mermaid-broken-receiver {
-  0% { stroke-dashoffset: 36; opacity: 0.8; }
-  45% { stroke-dashoffset: 0; opacity: 1; }
-  50% { opacity: 0.3; filter: drop-shadow(0 0 6px currentColor); }
-  60% { opacity: 1; }
-  75% { stroke-dashoffset: 12; opacity: 0.6; }
-  100% { stroke-dashoffset: 36; opacity: 0.8; }
+/* Electric Zap Arc across severed network gap */
+@keyframes mermaid-breaker-zap {
+  0%, 100% { opacity: 0.15; stroke-width: 1.2px; }
+  48% { opacity: 0.15; }
+  50% { opacity: 1; stroke-width: 3.5px; filter: drop-shadow(0 0 6px #67e8f9) drop-shadow(0 0 12px currentColor); }
+  54% { opacity: 0.3; }
+  56% { opacity: 1; stroke-width: 2.8px; }
+  60% { opacity: 0.15; }
+}
+
+/* Rate Limit 429 Ricochet / Receiver impact recoil */
+@keyframes mermaid-ricochet-recoil {
+  0% { stroke-dashoffset: 40; opacity: 0.85; }
+  40% { stroke-dashoffset: 0; opacity: 1; }
+  50% { stroke-dashoffset: 6; opacity: 1; filter: drop-shadow(0 0 10px currentColor); }
+  75% { stroke-dashoffset: 22; opacity: 0.45; }
+  100% { stroke-dashoffset: 40; opacity: 0.85; }
+}
+
+/* Expanding Shockwave Burst Ring at Receiver impact point */
+@keyframes mermaid-shockwave-burst {
+  0% { r: 3px; opacity: 1; stroke-width: 2.8px; }
+  100% { r: 24px; opacity: 0; stroke-width: 0.5px; }
+}
+
+/* Sender Alarm Radar Ping radiating from origin lifeline */
+@keyframes mermaid-alarm-ping {
+  0% { transform: scale(0.6); opacity: 1; }
+  75% { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
 }
 
 @keyframes mermaid-x-pulse {
   0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.22); opacity: 0.75; }
+  50% { transform: scale(1.22); opacity: 0.8; }
 }
 
+/* Happy Path 1: Continuous Flow */
 .arrow-anim-flow {
   stroke-dasharray: 8 6 !important;
-  animation: mermaid-arrow-flow 1.2s linear infinite !important;
+  animation: mermaid-arrow-flow 1.1s linear infinite !important;
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor) !important;
 }
 
+/* Happy Path 2: Glowing Orb base rail */
 .arrow-anim-pulse {
-  /* Full solid line underneath traveling packet */
   stroke-dasharray: none !important;
-  opacity: 0.55 !important;
+  opacity: 0.65 !important;
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 7px currentColor);
 }
 
+/* Happy Path 2: Traveling Neon Orb packet runner */
 .arrow-anim-packet-runner {
   stroke-dasharray: 6 100 !important;
   stroke-linecap: round !important;
   animation: mermaid-arrow-packet 1.4s ease-in-out infinite !important;
-  filter: drop-shadow(0 0 5px currentColor) drop-shadow(0 0 2px #ffffff) !important;
+  filter:
+    drop-shadow(0 0 2px #ffffff)
+    drop-shadow(0 0 6px currentColor)
+    drop-shadow(0 0 14px currentColor)
+    drop-shadow(0 0 24px currentColor) !important;
   pointer-events: none !important;
 }
 
+/* Happy Path 3: Cyber Laser Glow */
 .arrow-anim-cyber {
-  stroke-dasharray: 16 6 4 6 !important;
-  animation: mermaid-arrow-cyber 0.9s linear infinite !important;
-  filter: drop-shadow(0 0 4px currentColor);
+  stroke-dasharray: 14 8 4 8 !important;
+  animation: mermaid-arrow-cyber 0.85s linear infinite !important;
+  filter:
+    drop-shadow(0 0 2px #ffffff)
+    drop-shadow(0 0 6px currentColor)
+    drop-shadow(0 0 14px currentColor) !important;
 }
 
+/* Failure Mode 1: Broken Sender (HTTP 500 Panic Glitch) */
 .arrow-anim-broken-sender,
 .arrow-anim-stutter {
-  stroke-dasharray: 4 6 !important;
-  animation: mermaid-broken-sender 1.1s steps(4) infinite !important;
+  stroke-dasharray: 6 3 !important;
+  animation: mermaid-broken-sender 1.2s steps(8) infinite !important;
+  filter: drop-shadow(0 0 3px #ffffff) drop-shadow(0 0 6px currentColor) drop-shadow(0 0 14px currentColor) !important;
 }
 
+/* Failure Mode 2: Broken Network (Severed Circuit Breaker Gap) */
 .arrow-anim-broken-network,
 .arrow-anim-ricochet {
-  stroke-dasharray: 8 6 !important;
   animation: mermaid-broken-network 1.6s ease-in-out infinite !important;
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 8px currentColor) !important;
 }
 
+/* Electric Zap Arc across severed network gap */
+.arrow-zap-spark {
+  animation: mermaid-breaker-zap 2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.arrow-breaker-cap {
+  filter: drop-shadow(0 0 4px currentColor);
+  pointer-events: none;
+}
+
+/* Failure Mode 3: Broken Receiver (Impact Barrier & Ricochet) */
 .arrow-anim-broken-receiver,
 .arrow-anim-hesitate {
-  stroke-dasharray: 12 6 !important;
-  animation: mermaid-broken-receiver 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+  stroke-dasharray: 10 6 !important;
+  animation: mermaid-ricochet-recoil 1.9s cubic-bezier(0.2, 0.8, 0.3, 1) infinite !important;
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor) !important;
+}
+
+.arrow-barrier-wall {
+  filter: drop-shadow(0 0 5px currentColor);
+  pointer-events: none;
+}
+
+.arrow-shockwave-burst {
+  animation: mermaid-shockwave-burst 1.6s cubic-bezier(0.1, 0.7, 0.3, 1) infinite;
+  pointer-events: none;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+
+.arrow-alarm-ping {
+  animation: mermaid-alarm-ping 1.4s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+  pointer-events: none;
 }
 
 .arrow-x-mark {
   transform-origin: center;
   animation: mermaid-x-pulse 1.3s ease-in-out infinite;
   pointer-events: none;
+  filter: drop-shadow(0 0 5px currentColor);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -132,6 +209,9 @@ body {
   .arrow-anim-ricochet,
   .arrow-anim-broken-receiver,
   .arrow-anim-hesitate,
+  .arrow-zap-spark,
+  .arrow-shockwave-burst,
+  .arrow-alarm-ping,
   .arrow-x-mark {
     animation: none !important;
   }

@@ -107,7 +107,7 @@ export default function AnimatedArrowSelector({
                           y2="9"
                           stroke={previewColor}
                           strokeWidth="2.2"
-                          opacity="0.45"
+                          opacity="0.6"
                           markerEnd={`url(#${markerId})`}
                         />
                         <line
@@ -121,7 +121,62 @@ export default function AnimatedArrowSelector({
                           className="arrow-anim-packet-runner"
                         />
                       </>
-                    ) : (
+                    ) : (preset.id === 'broken-network' || preset.id === 'ricochet') ? (
+                      <>
+                        {/* Severed gap with electric arc & floating broken connection badge */}
+                        <line
+                          x1="4"
+                          y1="9"
+                          x2="26"
+                          y2="9"
+                          stroke={previewColor}
+                          strokeWidth="2.2"
+                          className="arrow-anim-broken-network"
+                        />
+                        <line
+                          x1="26"
+                          y1="4"
+                          x2="26"
+                          y2="14"
+                          stroke={previewColor}
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          className="arrow-breaker-cap"
+                        />
+                        <path
+                          d="M 26 9 L 31 5 L 37 13 L 42 9"
+                          fill="none"
+                          stroke="#67e8f9"
+                          strokeWidth="2"
+                          className="arrow-zap-spark"
+                        />
+                        <line
+                          x1="42"
+                          y1="4"
+                          x2="42"
+                          y2="14"
+                          stroke={previewColor}
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          className="arrow-breaker-cap"
+                        />
+                        <line
+                          x1="42"
+                          y1="9"
+                          x2="68"
+                          y2="9"
+                          stroke={previewColor}
+                          strokeWidth="2.2"
+                          markerEnd={`url(#${markerId})`}
+                          className="arrow-anim-broken-network"
+                        />
+                        <g className="arrow-x-mark" transform="translate(34, 9)">
+                          <circle r="6" fill="#ffffff" stroke={previewColor} strokeWidth="1.6" />
+                          <line x1="-2.8" y1="-2.8" x2="2.8" y2="2.8" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
+                          <line x1="-2.8" y1="2.8" x2="2.8" y2="-2.8" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
+                        </g>
+                      </>
+                    ) : (preset.id === 'broken-sender' || preset.id === 'stutter') ? (
                       <>
                         <line
                           x1="4"
@@ -129,30 +184,57 @@ export default function AnimatedArrowSelector({
                           x2="68"
                           y2="9"
                           stroke={previewColor}
+                          strokeWidth="2.5"
+                          markerEnd={`url(#${markerId})`}
+                          className="arrow-anim-broken-sender"
+                        />
+                        <circle cx="14" cy="9" r="7" fill="none" stroke={previewColor} strokeWidth="1.2" className="arrow-alarm-ping" />
+                        <g className="arrow-x-mark" transform="translate(14, 9)">
+                          <circle r="5.5" fill="#ef4444" stroke="#ffffff" strokeWidth="1" />
+                          <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" />
+                          <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" />
+                        </g>
+                      </>
+                    ) : (preset.id === 'broken-receiver' || preset.id === 'hesitate') ? (
+                      <>
+                        <line
+                          x1="4"
+                          y1="9"
+                          x2="66"
+                          y2="9"
+                          stroke={previewColor}
                           strokeWidth="2.2"
                           markerEnd={`url(#${markerId})`}
-                          className={`arrow-anim-${preset.id}`}
+                          className="arrow-anim-broken-receiver"
                         />
-                        {(preset.id === 'broken-sender' || preset.id === 'stutter') && (
-                          <g className="arrow-x-mark" transform="translate(14, 9)">
-                            <line x1="-3.5" y1="-3.5" x2="3.5" y2="3.5" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
-                            <line x1="-3.5" y1="3.5" x2="3.5" y2="-3.5" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
-                          </g>
-                        )}
-                        {(preset.id === 'broken-network' || preset.id === 'ricochet') && (
-                          <g className="arrow-x-mark" transform="translate(36, 9)">
-                            <circle r="6" fill="#ffffff" stroke={previewColor} strokeWidth="1.2" />
-                            <line x1="-3" y1="-3" x2="3" y2="3" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
-                            <line x1="-3" y1="3" x2="3" y2="-3" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
-                          </g>
-                        )}
-                        {(preset.id === 'broken-receiver' || preset.id === 'hesitate') && (
-                          <g className="arrow-x-mark" transform="translate(56, 9)">
-                            <line x1="-3.5" y1="-3.5" x2="3.5" y2="3.5" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
-                            <line x1="-3.5" y1="3.5" x2="3.5" y2="-3.5" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
-                          </g>
-                        )}
+                        <line
+                          x1="68"
+                          y1="2"
+                          x2="68"
+                          y2="16"
+                          stroke={previewColor}
+                          strokeWidth="2.8"
+                          strokeLinecap="round"
+                          className="arrow-barrier-wall"
+                        />
+                        <circle cx="68" cy="9" r="3" fill="none" stroke={previewColor} strokeWidth="1.8" className="arrow-shockwave-burst" />
+                        <g className="arrow-x-mark" transform="translate(54, 9)">
+                          <circle r="5.5" fill="#ffffff" stroke={previewColor} strokeWidth="1.4" />
+                          <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
+                          <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
+                        </g>
                       </>
+                    ) : (
+                      <line
+                        x1="4"
+                        y1="9"
+                        x2="68"
+                        y2="9"
+                        stroke={previewColor}
+                        strokeWidth="2.4"
+                        markerEnd={`url(#${markerId})`}
+                        className={`arrow-anim-${preset.id}`}
+                      />
                     )}
                   </svg>
                 </div>

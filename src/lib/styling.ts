@@ -15,12 +15,12 @@ export interface AnimatedArrowPreset {
 }
 
 export const ANIMATED_ARROW_PRESETS: AnimatedArrowPreset[] = [
-  { id: 'flow', name: 'Stream', description: 'Smooth continuous flow' },
+  { id: 'flow', name: 'Stream', description: 'Smooth continuous flow with glowing tracer' },
   { id: 'pulse', name: 'Glowing Orb', description: 'Full line with traveling glowing packet' },
   { id: 'cyber', name: 'Cyber Glow', description: 'High-velocity neon tracer' },
-  { id: 'broken-sender', name: 'Broken Sender', description: 'X at origin: sender fails or sends broken request', isError: true },
-  { id: 'broken-network', name: 'Broken Network', description: 'X in transit: network severed / dropped mid-flight', isError: true },
-  { id: 'broken-receiver', name: 'Broken Receiver', description: 'X on arrival: receiver crashes / rejects receipt', isError: true },
+  { id: 'broken-sender', name: 'Broken Sender', description: 'HTTP 500 panic glitch & alarm at origin lifeline', isError: true },
+  { id: 'broken-network', name: 'Broken Network', description: 'Severed gap & electric spark in transit; broken connection', isError: true },
+  { id: 'broken-receiver', name: 'Broken Receiver', description: 'Arrival barrier wall & shockwave burst; target rejected/crashed', isError: true },
 ];
 
 export const ANIMATED_ARROW_COLORS = {
@@ -219,33 +219,84 @@ export function applyArrowStyles(svg: string, model: DiagramModel, config: Diagr
   }
 }
 
-function createXMark(doc: Document, cx: number, cy: number, color: string, className: string, withBg = false): Element {
+function createXMark(
+  doc: Document,
+  cx: number,
+  cy: number,
+  color: string,
+  className: string,
+  variant: 'default' | 'badge' | 'alarm' = 'default'
+): Element {
   const g = doc.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('class', `arrow-x-mark ${className}`);
   g.setAttribute('transform', `translate(${cx}, ${cy})`);
-  if (withBg) {
+
+  if (variant === 'alarm') {
+    // Ping radar wave radiating from origin lifeline
+    const ping = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    ping.setAttribute('class', 'arrow-alarm-ping');
+    ping.setAttribute('r', '10');
+    ping.setAttribute('fill', 'none');
+    ping.setAttribute('stroke', color);
+    ping.setAttribute('stroke-width', '1.6');
+    g.appendChild(ping);
+
+    // Alarm badge background
     const circle = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('r', '8');
-    circle.setAttribute('fill', '#ffffff');
-    circle.setAttribute('stroke', color);
+    circle.setAttribute('fill', '#ef4444');
+    circle.setAttribute('stroke', '#ffffff');
     circle.setAttribute('stroke-width', '1.5');
     g.appendChild(circle);
+
+    // Crisp white cross
+    const l1 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l1.setAttribute('x1', '-3.5');
+    l1.setAttribute('y1', '-3.5');
+    l1.setAttribute('x2', '3.5');
+    l1.setAttribute('y2', '3.5');
+    l1.setAttribute('stroke', '#ffffff');
+    l1.setAttribute('stroke-width', '2.2');
+    l1.setAttribute('stroke-linecap', 'round');
+    g.appendChild(l1);
+
+    const l2 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l2.setAttribute('x1', '-3.5');
+    l2.setAttribute('y1', '3.5');
+    l2.setAttribute('x2', '3.5');
+    l2.setAttribute('y2', '-3.5');
+    l2.setAttribute('stroke', '#ffffff');
+    l2.setAttribute('stroke-width', '2.2');
+    l2.setAttribute('stroke-linecap', 'round');
+    g.appendChild(l2);
+
+    return g;
   }
+
+  if (variant === 'badge') {
+    const circle = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('r', '8.5');
+    circle.setAttribute('fill', '#ffffff');
+    circle.setAttribute('stroke', color);
+    circle.setAttribute('stroke-width', '2');
+    g.appendChild(circle);
+  }
+
   const l1 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
-  l1.setAttribute('x1', '-4.5');
-  l1.setAttribute('y1', '-4.5');
-  l1.setAttribute('x2', '4.5');
-  l1.setAttribute('y2', '4.5');
+  l1.setAttribute('x1', '-4');
+  l1.setAttribute('y1', '-4');
+  l1.setAttribute('x2', '4');
+  l1.setAttribute('y2', '4');
   l1.setAttribute('stroke', color);
   l1.setAttribute('stroke-width', '2.2');
   l1.setAttribute('stroke-linecap', 'round');
   g.appendChild(l1);
 
   const l2 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
-  l2.setAttribute('x1', '-4.5');
-  l2.setAttribute('y1', '4.5');
-  l2.setAttribute('x2', '4.5');
-  l2.setAttribute('y2', '-4.5');
+  l2.setAttribute('x1', '-4');
+  l2.setAttribute('y1', '4');
+  l2.setAttribute('x2', '4');
+  l2.setAttribute('y2', '-4');
   l2.setAttribute('stroke', color);
   l2.setAttribute('stroke-width', '2.2');
   l2.setAttribute('stroke-linecap', 'round');
@@ -281,21 +332,90 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
     const x2 = parseFloat(target.getAttribute('x2') || '0');
     const y2 = parseFloat(target.getAttribute('y2') || '0');
     const dx = x2 >= x1 ? 1 : -1;
+    const len = Math.abs(x2 - x1);
 
     if (anim === 'broken-sender' || anim === 'stutter') {
       const cx = x1 + dx * 14;
       const cy = y1;
-      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-sender', false);
+      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-sender', 'alarm');
       target.parentNode?.insertBefore(xMark, target.nextSibling);
     } else if (anim === 'broken-network' || anim === 'ricochet') {
-      const cx = (x1 + x2) / 2;
-      const cy = (y1 + y2) / 2;
-      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-network', true);
+      const midX = (x1 + x2) / 2;
+      const midY = (y1 + y2) / 2;
+      const gap = Math.min(36, Math.max(18, len * 0.35));
+      const halfSeg = Math.max(0, (len - gap) / 2);
+      const xCut1 = midX - dx * (gap / 2);
+      const xCut2 = midX + dx * (gap / 2);
+
+      // Physically sever the line in the center using dash pattern
+      const targetStyle = target as Styleable;
+      targetStyle.style.strokeDasharray = `${halfSeg} ${gap} ${len + 100}`;
+      targetStyle.style.strokeDashoffset = '0';
+
+      // Left cutoff breaker cap
+      const cap1 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+      cap1.setAttribute('class', 'arrow-breaker-cap');
+      cap1.setAttribute('x1', String(xCut1));
+      cap1.setAttribute('y1', String(midY - 6));
+      cap1.setAttribute('x2', String(xCut1));
+      cap1.setAttribute('y2', String(midY + 6));
+      cap1.setAttribute('stroke', color);
+      cap1.setAttribute('stroke-width', '2.5');
+      cap1.setAttribute('stroke-linecap', 'round');
+      target.parentNode?.insertBefore(cap1, target.nextSibling);
+
+      // Right cutoff breaker cap
+      const cap2 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+      cap2.setAttribute('class', 'arrow-breaker-cap');
+      cap2.setAttribute('x1', String(xCut2));
+      cap2.setAttribute('y1', String(midY - 6));
+      cap2.setAttribute('x2', String(xCut2));
+      cap2.setAttribute('y2', String(midY + 6));
+      cap2.setAttribute('stroke', color);
+      cap2.setAttribute('stroke-width', '2.5');
+      cap2.setAttribute('stroke-linecap', 'round');
+      target.parentNode?.insertBefore(cap2, target.nextSibling);
+
+      // High-voltage electric arc spark crackling across the gap
+      const zap = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+      zap.setAttribute('class', 'arrow-zap-spark');
+      zap.setAttribute('d', `M ${xCut1} ${midY} L ${midX - dx * 5} ${midY - 4} L ${midX + dx * 4} ${midY + 5} L ${xCut2} ${midY}`);
+      zap.setAttribute('fill', 'none');
+      zap.setAttribute('stroke', '#67e8f9');
+      zap.setAttribute('stroke-width', '2.2');
+      target.parentNode?.insertBefore(zap, target.nextSibling);
+
+      // Central floating broken connection badge
+      const xMark = createXMark(doc, midX, midY, color, 'arrow-x-network', 'badge');
       target.parentNode?.insertBefore(xMark, target.nextSibling);
     } else if (anim === 'broken-receiver' || anim === 'hesitate') {
+      // Rejection barrier wall at target lifeline
+      const barrier = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+      barrier.setAttribute('class', 'arrow-barrier-wall');
+      barrier.setAttribute('x1', String(x2));
+      barrier.setAttribute('y1', String(y2 - 12));
+      barrier.setAttribute('x2', String(x2));
+      barrier.setAttribute('y2', String(y2 + 12));
+      barrier.setAttribute('stroke', color);
+      barrier.setAttribute('stroke-width', '3');
+      barrier.setAttribute('stroke-linecap', 'round');
+      target.parentNode?.insertBefore(barrier, target.nextSibling);
+
+      // Expanding neon shockwave burst ring on collision
+      const shockwave = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      shockwave.setAttribute('class', 'arrow-shockwave-burst');
+      shockwave.setAttribute('cx', String(x2));
+      shockwave.setAttribute('cy', String(y2));
+      shockwave.setAttribute('r', '3');
+      shockwave.setAttribute('fill', 'none');
+      shockwave.setAttribute('stroke', color);
+      shockwave.setAttribute('stroke-width', '2');
+      target.parentNode?.insertBefore(shockwave, target.nextSibling);
+
+      // Rejection crosshead badge
       const cx = x2 - dx * 14;
       const cy = y2;
-      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-receiver', false);
+      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-receiver', 'badge');
       target.parentNode?.insertBefore(xMark, target.nextSibling);
     }
   }
