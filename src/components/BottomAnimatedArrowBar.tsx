@@ -29,20 +29,20 @@ export default function BottomAnimatedArrowBar({
       data-testid="bottom-animated-arrow-bar"
       className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none flex flex-col items-center"
     >
-      <div className="w-full max-w-3xl pointer-events-auto bg-white/95 backdrop-blur-md border-t border-x border-gray-200/80 rounded-t-xl shadow-xl transition-all duration-300 ease-in-out">
+      <div className="w-full max-w-3xl pointer-events-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-x border-gray-200/80 dark:border-slate-800 rounded-t-xl shadow-xl transition-all duration-300 ease-in-out">
         {/* Toggle Bar Header */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 select-none">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 dark:border-slate-800 select-none">
           <button
             type="button"
             data-testid="toggle-animated-arrows-bar"
             onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-2 text-xs font-semibold text-gray-700 hover:text-blue-600 transition-colors"
+            className="flex items-center gap-2 text-xs font-semibold text-gray-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
           >
-            <div className="w-5 h-5 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center">
+            <div className="w-5 h-5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
               <Zap size={13} />
             </div>
             <span>Animated Arrows</span>
-            <span className="text-[11px] font-normal text-gray-400">
+            <span className="text-[11px] font-normal text-gray-400 dark:text-slate-500">
               (6 Motion Styles &bull; 10 Base Colors)
             </span>
             {isOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
@@ -53,16 +53,16 @@ export default function BottomAnimatedArrowBar({
               type="button"
               data-testid="convert-diagram-bar-btn"
               onClick={onConvertDiagram}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors border border-indigo-200/50"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors border border-indigo-200/50 dark:border-indigo-800/50"
               title="Deterministically convert all diagram arrows to animated arrows"
             >
-              <Sparkles size={12} className="text-indigo-500" />
+              <Sparkles size={12} className="text-indigo-500 dark:text-indigo-400" />
               Convert Diagram
             </button>
             <button
               type="button"
               onClick={() => setIsOpen(!isOpen)}
-              className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 text-xs"
+              className="p-1 rounded text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 text-xs"
             >
               {isOpen ? 'Minimize' : 'Expand'}
             </button>
@@ -73,11 +73,11 @@ export default function BottomAnimatedArrowBar({
         {isOpen && (
           <div className="p-3 max-h-80 overflow-y-auto">
             {hasSelectedArrow ? (
-              <p className="text-[11px] text-blue-600 font-medium mb-2 bg-blue-50/60 px-2 py-1 rounded">
+              <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium mb-2 bg-blue-50/60 dark:bg-blue-950/40 px-2 py-1 rounded">
                 Editing selected arrow &mdash; select an animation or base color below to apply:
               </p>
             ) : (
-              <p className="text-[11px] text-gray-500 mb-2 italic">
+              <p className="text-[11px] text-gray-500 dark:text-slate-400 mb-2 italic">
                 Select any arrow in the diagram to apply motion styles, or click &ldquo;Convert Diagram&rdquo; to auto-convert all:
               </p>
             )}

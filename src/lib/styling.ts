@@ -19,7 +19,7 @@ export const ANIMATED_ARROW_PRESETS: AnimatedArrowPreset[] = [
   { id: 'pulse', name: 'Glowing Orb', description: 'Full line with traveling glowing packet' },
   { id: 'cyber', name: 'Cyber Glow', description: 'High-velocity neon tracer' },
   { id: 'broken-sender', name: 'Broken Sender', description: 'HTTP 500 panic glitch & alarm at origin lifeline', isError: true },
-  { id: 'broken-network', name: 'Broken Network', description: 'Severed gap & electric spark in transit; broken connection', isError: true },
+  { id: 'broken-network', name: 'Broken Network', description: 'Severed gap in transit; broken connection', isError: true },
   { id: 'broken-receiver', name: 'Broken Receiver', description: 'Arrival barrier wall & shockwave burst; target rejected/crashed', isError: true },
 ];
 
@@ -399,42 +399,6 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
       cap2.setAttribute('stroke-width', '2.8');
       cap2.setAttribute('stroke-linecap', 'round');
       target.parentNode?.insertBefore(cap2, target.nextSibling);
-
-      // Terminal spark dots on the cut caps
-      const dot1 = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      dot1.setAttribute('class', 'arrow-zap-spark');
-      dot1.setAttribute('cx', String(xCut1));
-      dot1.setAttribute('cy', String(midY));
-      dot1.setAttribute('r', '2.5');
-      dot1.setAttribute('fill', '#0284c7');
-      target.parentNode?.insertBefore(dot1, target.nextSibling);
-
-      const dot2 = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      dot2.setAttribute('class', 'arrow-zap-spark');
-      dot2.setAttribute('cx', String(xCut2));
-      dot2.setAttribute('cy', String(midY));
-      dot2.setAttribute('r', '2.5');
-      dot2.setAttribute('fill', '#0284c7');
-      target.parentNode?.insertBefore(dot2, target.nextSibling);
-
-      // High-voltage electric arc sparks crackling across the gap (vivid and bold!)
-      // Upper lightning bolt
-      const zapUpper = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
-      zapUpper.setAttribute('class', 'arrow-zap-spark');
-      zapUpper.setAttribute('d', `M ${xCut1} ${midY} L ${midX - dx * 10} ${midY - 8} L ${midX - dx * 2} ${midY - 2} L ${midX + dx * 5} ${midY - 9} L ${xCut2} ${midY}`);
-      zapUpper.setAttribute('fill', 'none');
-      zapUpper.setAttribute('stroke', '#0284c7');
-      zapUpper.setAttribute('stroke-width', '2.8');
-      target.parentNode?.insertBefore(zapUpper, target.nextSibling);
-
-      // Lower lightning bolt
-      const zapLower = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
-      zapLower.setAttribute('class', 'arrow-zap-spark');
-      zapLower.setAttribute('d', `M ${xCut1} ${midY} L ${midX - dx * 8} ${midY + 7} L ${midX + dx * 1} ${midY + 2} L ${midX + dx * 9} ${midY + 8} L ${xCut2} ${midY}`);
-      zapLower.setAttribute('fill', 'none');
-      zapLower.setAttribute('stroke', '#0284c7');
-      zapLower.setAttribute('stroke-width', '2.8');
-      target.parentNode?.insertBefore(zapLower, target.nextSibling);
 
       // Central floating broken connection badge
       const xMark = createXMark(doc, midX, midY, color, 'arrow-x-network', 'badge');

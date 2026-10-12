@@ -34,7 +34,7 @@ export default function AnimatedArrowSelector({
       {/* 6 Default Animated Arrows */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
+          <span className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1">
             <Play size={12} className="text-blue-500" />
             Animated Arrows (6 Styles)
           </span>
@@ -43,7 +43,7 @@ export default function AnimatedArrowSelector({
               type="button"
               data-testid="clear-arrow-animation"
               onClick={() => onSelectAnimation('none')}
-              className="text-[11px] text-gray-400 hover:text-gray-600 underline"
+              className="text-[11px] text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 underline"
             >
               Reset Animation
             </button>
@@ -64,16 +64,16 @@ export default function AnimatedArrowSelector({
                 onClick={() => onSelectAnimation(preset.id)}
                 className={`flex flex-col items-center justify-between p-1.5 rounded-lg border text-left transition-all ${
                   isSelected
-                    ? 'border-blue-500 bg-blue-50/80 shadow-sm ring-1 ring-blue-400'
-                    : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                    ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-950/40 shadow-xs ring-1 ring-blue-400'
+                    : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 hover:border-gray-300 dark:hover:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800'
                 }`}
                 title={`${preset.name}: ${preset.description}`}
               >
                 <div className="w-full flex justify-between items-center mb-1">
-                  <span className="text-[11px] font-medium text-gray-700 truncate">
+                  <span className="text-[11px] font-medium text-gray-700 dark:text-slate-200 truncate">
                     {preset.name}
                   </span>
-                  {isSelected && <Check size={10} className="text-blue-600 shrink-0" />}
+                  {isSelected && <Check size={10} className="text-blue-600 dark:text-blue-400 shrink-0" />}
                 </div>
 
                 {/* Live SVG animation preview */}
@@ -123,7 +123,7 @@ export default function AnimatedArrowSelector({
                       </>
                     ) : (preset.id === 'broken-network' || preset.id === 'ricochet') ? (
                       <>
-                        {/* Severed gap with bold dual electric lightning arcs & floating broken connection badge */}
+                        {/* Severed gap with cutoff breaker caps & floating broken connection badge */}
                         <line
                           x1="4"
                           y1="9"
@@ -143,22 +143,6 @@ export default function AnimatedArrowSelector({
                           strokeLinecap="round"
                           className="arrow-breaker-cap"
                         />
-                        <circle cx="25" cy="9" r="2" fill="#0284c7" className="arrow-zap-spark" />
-                        <path
-                          d="M 25 9 L 30 4 L 37 13 L 43 9"
-                          fill="none"
-                          stroke="#0284c7"
-                          strokeWidth="2.2"
-                          className="arrow-zap-spark"
-                        />
-                        <path
-                          d="M 25 9 L 31 14 L 38 5 L 43 9"
-                          fill="none"
-                          stroke="#0284c7"
-                          strokeWidth="2.2"
-                          className="arrow-zap-spark"
-                        />
-                        <circle cx="43" cy="9" r="2" fill="#0284c7" className="arrow-zap-spark" />
                         <line
                           x1="43"
                           y1="3"
@@ -258,20 +242,20 @@ export default function AnimatedArrowSelector({
       {/* 10 Base Colors: 5 Positive (Green/Blue) + 5 Error (Orange/Red) */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          <span className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide">
             Base Color (5 Happy Paths / 5 Errors)
           </span>
           {hasSelectedArrow && (
-            <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+            <span className="text-[10px] text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded">
               Selected Arrow
             </span>
           )}
         </div>
 
-        <div className="space-y-1.5 bg-gray-50/70 p-2 rounded-lg border border-gray-100">
+        <div className="space-y-1.5 bg-gray-50/70 dark:bg-slate-800/50 p-2 rounded-lg border border-gray-100 dark:border-slate-800">
           {/* 5 Happy Path / Positive Colors (Green & Blue) */}
           <div>
-            <div className="text-[10px] font-medium text-emerald-700 mb-1 flex items-center gap-1">
+            <div className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 mb-1 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               Positive Streams (Green / Blue)
             </div>
@@ -286,7 +270,7 @@ export default function AnimatedArrowSelector({
                     onClick={() => onSelectColor(c.hex)}
                     style={{ backgroundColor: c.hex }}
                     className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform hover:scale-110 shadow-xs ${
-                      isSelected ? 'ring-2 ring-offset-2 ring-gray-900 scale-105' : 'border border-black/10'
+                      isSelected ? 'ring-2 ring-offset-2 ring-gray-900 dark:ring-white dark:ring-offset-slate-900 scale-105' : 'border border-black/10'
                     }`}
                     title={`${c.name} (${c.hex}) - Happy Path`}
                   >
@@ -298,8 +282,8 @@ export default function AnimatedArrowSelector({
           </div>
 
           {/* 5 Error / Warning Colors (Orange & Red) */}
-          <div className="pt-1 border-t border-gray-200/60">
-            <div className="text-[10px] font-medium text-rose-700 mb-1 flex items-center gap-1">
+          <div className="pt-1 border-t border-gray-200/60 dark:border-slate-700/60">
+            <div className="text-[10px] font-medium text-rose-700 dark:text-rose-400 mb-1 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
               Failure Modes (Orange / Red)
             </div>
@@ -314,7 +298,7 @@ export default function AnimatedArrowSelector({
                     onClick={() => onSelectColor(c.hex)}
                     style={{ backgroundColor: c.hex }}
                     className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform hover:scale-110 shadow-xs ${
-                      isSelected ? 'ring-2 ring-offset-2 ring-gray-900 scale-105' : 'border border-black/10'
+                      isSelected ? 'ring-2 ring-offset-2 ring-gray-900 dark:ring-white dark:ring-offset-slate-900 scale-105' : 'border border-black/10'
                     }`}
                     title={`${c.name} (${c.hex}) - Error / Failure`}
                   >

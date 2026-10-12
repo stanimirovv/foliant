@@ -1000,9 +1000,21 @@ export default function DiagramViewer({
   };
 
   return (
-    <div className="w-full h-full relative overflow-hidden bg-white  rounded border border-gray-200 ">
+    <div
+      className={`w-full h-full relative overflow-hidden rounded border transition-colors ${
+        theme === 'dark'
+          ? 'bg-slate-950 border-slate-800/80 text-slate-100'
+          : 'bg-white border-gray-200 text-gray-900'
+      }`}
+    >
       {error && (
-        <div className="absolute top-0 left-0 w-full bg-red-100 text-red-600 p-2 z-10 text-sm overflow-auto max-h-32">
+        <div
+          className={`absolute top-0 left-0 w-full p-2 z-10 text-sm overflow-auto max-h-32 ${
+            theme === 'dark'
+              ? 'bg-red-950/80 text-red-300 border-b border-red-800/50'
+              : 'bg-red-100 text-red-600'
+          }`}
+        >
           {error}
         </div>
       )}
@@ -1037,7 +1049,10 @@ export default function DiagramViewer({
               </div>
             ) : (
               !code && !error && (
-                <div className="text-sm text-gray-400 select-none" data-testid="no-diagram">
+                <div
+                  className={`text-sm select-none ${theme === 'dark' ? 'text-slate-500' : 'text-gray-400'}`}
+                  data-testid="no-diagram"
+                >
                   No diagram selected
                 </div>
               )

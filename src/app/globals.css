@@ -3,13 +3,13 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #090d16;
+  --foreground: #f8fafc;
 }
 
 body {
-  color: #171717;
-  background: #ffffff;
+  color: #f8fafc;
+  background: #090d16;
   font-family: Arial, Helvetica, sans-serif;
 }
 
@@ -22,7 +22,7 @@ body {
 /* Editor selection highlight (EDITING_PLAN.md 4.7): a glow that works on
    shapes and bare lines alike, without overriding stroke/fill styles. */
 .editor-selected {
-  filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.9));
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.95)) drop-shadow(0 0 12px rgba(59, 130, 246, 0.45));
 }
 
 /* --- Mermaid Animated Arrows (6 styles) --- */
@@ -43,73 +43,42 @@ body {
   to { stroke-dashoffset: 0; }
 }
 
-/* HTTP 500 Panic Glitch - Erratic stroboscopic jitter directly inspired by prototype */
+/* Broken Sender - Smooth, relaxed dash progression (easy on the eyes, no jitter) */
 @keyframes mermaid-broken-sender {
-  0%, 100% {
-    opacity: 0.95;
-    stroke-dashoffset: 0;
-    transform: translateY(0);
-    filter: drop-shadow(0 0 3px #ffffff) drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px currentColor);
+  0% {
+    stroke-dashoffset: 28;
+    opacity: 0.9;
   }
-  10% { opacity: 0.2; transform: translateY(-1.5px); }
-  25% { opacity: 1; transform: translateY(1.5px); stroke-dashoffset: 8; }
-  40% { opacity: 0.15; }
-  55% { opacity: 0.85; transform: translateY(0); stroke-dashoffset: 16; }
-  70% { opacity: 0.3; }
-  85% { opacity: 1; stroke-dashoffset: 24; }
+  50% {
+    stroke-dashoffset: 14;
+    opacity: 0.65;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
 }
 
 /* Circuit Breaker Voltage Flicker on severed line stubs */
 @keyframes mermaid-broken-network {
   0%, 100% { opacity: 0.9; }
   25% { opacity: 0.7; }
-  50% { opacity: 0.3; }
+  50% { opacity: 0.4; }
   75% { opacity: 0.85; }
 }
 
-/* Electric Zap Arc across severed network gap - bold, vivid high-voltage crackle */
-@keyframes mermaid-breaker-zap {
-  0%, 100% {
-    opacity: 0.9;
-    stroke: #0284c7;
-    filter: drop-shadow(0 0 3px #38bdf8) drop-shadow(0 0 8px currentColor);
-  }
-  20% {
-    opacity: 0.55;
-    stroke: #38bdf8;
-    filter: drop-shadow(0 0 5px #00e5ff);
-  }
-  40% {
-    opacity: 1;
-    stroke: #00e5ff;
-    stroke-width: 3.5px;
-    filter: drop-shadow(0 0 8px #00e5ff) drop-shadow(0 0 14px currentColor);
-  }
-  60% {
-    opacity: 0.65;
-    stroke: #0284c7;
-    stroke-width: 2.2px;
-  }
-  80% {
-    opacity: 1;
-    stroke: #38bdf8;
-    stroke-width: 3.2px;
-    filter: drop-shadow(0 0 6px #38bdf8);
-  }
-}
-
-/* Rate Limit 429 Ricochet / Receiver impact recoil */
+/* Rate Limit 429 Ricochet / Receiver impact recoil - slow, calm glide */
 @keyframes mermaid-ricochet-recoil {
-  0% { stroke-dashoffset: 40; opacity: 0.85; }
-  40% { stroke-dashoffset: 0; opacity: 1; }
-  50% { stroke-dashoffset: 6; opacity: 1; filter: drop-shadow(0 0 10px currentColor); }
-  75% { stroke-dashoffset: 22; opacity: 0.45; }
-  100% { stroke-dashoffset: 40; opacity: 0.85; }
+  0% { stroke-dashoffset: 36; opacity: 0.85; }
+  45% { stroke-dashoffset: 0; opacity: 1; }
+  55% { stroke-dashoffset: 4; opacity: 0.95; }
+  80% { stroke-dashoffset: 18; opacity: 0.55; }
+  100% { stroke-dashoffset: 36; opacity: 0.85; }
 }
 
-/* Expanding Shockwave Burst Ring at Sender origin and Receiver impact */
+/* Expanding Shockwave Burst Ring at Sender origin and Receiver impact - relaxed expansion */
 @keyframes mermaid-shockwave-burst {
-  0% { r: 3px; opacity: 1; stroke-width: 2.8px; }
+  0% { r: 3px; opacity: 0.9; stroke-width: 2.2px; }
   100% { r: 24px; opacity: 0; stroke-width: 0.5px; }
 }
 
@@ -163,25 +132,19 @@ body {
     drop-shadow(0 0 14px currentColor) !important;
 }
 
-/* Failure Mode 1: Broken Sender (HTTP 500 Panic Glitch) */
+/* Failure Mode 1: Broken Sender (Gentle, slow dash movement) */
 .arrow-anim-broken-sender,
 .arrow-anim-stutter {
-  stroke-dasharray: 6 3 !important;
-  animation: mermaid-broken-sender 1.2s steps(8) infinite !important;
-  filter: drop-shadow(0 0 3px #ffffff) drop-shadow(0 0 6px currentColor) drop-shadow(0 0 14px currentColor) !important;
+  stroke-dasharray: 8 6 !important;
+  animation: mermaid-broken-sender 3.2s ease-in-out infinite !important;
+  filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 6px currentColor) !important;
 }
 
 /* Failure Mode 2: Broken Network (Severed Circuit Breaker Gap) */
 .arrow-anim-broken-network,
 .arrow-anim-ricochet {
-  animation: mermaid-broken-network 1.6s ease-in-out infinite !important;
+  animation: mermaid-broken-network 2.5s ease-in-out infinite !important;
   filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 8px currentColor) !important;
-}
-
-/* Electric Zap Arc across severed network gap */
-.arrow-zap-spark {
-  animation: mermaid-breaker-zap 2s ease-in-out infinite;
-  pointer-events: none;
 }
 
 .arrow-breaker-cap {
@@ -189,12 +152,12 @@ body {
   pointer-events: none;
 }
 
-/* Failure Mode 3: Broken Receiver (Impact Barrier & Ricochet) */
+/* Failure Mode 3: Broken Receiver (Gentle, slow dash recoil & impact) */
 .arrow-anim-broken-receiver,
 .arrow-anim-hesitate {
   stroke-dasharray: 10 6 !important;
-  animation: mermaid-ricochet-recoil 1.9s cubic-bezier(0.2, 0.8, 0.3, 1) infinite !important;
-  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor) !important;
+  animation: mermaid-ricochet-recoil 3.6s ease-in-out infinite !important;
+  filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 7px currentColor) !important;
 }
 
 .arrow-barrier-wall {
@@ -203,19 +166,19 @@ body {
 }
 
 .arrow-shockwave-burst {
-  animation: mermaid-shockwave-burst 1.6s cubic-bezier(0.1, 0.7, 0.3, 1) infinite;
+  animation: mermaid-shockwave-burst 2.6s cubic-bezier(0.1, 0.7, 0.3, 1) infinite;
   pointer-events: none;
-  filter: drop-shadow(0 0 6px currentColor);
+  filter: drop-shadow(0 0 5px currentColor);
 }
 
 .arrow-alarm-ping {
-  animation: mermaid-alarm-ping 1.4s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+  animation: mermaid-alarm-ping 2.2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
   pointer-events: none;
 }
 
 .arrow-x-mark {
   transform-origin: center;
-  animation: mermaid-x-pulse 1.3s ease-in-out infinite;
+  animation: mermaid-x-pulse 1.8s ease-in-out infinite;
   pointer-events: none;
   filter: drop-shadow(0 0 5px currentColor);
 }
@@ -231,7 +194,6 @@ body {
   .arrow-anim-ricochet,
   .arrow-anim-broken-receiver,
   .arrow-anim-hesitate,
-  .arrow-zap-spark,
   .arrow-shockwave-burst,
   .arrow-alarm-ping,
   .arrow-x-mark {

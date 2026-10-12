@@ -118,8 +118,8 @@ function describeElement(el: ModelElement): string {
   }
 }
 
-const fieldLabel = 'text-xs font-semibold text-gray-400 block mb-1';
-const fieldInput = 'w-full px-2 py-1 text-sm border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500';
+const fieldLabel = 'text-xs font-semibold text-gray-500 dark:text-slate-400 block mb-1';
+const fieldInput = 'w-full px-2 py-1 text-sm border rounded bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500';
 
 // Properties panel for the structured editor (EDITING_PLAN.md 4.12).
 export default function EditorPanel({
@@ -166,13 +166,13 @@ export default function EditorPanel({
 
   return (
     <div className="p-4">
-      <h2 className="text-xs font-bold uppercase text-gray-500 mb-2">Editor</h2>
+      <h2 className="text-xs font-bold uppercase text-gray-500 dark:text-slate-400 mb-2">Editor</h2>
       {!isMultiSelect && !activeElement && (
         <>
-          <p className="text-xs text-gray-500 italic">
+          <p className="text-xs text-gray-500 dark:text-slate-400 italic">
             Click an element in the diagram to edit it.
           </p>
-          <p className="text-xs text-gray-400 italic mt-1">
+          <p className="text-xs text-gray-400 dark:text-slate-500 italic mt-1">
             {diagramType === 'flowchart'
               ? 'Drag a node onto another node to connect them, or drag it into empty space to move it.'
               : 'Drag an actor box to reorder it, or drag between lifelines to add a message.'}
@@ -224,29 +224,29 @@ export default function EditorPanel({
         />
       )}
       {!isMultiSelect && activeElement && !isComponent(activeElement) && !isArrow(activeElement) && (
-        <p className="text-xs text-gray-500 italic">
+        <p className="text-xs text-gray-500 dark:text-slate-400 italic">
           This element is not editable.
         </p>
       )}
       {warning && (
-        <p className="text-xs text-yellow-600 mt-2">{warning}</p>
+        <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">{warning}</p>
       )}
       {pendingDelete && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
           data-testid="delete-dialog"
         >
-          <div className="bg-white rounded shadow-lg p-4 w-80">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg shadow-xl p-4 w-80">
             <h3 className="text-sm font-semibold mb-2">
               Delete {describeElement(pendingDelete.element)}?
             </h3>
             {pendingDelete.cascaded.length > 0 && (
               <div className="mb-3">
-                <p className="text-xs text-gray-500 mb-1">
+                <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">
                   This also removes {pendingDelete.cascaded.length} referencing
                   {' '}{pendingDelete.cascaded.length === 1 ? 'element' : 'elements'}:
                 </p>
-                <ul className="text-xs text-gray-700 list-disc pl-4 max-h-32 overflow-y-auto">
+                <ul className="text-xs text-gray-700 dark:text-slate-300 list-disc pl-4 max-h-32 overflow-y-auto">
                   {pendingDelete.cascaded.map(el => (
                     <li key={el.key}>{describeElement(el)}</li>
                   ))}
@@ -256,14 +256,14 @@ export default function EditorPanel({
             <div className="flex justify-end space-x-2">
               <button
                 onClick={onCancelDelete}
-                className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-100"
+                className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800"
               >
                 Cancel
               </button>
               <button
                 onClick={onConfirmDelete}
                 data-testid="confirm-delete"
-                className="px-2 py-1 text-xs rounded bg-red-500 text-white hover:bg-red-600"
+                className="px-2 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700 font-medium"
               >
                 Delete
               </button>
@@ -309,15 +309,15 @@ function MultiElementFields({
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-xs font-semibold text-gray-700">
+        <p className="text-xs font-semibold text-gray-700 dark:text-slate-200">
           Selected Elements ({elements.length})
         </p>
-        <p className="text-[11px] text-gray-400 mt-0.5">
+        <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-0.5">
           Hold Shift and click elements in the diagram to add or remove them.
         </p>
       </div>
 
-      <div className="space-y-2 border border-blue-100 bg-blue-50/50 rounded p-2.5">
+      <div className="space-y-2 border border-blue-100 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 rounded p-2.5">
         <span className={fieldLabel}>Add tag to all elements</span>
         {actorKeys.length > 0 && (
           <div className="flex space-x-1">
@@ -338,7 +338,7 @@ function MultiElementFields({
               data-testid="multi-add-existing-tag"
               disabled={!existingTagSelect}
               onClick={submitExistingTag}
-              className="px-2 text-xs rounded border border-gray-200 bg-white hover:bg-gray-100 disabled:opacity-40"
+              className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40"
             >
               Add
             </button>
@@ -365,7 +365,7 @@ function MultiElementFields({
             title="Add tag"
             data-testid="multi-add-tag"
             onClick={submitTag}
-            className="px-2 text-xs rounded border border-gray-200 bg-white hover:bg-gray-100"
+            className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700"
           >
             Add
           </button>
@@ -381,25 +381,25 @@ function MultiElementFields({
           {elementsTagInfo.map(item => (
             <div
               key={item.element.key}
-              className="p-2 rounded border border-gray-200 bg-gray-50/60 space-y-1.5"
+              className="p-2 rounded border border-gray-200 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/40 space-y-1.5"
               data-testid={`multi-element-${item.element.key}`}
             >
-              <div className="flex items-center justify-between text-xs font-medium text-gray-700">
+              <div className="flex items-center justify-between text-xs font-medium text-gray-700 dark:text-slate-200">
                 <span className="truncate mr-1" title={describeElement(item.element)}>
                   {describeElement(item.element)}
                 </span>
-                <span className="text-[10px] text-gray-400 font-mono flex-shrink-0">
+                <span className="text-[10px] text-gray-400 dark:text-slate-500 font-mono flex-shrink-0">
                   {item.element.key}
                 </span>
               </div>
               <div className="flex flex-wrap gap-1">
                 {(item.ownTags ?? []).length === 0 && (!item.inheritedTags || item.inheritedTags.length === 0) && (
-                  <span className="text-[11px] text-gray-400 italic">No tags</span>
+                  <span className="text-[11px] text-gray-400 dark:text-slate-500 italic">No tags</span>
                 )}
                 {(item.ownTags ?? []).map(tag => (
                   <span
                     key={tag}
-                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs"
+                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs"
                   >
                     {tag}
                     <button
@@ -407,7 +407,7 @@ function MultiElementFields({
                       aria-label={`Remove tag ${tag} from ${describeElement(item.element)}`}
                       data-testid={`remove-tag-${item.element.key}-${tag}`}
                       onClick={() => onRemoveTag(tag, item.element.key)}
-                      className="ml-1 hover:text-blue-900"
+                      className="ml-1 hover:text-blue-900 dark:hover:text-blue-100"
                     >
                       <X size={10} />
                     </button>
@@ -417,7 +417,7 @@ function MultiElementFields({
                   <span
                     key={tag}
                     title="Inherited"
-                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-xs"
+                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 text-xs"
                   >
                     {tag}
                   </span>
@@ -468,7 +468,7 @@ function ParticipantFields({
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-gray-400 dark:text-slate-500">
         {element.kind === 'participant' ? 'Participant' : 'Node'}: <span className="font-mono">{element.id}</span>
       </p>
 
@@ -490,12 +490,12 @@ function ParticipantFields({
             type="color"
             aria-label="Color"
             data-testid="actor-color-picker"
-            className="h-8 w-12 cursor-pointer rounded border border-gray-200 bg-white p-0.5"
+            className="h-8 w-12 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5"
             list="editor-actor-color-list"
             value={colorToHex(meta?.color)}
             onChange={(e) => onSetColor(e.target.value)}
           />
-          <span className="text-xs text-gray-500 font-mono flex-1">
+          <span className="text-xs text-gray-500 dark:text-slate-400 font-mono flex-1">
             {meta?.color || 'Default'}
           </span>
           {meta?.color && (
@@ -515,7 +515,7 @@ function ParticipantFields({
                   onSetColor('');
                 }
               }}
-              className="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-100 cursor-pointer select-none"
+              className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1.5 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none"
             >
               Clear
             </span>
@@ -533,14 +533,14 @@ function ParticipantFields({
             {tags.map(tag => (
               <span
                 key={tag}
-                className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs"
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs"
               >
                 {tag}
                 <button
                   type="button"
                   aria-label={`Remove tag ${tag}`}
                   onClick={() => onRemoveTag(tag)}
-                  className="ml-1 hover:text-blue-900"
+                  className="ml-1 hover:text-blue-900 dark:hover:text-blue-100"
                 >
                   <X size={10} />
                 </button>
@@ -567,7 +567,7 @@ function ParticipantFields({
               data-testid="participant-add-existing-tag"
               disabled={!existingTagSelect}
               onClick={submitExistingTag}
-              className="px-2 text-xs rounded border border-gray-200 hover:bg-gray-100 disabled:opacity-40"
+              className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40"
             >
               Add
             </button>
@@ -593,7 +593,7 @@ function ParticipantFields({
             title="Add tag"
             data-testid="add-tag"
             onClick={submitTag}
-            className="px-2 text-xs rounded border border-gray-200 hover:bg-gray-100"
+            className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700"
           >
             Add
           </button>
@@ -690,12 +690,12 @@ function ArrowFields({
             type="color"
             aria-label="Color"
             data-testid="arrow-color-picker"
-            className="h-8 w-12 cursor-pointer rounded border border-gray-200 bg-white p-0.5"
+            className="h-8 w-12 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5"
             list="editor-arrow-color-list"
             value={colorToHex(arrowStyle?.color)}
             onChange={(e) => onSetColor(e.target.value)}
           />
-          <span className="text-xs text-gray-500 font-mono flex-1">
+          <span className="text-xs text-gray-500 dark:text-slate-400 font-mono flex-1">
             {arrowStyle?.color || 'Default'}
           </span>
           {arrowStyle?.color && (
@@ -715,7 +715,7 @@ function ArrowFields({
                   onSetColor('');
                 }
               }}
-              className="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-100 cursor-pointer select-none"
+              className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1.5 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none"
             >
               Clear
             </span>
@@ -751,7 +751,7 @@ function ArrowFields({
       </label>
 
       {onSetAnimation && (
-        <div className="pt-2 border-t border-gray-100">
+        <div className="pt-2 border-t border-gray-100 dark:border-slate-800">
           <AnimatedArrowSelector
             currentAnimation={arrowStyle?.animation ?? 'none'}
             currentColor={arrowStyle?.color}
@@ -770,14 +770,14 @@ function ArrowFields({
             {ownTags.map(tag => (
               <span
                 key={tag}
-                className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs"
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs"
               >
                 {tag}
                 <button
                   type="button"
                   aria-label={`Remove tag ${tag}`}
                   onClick={() => onRemoveTag(tag)}
-                  className="ml-1 hover:text-blue-900"
+                  className="ml-1 hover:text-blue-900 dark:hover:text-blue-100"
                 >
                   <X size={10} />
                 </button>
@@ -787,7 +787,7 @@ function ArrowFields({
               <span
                 key={tag}
                 title={`Inherited from ${element.from}`}
-                className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-xs"
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 text-xs"
               >
                 {tag}
               </span>
@@ -813,7 +813,7 @@ function ArrowFields({
               data-testid="arrow-add-existing-tag"
               disabled={!existingTagSelect}
               onClick={submitExistingTag}
-              className="px-2 text-xs rounded border border-gray-200 hover:bg-gray-100 disabled:opacity-40"
+              className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40"
             >
               Add
             </button>
@@ -839,7 +839,7 @@ function ArrowFields({
             title="Add tag"
             data-testid="add-arrow-tag"
             onClick={submitTag}
-            className="px-2 text-xs rounded border border-gray-200 hover:bg-gray-100"
+            className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700"
           >
             Add
           </button>
@@ -851,13 +851,13 @@ function ArrowFields({
 
       <div>
         <span className={fieldLabel}>Inherit service tags</span>
-        <div className="flex border border-gray-200 rounded overflow-hidden text-[10px] w-full bg-gray-50">
+        <div className="flex border border-gray-200 dark:border-slate-700 rounded overflow-hidden text-[10px] w-full bg-gray-50 dark:bg-slate-800">
           <button
             type="button"
             data-testid="arrow-inherit-on"
             title="Merged: the message also carries the tags of the service it originates from"
             onClick={() => onSetKeyMode('merged')}
-            className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${keyMode === 'merged' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+            className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${keyMode === 'merged' ? 'bg-blue-500 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700'}`}
           >
             On
           </button>
@@ -866,7 +866,7 @@ function ArrowFields({
             data-testid="arrow-inherit-off"
             title="Clean: only the message's own tags"
             onClick={() => onSetKeyMode('clean')}
-            className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${keyMode === 'clean' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+            className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 dark:border-slate-700 ${keyMode === 'clean' ? 'bg-blue-500 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700'}`}
           >
             Off
           </button>

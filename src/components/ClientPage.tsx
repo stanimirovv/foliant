@@ -80,7 +80,9 @@ export default function ClientPage() {
   
   const currentFile = searchParams.get('file');
   const searchQuery = searchParams.get('q') || '';
-  const theme = (searchParams.get('theme') as 'default' | 'dark') || 'default';
+  const themeParam = searchParams.get('theme');
+  const theme: 'default' | 'dark' = themeParam === 'default' ? 'default' : 'dark';
+  const isDark = theme === 'dark';
   const dirParam = searchParams.get('dir') || '';
   
   const [customDirInput, setCustomDirInput] = useState(dirParam);
@@ -985,9 +987,9 @@ export default function ClientPage() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50  text-gray-900 ">
-      <div className="w-64 border-r border-gray-200  bg-white  flex flex-col">
-        <div className="p-4 border-b border-gray-200  flex justify-between items-center">
+    <div className={`flex h-screen ${isDark ? 'dark bg-slate-950 text-slate-100' : 'bg-gray-50 text-gray-900'}`}>
+      <div className={`w-64 border-r flex flex-col ${isDark ? 'border-slate-800 bg-slate-900 text-slate-200' : 'border-gray-200 bg-white text-gray-900'}`}>
+        <div className={`p-4 border-b flex justify-between items-center ${isDark ? 'border-slate-800' : 'border-gray-200'}`}>
           <div className="flex items-center space-x-2">
             <img src="/logo.png" alt="Logo" className="w-6 h-6 rounded-md object-cover" />
             <h1 className="font-bold">Mermaid Viewer</h1>
@@ -998,7 +1000,8 @@ export default function ClientPage() {
               params.set('theme', theme === 'dark' ? 'default' : 'dark');
               router.replace(`${pathname}?${params.toString()}`);
             }}
-            className="p-1 rounded hover:bg-gray-100 "
+            className={`p-1 rounded transition-colors ${isDark ? 'text-amber-300 hover:bg-slate-800' : 'text-gray-700 hover:bg-gray-100'}`}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
@@ -1006,7 +1009,7 @@ export default function ClientPage() {
         
         <div className="flex-1 overflow-y-auto p-4">
           <div className="mb-6">
-            <h2 className="text-xs font-bold uppercase text-gray-500 mb-2 flex items-center">
+            <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2 flex items-center`}>
               <Folder size={14} className="mr-1" /> Directory
             </h2>
             <form onSubmit={handleDirSubmit} className="mb-2">
@@ -1015,20 +1018,20 @@ export default function ClientPage() {
                 placeholder="Paste absolute path..."
                 value={customDirInput}
                 onChange={e => setCustomDirInput(e.target.value)}
-                className="w-full px-2 py-1 text-sm border rounded mb-1"
+                className={`w-full px-2 py-1 text-sm border rounded mb-1 ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 placeholder-slate-500 focus:ring-blue-500' : 'bg-white border-gray-200 text-gray-900'}`}
               />
-              <button type="submit" className="w-full bg-blue-500 text-white rounded py-1 text-sm hover:bg-blue-600">
+              <button type="submit" className="w-full bg-blue-600 text-white rounded py-1 text-sm hover:bg-blue-700 font-medium">
                 Load Directory
               </button>
             </form>
             {recentDirs.length > 0 && (
               <div className="mb-2">
-                <span className="text-xs text-gray-400">Recent:</span>
+                <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>Recent:</span>
                 <ul className="space-y-1 mt-1">
                   {recentDirs.map(d => (
                     <li key={d}>
                       <button
-                        className="w-full text-left text-xs truncate text-blue-600 hover:underline"
+                        className={`w-full text-left text-xs truncate ${isDark ? 'text-blue-400' : 'text-blue-600'} hover:underline`}
                         onClick={() => {
                           setCustomDirInput(d);
                           const params = new URLSearchParams(searchParams.toString());
@@ -1053,30 +1056,34 @@ export default function ClientPage() {
           </div>
 
           <div className="mb-6">
-            <h2 className="text-xs font-bold uppercase text-gray-500 mb-2 flex items-center">
+            <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2 flex items-center`}>
               <Folder size={14} className="mr-1" /> Files
               <button
                 data-testid="new-diagram"
                 title="New diagram"
                 onClick={() => setPendingNew(true)}
-                className="ml-auto normal-case font-normal text-blue-500 hover:text-blue-600 flex items-center space-x-0.5"
+                className={`ml-auto normal-case font-normal ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500 hover:text-blue-600'} flex items-center space-x-0.5`}
               >
                 <Plus size={12} /> New
               </button>
             </h2>
             {filesError && (
-              <p className="text-xs text-red-600 mb-1" data-testid="files-error">
+              <p className="text-xs text-red-500 mb-1" data-testid="files-error">
                 {filesError}{dirParam ? `: ${dirParam}` : ''}
               </p>
             )}
             {!filesError && files.length === 0 && (
-              <p className="text-xs text-gray-400 italic mb-1">No .mmd files in this directory</p>
+              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'} italic mb-1`}>No .mmd files in this directory</p>
             )}
             <ul className="space-y-1">
               {files.map(f => (
                 <li key={f}>
                   <button
-                    className={`w-full text-left px-2 py-1 rounded text-sm ${currentFile === f ? 'bg-blue-100  text-blue-700 ' : 'hover:bg-gray-100 '}`}
+                    className={`w-full text-left px-2 py-1 rounded text-sm transition-colors ${
+                      currentFile === f
+                        ? (isDark ? 'bg-blue-900/40 text-blue-300 border border-blue-700/50 font-medium' : 'bg-blue-100 text-blue-700 font-medium')
+                        : (isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-gray-700 hover:bg-gray-100')
+                    }`}
                     onClick={() => {
                       const params = new URLSearchParams(searchParams.toString());
                       params.set('file', f);
@@ -1091,9 +1098,9 @@ export default function ClientPage() {
           </div>
 
           <div className="mb-6">
-            <h2 className="text-xs font-bold uppercase text-gray-500 mb-2">Filters</h2>
+            <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2`}>Filters</h2>
             {regionRoots.length === 0 ? (
-              <p className="text-xs text-gray-500 italic">No regions found</p>
+              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'} italic`}>No regions found</p>
             ) : (
               <div className="-ml-4">{renderRegionTree(regionRoots)}</div>
             )}
@@ -1101,39 +1108,39 @@ export default function ClientPage() {
 
           {(availableColors.length > 0 || availableKeys.length > 0) && (
             <div className="mb-6">
-              <h2 className="text-xs font-bold uppercase text-gray-500 mb-2">Actors</h2>
+              <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2`}>Actors</h2>
               
               {availableColors.length > 0 && (
                 <div className="mb-3">
-                  <span className="text-xs font-semibold text-gray-400 block mb-1">By Color</span>
+                  <span className={`text-xs font-semibold ${isDark ? 'text-slate-500' : 'text-gray-400'} block mb-1`}>By Color</span>
                   <ul className="space-y-2">
                     {availableColors.map(c => {
                       const currentState = hideColors.has(c) ? 'off' : mergeCleanColors.has(c) ? 'merged_clean' : mergeColors.has(c) ? 'merged' : 'on';
                       return (
-                        <li key={c} className="text-sm flex flex-col pl-2 border-l-2 border-gray-200 ml-1">
-                          <span className="font-medium text-gray-700">{c}</span>
-                          <div className="flex border border-gray-200 rounded overflow-hidden text-[10px] mt-1 w-full bg-gray-50">
+                        <li key={c} className={`text-sm flex flex-col pl-2 border-l-2 ml-1 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
+                          <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>{c}</span>
+                          <div className={`flex border rounded overflow-hidden text-[10px] mt-1 w-full ${isDark ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
                             <button 
                               onClick={() => setActorState('color', c, 'on')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                             >
                               On
                             </button>
                             <button 
                               onClick={() => setActorState('color', c, 'off')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'off' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'off' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                             >
                               Off
                             </button>
                             <button 
                               onClick={() => setActorState('color', c, 'merged')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'merged' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                             >
                               Merged
                             </button>
                             <button 
                               onClick={() => setActorState('color', c, 'merged_clean')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'merged_clean' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged_clean' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                               title="Merge actors and hide their internal self-calls"
                             >
                               Clean
@@ -1148,35 +1155,35 @@ export default function ClientPage() {
 
               {availableKeys.length > 0 && (
                 <div className="mb-3">
-                  <span className="text-xs font-semibold text-gray-400 block mb-1">By Key</span>
+                  <span className={`text-xs font-semibold ${isDark ? 'text-slate-500' : 'text-gray-400'} block mb-1`}>By Key</span>
                   <ul className="space-y-2">
                     {availableKeys.map(k => {
                       const currentState = hideKeys.has(k) ? 'off' : mergeCleanKeys.has(k) ? 'merged_clean' : mergeKeys.has(k) ? 'merged' : 'on';
                       return (
-                        <li key={k} className="text-sm flex flex-col pl-2 border-l-2 border-gray-200 ml-1">
-                          <span className="font-medium text-gray-700">{k}</span>
-                          <div className="flex border border-gray-200 rounded overflow-hidden text-[10px] mt-1 w-full bg-gray-50">
+                        <li key={k} className={`text-sm flex flex-col pl-2 border-l-2 ml-1 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
+                          <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>{k}</span>
+                          <div className={`flex border rounded overflow-hidden text-[10px] mt-1 w-full ${isDark ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
                             <button 
                               onClick={() => setActorState('key', k, 'on')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                             >
                               On
                             </button>
                             <button 
                               onClick={() => setActorState('key', k, 'off')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'off' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'off' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                             >
                               Off
                             </button>
                             <button 
                               onClick={() => setActorState('key', k, 'merged')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'merged' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                             >
                               Merged
                             </button>
                             <button 
                               onClick={() => setActorState('key', k, 'merged_clean')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 ${currentState === 'merged_clean' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged_clean' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                               title="Merge actors and hide their internal self-calls"
                             >
                               Clean
@@ -1193,35 +1200,35 @@ export default function ClientPage() {
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xs font-bold uppercase text-gray-500">Saved Views</h2>
+              <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Saved Views</h2>
               <button 
                 onClick={saveCurrentView}
-                className="text-blue-500 hover:text-blue-600 p-1 rounded hover:bg-blue-50"
+                className={`p-1 rounded transition-colors ${isDark ? 'text-blue-400 hover:text-blue-300 hover:bg-slate-800' : 'text-blue-500 hover:text-blue-600 hover:bg-blue-50'}`}
                 title="Save Current View"
               >
                 <Save size={14} />
               </button>
             </div>
             {(!viewsData || !viewsData.views || viewsData.views.length === 0) ? (
-              <p className="text-xs text-gray-500 italic">No saved views</p>
+              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'} italic`}>No saved views</p>
             ) : (
               <ul className="space-y-2">
                 {viewsData.views.map(view => (
-                  <li key={view.name} className="flex items-center justify-between bg-gray-50 p-2 rounded border text-sm group">
+                  <li key={view.name} className={`flex items-center justify-between p-2 rounded border text-sm group ${isDark ? 'bg-slate-800/60 border-slate-700 text-slate-200' : 'bg-gray-50 border-gray-200 text-gray-800'}`}>
                     <span className="truncate font-medium flex-1 mr-2" title={view.name}>
                       {view.name}
                     </span>
                     <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
                         onClick={() => loadView(view)} 
-                        className="text-green-600 hover:text-green-700 p-1 hover:bg-green-100 rounded"
+                        className={`p-1 rounded transition-colors ${isDark ? 'text-emerald-400 hover:bg-slate-700' : 'text-green-600 hover:text-green-700 hover:bg-green-100'}`}
                         title="Load View"
                       >
                         <Play size={14} />
                       </button>
                       <button 
                         onClick={() => deleteView(view.name)} 
-                        className="text-red-500 hover:text-red-600 p-1 hover:bg-red-100 rounded"
+                        className={`p-1 rounded transition-colors ${isDark ? 'text-rose-400 hover:bg-slate-700' : 'text-red-500 hover:text-red-600 hover:bg-red-100'}`}
                         title="Delete View"
                       >
                         <Trash2 size={14} />
@@ -1236,10 +1243,12 @@ export default function ClientPage() {
       </div>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="p-4 border-b border-gray-200  bg-white  flex items-center justify-between">
+        <div className={`p-4 border-b flex items-center justify-between transition-colors ${
+          isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
+        }`}>
           <div className="flex items-center space-x-2">
             <div className="relative w-64">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <Search className={`absolute left-2 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-400' : 'text-gray-400'}`} size={16} />
               <input
                 type="text"
                 placeholder="Search diagram..."
@@ -1253,7 +1262,9 @@ export default function ClientPage() {
                   }
                   router.replace(`${pathname}?${params.toString()}`, { scroll: false });
                 }}
-                className="w-full pl-8 pr-3 py-1 text-sm border rounded bg-gray-50   focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`w-full pl-8 pr-3 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  isDark ? 'bg-slate-800 border-slate-700 text-slate-100 placeholder-slate-400' : 'bg-gray-50 border-gray-200 text-gray-900'
+                }`}
               />
             </div>
             <button
@@ -1262,10 +1273,10 @@ export default function ClientPage() {
               title={editSupported
                 ? (editMode ? 'Exit edit mode' : 'Edit diagram')
                 : 'Editing is only available for sequence and flowchart diagrams'}
-              className={`p-1.5 rounded border ${
+              className={`p-1.5 rounded border transition-colors ${
                 editMode
-                  ? 'bg-blue-500 text-white border-blue-500'
-                  : 'border-gray-200  hover:bg-gray-100 '
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : (isDark ? 'border-slate-700 text-slate-200 hover:bg-slate-800' : 'border-gray-200 hover:bg-gray-100')
               } ${!editSupported ? 'opacity-40 cursor-not-allowed' : ''}`}
             >
               <Pencil size={16} />
@@ -1275,7 +1286,9 @@ export default function ClientPage() {
                 <button
                   onClick={handleAddParticipant}
                   title="Add Participant"
-                  className="flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-100"
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                    isDark ? 'border-slate-700 text-slate-200 hover:bg-slate-800' : 'border-gray-200 hover:bg-gray-100'
+                  }`}
                 >
                   <UserPlus size={14} />
                   <span>Participant</span>
@@ -1286,10 +1299,12 @@ export default function ClientPage() {
                   title={componentElements.length === 0
                     ? 'Add a participant first'
                     : 'Add Message'}
-                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                    isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+                  } ${
                     componentElements.length === 0
                       ? 'opacity-40 cursor-not-allowed'
-                      : 'hover:bg-gray-100'
+                      : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
                   }`}
                 >
                   <MessageSquarePlus size={14} />
@@ -1300,21 +1315,23 @@ export default function ClientPage() {
                   disabled={!rawCode}
                   title="Add Sticky Note"
                   data-testid="add-sticky-note"
-                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
-                    !rawCode ? 'opacity-40 cursor-not-allowed' : 'hover:bg-amber-50 hover:border-amber-300'
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                    isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+                  } ${
+                    !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-amber-950/40 hover:border-amber-700/60' : 'hover:bg-amber-50 hover:border-amber-300')
                   }`}
                 >
-                  <StickyNoteIcon size={14} className="text-amber-600" />
+                  <StickyNoteIcon size={14} className="text-amber-500" />
                   <span>+ Note</span>
                 </button>
                 <button
                   onClick={() => setShowNotes(!showNotes)}
                   title={showNotes ? 'Hide sticky notes' : 'Show sticky notes'}
                   data-testid="toggle-sticky-notes"
-                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border ${
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
                     showNotes
-                      ? 'bg-amber-100 border-amber-300 text-amber-900'
-                      : 'border-gray-200 text-gray-500 hover:bg-gray-100'
+                      ? (isDark ? 'bg-amber-950/60 border-amber-700/60 text-amber-300' : 'bg-amber-100 border-amber-300 text-amber-900')
+                      : (isDark ? 'border-slate-700 text-slate-400 hover:bg-slate-800' : 'border-gray-200 text-gray-500 hover:bg-gray-100')
                   }`}
                 >
                   <span>Notes ({stickyNotes.length})</span>
@@ -1323,8 +1340,10 @@ export default function ClientPage() {
                   onClick={undo}
                   disabled={historyPast.length === 0}
                   title="Undo (Ctrl+Z)"
-                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
-                    historyPast.length === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100'
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                    isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+                  } ${
+                    historyPast.length === 0 ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
                   }`}
                 >
                   <Undo2 size={14} />
@@ -1334,8 +1353,10 @@ export default function ClientPage() {
                   onClick={redo}
                   disabled={historyFuture.length === 0}
                   title="Redo (Ctrl+Y)"
-                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
-                    historyFuture.length === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100'
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                    isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+                  } ${
+                    historyFuture.length === 0 ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
                   }`}
                 >
                   <Redo2 size={14} />
@@ -1346,11 +1367,13 @@ export default function ClientPage() {
                   disabled={!rawCode}
                   title="Copy Mermaid Code"
                   data-testid="copy-mermaid"
-                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border border-gray-200 ${
-                    !rawCode ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100'
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                    isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+                  } ${
+                    !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
                   }`}
                 >
-                  {copied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
+                  {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
                   <span>{copied ? 'Copied' : 'Copy'}</span>
                 </button>
               </>
@@ -1414,7 +1437,9 @@ export default function ClientPage() {
             />
           </div>
           {editMode && (
-            <div className="w-72 flex-shrink-0 border-l border-gray-200  bg-white  overflow-y-auto">
+            <div className={`w-72 flex-shrink-0 border-l overflow-y-auto transition-colors ${
+              isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
+            }`}>
               <EditorPanel
                 element={selectedRawElement}
                 selectedElements={selectedRawElements}
@@ -1475,17 +1500,17 @@ function NewDiagramDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       data-testid="new-diagram-dialog"
     >
-      <div className="bg-white rounded shadow-lg p-4 w-80">
+      <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg shadow-xl p-4 w-80">
         <h3 className="text-sm font-semibold mb-2">New diagram</h3>
         <label className="block mb-2">
-          <span className="text-xs text-gray-500">File name</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">File name</span>
           <input
             type="text"
             data-testid="new-diagram-name"
-            className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="my-diagram"
             value={name}
             onChange={(e) => { setName(e.target.value); setError(null); }}
@@ -1498,10 +1523,10 @@ function NewDiagramDialog({
           />
         </label>
         <label className="block mb-3">
-          <span className="text-xs text-gray-500">Type</span>
+          <span className="text-xs text-gray-500 dark:text-slate-400">Type</span>
           <select
             data-testid="new-diagram-type"
-            className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={type}
             onChange={(e) => setType(e.target.value as 'sequence' | 'flowchart')}
           >
@@ -1510,13 +1535,13 @@ function NewDiagramDialog({
           </select>
         </label>
         {error && (
-          <p data-testid="new-diagram-error" className="text-xs text-red-500 mb-2">{error}</p>
+          <p data-testid="new-diagram-error" className="text-xs text-red-500 dark:text-red-400 mb-2">{error}</p>
         )}
         <div className="flex justify-end space-x-2">
           <button
             onClick={onCancel}
             data-testid="new-diagram-cancel"
-            className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-100"
+            className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800"
           >
             Cancel
           </button>
@@ -1524,7 +1549,7 @@ function NewDiagramDialog({
             onClick={submit}
             data-testid="new-diagram-create"
             disabled={busy}
-            className="px-2 py-1 text-xs rounded bg-blue-500 text-white hover:bg-blue-600"
+            className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 font-medium"
           >
             Create
           </button>

@@ -315,7 +315,6 @@ describe('applyArrowStyles (sequence fixture)', () => {
     const rootNetwork = parseSvgRoot(outNetwork);
     expect(rootNetwork.querySelector('.arrow-x-network circle')).toBeTruthy();
     expect(rootNetwork.querySelector('.arrow-breaker-cap')).toBeTruthy();
-    expect(rootNetwork.querySelector('.arrow-zap-spark')).toBeTruthy();
 
     const outReceiver = applyArrowStyles(SEQ_SVG, model, {
       version: 1,
