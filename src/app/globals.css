@@ -67,14 +67,35 @@ body {
   75% { opacity: 0.85; }
 }
 
-/* Electric Zap Arc across severed network gap */
+/* Electric Zap Arc across severed network gap - bold, vivid high-voltage crackle */
 @keyframes mermaid-breaker-zap {
-  0%, 100% { opacity: 0.15; stroke-width: 1.2px; }
-  48% { opacity: 0.15; }
-  50% { opacity: 1; stroke-width: 3.5px; filter: drop-shadow(0 0 6px #67e8f9) drop-shadow(0 0 12px currentColor); }
-  54% { opacity: 0.3; }
-  56% { opacity: 1; stroke-width: 2.8px; }
-  60% { opacity: 0.15; }
+  0%, 100% {
+    opacity: 0.9;
+    stroke: #0284c7;
+    filter: drop-shadow(0 0 3px #38bdf8) drop-shadow(0 0 8px currentColor);
+  }
+  20% {
+    opacity: 0.55;
+    stroke: #38bdf8;
+    filter: drop-shadow(0 0 5px #00e5ff);
+  }
+  40% {
+    opacity: 1;
+    stroke: #00e5ff;
+    stroke-width: 3.5px;
+    filter: drop-shadow(0 0 8px #00e5ff) drop-shadow(0 0 14px currentColor);
+  }
+  60% {
+    opacity: 0.65;
+    stroke: #0284c7;
+    stroke-width: 2.2px;
+  }
+  80% {
+    opacity: 1;
+    stroke: #38bdf8;
+    stroke-width: 3.2px;
+    filter: drop-shadow(0 0 6px #38bdf8);
+  }
 }
 
 /* Rate Limit 429 Ricochet / Receiver impact recoil */
@@ -86,7 +107,7 @@ body {
   100% { stroke-dashoffset: 40; opacity: 0.85; }
 }
 
-/* Expanding Shockwave Burst Ring at Receiver impact point */
+/* Expanding Shockwave Burst Ring at Sender origin and Receiver impact */
 @keyframes mermaid-shockwave-burst {
   0% { r: 3px; opacity: 1; stroke-width: 2.8px; }
   100% { r: 24px; opacity: 0; stroke-width: 0.5px; }
@@ -99,9 +120,10 @@ body {
   100% { transform: scale(2.2); opacity: 0; }
 }
 
+/* Pulse opacity/glow without transform: scale() to prevent overriding SVG translate(cx, cy) */
 @keyframes mermaid-x-pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.22); opacity: 0.8; }
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 4px currentColor); }
+  50% { opacity: 0.78; filter: drop-shadow(0 0 7px currentColor); }
 }
 
 /* Happy Path 1: Continuous Flow */

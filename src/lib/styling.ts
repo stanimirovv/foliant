@@ -335,14 +335,38 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
     const len = Math.abs(x2 - x1);
 
     if (anim === 'broken-sender' || anim === 'stutter') {
+      // 1. Origin barrier wall at sender lifeline
+      const barrier = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+      barrier.setAttribute('class', 'arrow-barrier-wall');
+      barrier.setAttribute('x1', String(x1));
+      barrier.setAttribute('y1', String(y1 - 12));
+      barrier.setAttribute('x2', String(x1));
+      barrier.setAttribute('y2', String(y1 + 12));
+      barrier.setAttribute('stroke', color);
+      barrier.setAttribute('stroke-width', '3');
+      barrier.setAttribute('stroke-linecap', 'round');
+      target.parentNode?.insertBefore(barrier, target.nextSibling);
+
+      // 2. Expanding neon shockwave burst circle at sender origin (identical to receiver!)
+      const shockwave = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      shockwave.setAttribute('class', 'arrow-shockwave-burst arrow-sender-burst');
+      shockwave.setAttribute('cx', String(x1));
+      shockwave.setAttribute('cy', String(y1));
+      shockwave.setAttribute('r', '3');
+      shockwave.setAttribute('fill', 'none');
+      shockwave.setAttribute('stroke', color);
+      shockwave.setAttribute('stroke-width', '2');
+      target.parentNode?.insertBefore(shockwave, target.nextSibling);
+
+      // 3. Sender origin error mark badge
       const cx = x1 + dx * 14;
       const cy = y1;
-      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-sender', 'alarm');
+      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-sender', 'badge');
       target.parentNode?.insertBefore(xMark, target.nextSibling);
     } else if (anim === 'broken-network' || anim === 'ricochet') {
       const midX = (x1 + x2) / 2;
       const midY = (y1 + y2) / 2;
-      const gap = Math.min(36, Math.max(18, len * 0.35));
+      const gap = Math.min(46, Math.max(24, len * 0.38));
       const halfSeg = Math.max(0, (len - gap) / 2);
       const xCut1 = midX - dx * (gap / 2);
       const xCut2 = midX + dx * (gap / 2);
@@ -356,11 +380,11 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
       const cap1 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
       cap1.setAttribute('class', 'arrow-breaker-cap');
       cap1.setAttribute('x1', String(xCut1));
-      cap1.setAttribute('y1', String(midY - 6));
+      cap1.setAttribute('y1', String(midY - 7));
       cap1.setAttribute('x2', String(xCut1));
-      cap1.setAttribute('y2', String(midY + 6));
+      cap1.setAttribute('y2', String(midY + 7));
       cap1.setAttribute('stroke', color);
-      cap1.setAttribute('stroke-width', '2.5');
+      cap1.setAttribute('stroke-width', '2.8');
       cap1.setAttribute('stroke-linecap', 'round');
       target.parentNode?.insertBefore(cap1, target.nextSibling);
 
@@ -368,22 +392,49 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
       const cap2 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
       cap2.setAttribute('class', 'arrow-breaker-cap');
       cap2.setAttribute('x1', String(xCut2));
-      cap2.setAttribute('y1', String(midY - 6));
+      cap2.setAttribute('y1', String(midY - 7));
       cap2.setAttribute('x2', String(xCut2));
-      cap2.setAttribute('y2', String(midY + 6));
+      cap2.setAttribute('y2', String(midY + 7));
       cap2.setAttribute('stroke', color);
-      cap2.setAttribute('stroke-width', '2.5');
+      cap2.setAttribute('stroke-width', '2.8');
       cap2.setAttribute('stroke-linecap', 'round');
       target.parentNode?.insertBefore(cap2, target.nextSibling);
 
-      // High-voltage electric arc spark crackling across the gap
-      const zap = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
-      zap.setAttribute('class', 'arrow-zap-spark');
-      zap.setAttribute('d', `M ${xCut1} ${midY} L ${midX - dx * 5} ${midY - 4} L ${midX + dx * 4} ${midY + 5} L ${xCut2} ${midY}`);
-      zap.setAttribute('fill', 'none');
-      zap.setAttribute('stroke', '#67e8f9');
-      zap.setAttribute('stroke-width', '2.2');
-      target.parentNode?.insertBefore(zap, target.nextSibling);
+      // Terminal spark dots on the cut caps
+      const dot1 = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot1.setAttribute('class', 'arrow-zap-spark');
+      dot1.setAttribute('cx', String(xCut1));
+      dot1.setAttribute('cy', String(midY));
+      dot1.setAttribute('r', '2.5');
+      dot1.setAttribute('fill', '#0284c7');
+      target.parentNode?.insertBefore(dot1, target.nextSibling);
+
+      const dot2 = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot2.setAttribute('class', 'arrow-zap-spark');
+      dot2.setAttribute('cx', String(xCut2));
+      dot2.setAttribute('cy', String(midY));
+      dot2.setAttribute('r', '2.5');
+      dot2.setAttribute('fill', '#0284c7');
+      target.parentNode?.insertBefore(dot2, target.nextSibling);
+
+      // High-voltage electric arc sparks crackling across the gap (vivid and bold!)
+      // Upper lightning bolt
+      const zapUpper = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+      zapUpper.setAttribute('class', 'arrow-zap-spark');
+      zapUpper.setAttribute('d', `M ${xCut1} ${midY} L ${midX - dx * 10} ${midY - 8} L ${midX - dx * 2} ${midY - 2} L ${midX + dx * 5} ${midY - 9} L ${xCut2} ${midY}`);
+      zapUpper.setAttribute('fill', 'none');
+      zapUpper.setAttribute('stroke', '#0284c7');
+      zapUpper.setAttribute('stroke-width', '2.8');
+      target.parentNode?.insertBefore(zapUpper, target.nextSibling);
+
+      // Lower lightning bolt
+      const zapLower = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+      zapLower.setAttribute('class', 'arrow-zap-spark');
+      zapLower.setAttribute('d', `M ${xCut1} ${midY} L ${midX - dx * 8} ${midY + 7} L ${midX + dx * 1} ${midY + 2} L ${midX + dx * 9} ${midY + 8} L ${xCut2} ${midY}`);
+      zapLower.setAttribute('fill', 'none');
+      zapLower.setAttribute('stroke', '#0284c7');
+      zapLower.setAttribute('stroke-width', '2.8');
+      target.parentNode?.insertBefore(zapLower, target.nextSibling);
 
       // Central floating broken connection badge
       const xMark = createXMark(doc, midX, midY, color, 'arrow-x-network', 'badge');

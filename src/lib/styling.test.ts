@@ -304,7 +304,9 @@ describe('applyArrowStyles (sequence fixture)', () => {
     });
     const rootSender = parseSvgRoot(outSender);
     expect(rootSender.querySelector('.arrow-x-sender')).toBeTruthy();
-    expect(rootSender.querySelector('.arrow-alarm-ping')).toBeTruthy();
+    expect(rootSender.querySelector('.arrow-barrier-wall')).toBeTruthy();
+    expect(rootSender.querySelector('.arrow-shockwave-burst')).toBeTruthy();
+    expect(rootSender.querySelector('.arrow-sender-burst')).toBeTruthy();
 
     const outNetwork = applyArrowStyles(SEQ_SVG, model, {
       version: 1,

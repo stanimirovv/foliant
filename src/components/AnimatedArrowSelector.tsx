@@ -123,45 +123,54 @@ export default function AnimatedArrowSelector({
                       </>
                     ) : (preset.id === 'broken-network' || preset.id === 'ricochet') ? (
                       <>
-                        {/* Severed gap with electric arc & floating broken connection badge */}
+                        {/* Severed gap with bold dual electric lightning arcs & floating broken connection badge */}
                         <line
                           x1="4"
                           y1="9"
-                          x2="26"
+                          x2="25"
                           y2="9"
                           stroke={previewColor}
                           strokeWidth="2.2"
                           className="arrow-anim-broken-network"
                         />
                         <line
-                          x1="26"
-                          y1="4"
-                          x2="26"
-                          y2="14"
+                          x1="25"
+                          y1="3"
+                          x2="25"
+                          y2="15"
                           stroke={previewColor}
-                          strokeWidth="2"
+                          strokeWidth="2.2"
                           strokeLinecap="round"
                           className="arrow-breaker-cap"
                         />
+                        <circle cx="25" cy="9" r="2" fill="#0284c7" className="arrow-zap-spark" />
                         <path
-                          d="M 26 9 L 31 5 L 37 13 L 42 9"
+                          d="M 25 9 L 30 4 L 37 13 L 43 9"
                           fill="none"
-                          stroke="#67e8f9"
-                          strokeWidth="2"
+                          stroke="#0284c7"
+                          strokeWidth="2.2"
                           className="arrow-zap-spark"
                         />
+                        <path
+                          d="M 25 9 L 31 14 L 38 5 L 43 9"
+                          fill="none"
+                          stroke="#0284c7"
+                          strokeWidth="2.2"
+                          className="arrow-zap-spark"
+                        />
+                        <circle cx="43" cy="9" r="2" fill="#0284c7" className="arrow-zap-spark" />
                         <line
-                          x1="42"
-                          y1="4"
-                          x2="42"
-                          y2="14"
+                          x1="43"
+                          y1="3"
+                          x2="43"
+                          y2="15"
                           stroke={previewColor}
-                          strokeWidth="2"
+                          strokeWidth="2.2"
                           strokeLinecap="round"
                           className="arrow-breaker-cap"
                         />
                         <line
-                          x1="42"
+                          x1="43"
                           y1="9"
                           x2="68"
                           y2="9"
@@ -171,9 +180,9 @@ export default function AnimatedArrowSelector({
                           className="arrow-anim-broken-network"
                         />
                         <g className="arrow-x-mark" transform="translate(34, 9)">
-                          <circle r="6" fill="#ffffff" stroke={previewColor} strokeWidth="1.6" />
-                          <line x1="-2.8" y1="-2.8" x2="2.8" y2="2.8" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
-                          <line x1="-2.8" y1="2.8" x2="2.8" y2="-2.8" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
+                          <circle r="5.5" fill="#ffffff" stroke={previewColor} strokeWidth="1.6" />
+                          <line x1="-2.4" y1="-2.4" x2="2.4" y2="2.4" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
+                          <line x1="-2.4" y1="2.4" x2="2.4" y2="-2.4" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                         </g>
                       </>
                     ) : (preset.id === 'broken-sender' || preset.id === 'stutter') ? (
@@ -188,11 +197,13 @@ export default function AnimatedArrowSelector({
                           markerEnd={`url(#${markerId})`}
                           className="arrow-anim-broken-sender"
                         />
-                        <circle cx="14" cy="9" r="7" fill="none" stroke={previewColor} strokeWidth="1.2" className="arrow-alarm-ping" />
+                        {/* Origin barrier wall and shockwave burst circle at sender (matching receiver) */}
+                        <line x1="4" y1="2" x2="4" y2="16" stroke={previewColor} strokeWidth="2.8" strokeLinecap="round" className="arrow-barrier-wall" />
+                        <circle cx="4" cy="9" r="3" fill="none" stroke={previewColor} strokeWidth="1.8" className="arrow-shockwave-burst" />
                         <g className="arrow-x-mark" transform="translate(14, 9)">
-                          <circle r="5.5" fill="#ef4444" stroke="#ffffff" strokeWidth="1" />
-                          <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" />
-                          <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" />
+                          <circle r="5.5" fill="#ffffff" stroke={previewColor} strokeWidth="1.4" />
+                          <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
+                          <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                         </g>
                       </>
                     ) : (preset.id === 'broken-receiver' || preset.id === 'hesitate') ? (
