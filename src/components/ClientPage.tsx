@@ -8,7 +8,7 @@ import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
@@ -18,6 +18,7 @@ import {
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
   getArrowTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
+  setParticipantKind, toggleActivation, groupParticipants, toggleDiagramOrientation,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
 import { buildSelectionMap } from '@/lib/svgmap';
@@ -931,6 +932,27 @@ export default function ClientPage() {
     applyEditResult(setArrowKeyMode(rawCode, viewsData, selectedArrow.key, mode));
   };
 
+  const handleSetParticipantKind = (kind: 'participant' | 'actor') => {
+    if (!selectedRawElement || selectedRawElement.kind !== 'participant') return;
+    applyEditResult(setParticipantKind(rawCode, viewsData, selectedRawElement.key, kind));
+  };
+
+  const handleToggleActivation = (endpoint: 'target' | 'source', active: boolean) => {
+    if (!selectedRawElement || selectedRawElement.kind !== 'message') return;
+    applyEditResult(toggleActivation(rawCode, viewsData, selectedRawElement.key, endpoint, active));
+  };
+
+  const handleGroupParticipants = (participantKeys: string[], title: string, color?: string) => {
+    applyEditResult(groupParticipants(rawCode, viewsData, participantKeys, title, color));
+  };
+
+  const handleToggleOrientation = () => {
+    const newCode = toggleDiagramOrientation(rawCode);
+    if (newCode !== rawCode) {
+      commitEdit(newCode);
+    }
+  };
+
   const handleRequestDelete = () => {
     if (!selectedRawElement) return;
     const result = deleteElement(rawCode, viewsData, selectedRawElement.key);
@@ -1487,6 +1509,20 @@ export default function ClientPage() {
                   <span>Redo</span>
                 </button>
                 <button
+                  onClick={handleToggleOrientation}
+                  disabled={isVisualLocked || !rawCode}
+                  title="Toggle Diagram Orientation (TD / LR)"
+                  data-testid="toggle-orientation"
+                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                    isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+                  } ${
+                    isVisualLocked || !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
+                  }`}
+                >
+                  <ArrowDownUp size={14} />
+                  <span>Orientation</span>
+                </button>
+                <button
                   onClick={handleCopyMermaid}
                   disabled={!rawCode}
                   title="Copy Mermaid Code"
@@ -1661,6 +1697,9 @@ export default function ClientPage() {
                         onAddTag={handleAddTag}
                         onRemoveTag={handleRemoveTag}
                         onSetKeyMode={handleSetArrowKeyMode}
+                        onSetParticipantKind={handleSetParticipantKind}
+                        onToggleActivation={handleToggleActivation}
+                        onGroupParticipants={handleGroupParticipants}
                         onRequestDelete={handleRequestDelete}
                         onConfirmDelete={handleConfirmDelete}
                         onCancelDelete={handleCancelDelete}
@@ -1701,6 +1740,9 @@ export default function ClientPage() {
                       onAddTag={handleAddTag}
                       onRemoveTag={handleRemoveTag}
                       onSetKeyMode={handleSetArrowKeyMode}
+                      onSetParticipantKind={handleSetParticipantKind}
+                      onToggleActivation={handleToggleActivation}
+                      onGroupParticipants={handleGroupParticipants}
                       onRequestDelete={handleRequestDelete}
                       onConfirmDelete={handleConfirmDelete}
                       onCancelDelete={handleCancelDelete}

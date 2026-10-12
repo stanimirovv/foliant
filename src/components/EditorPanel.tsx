@@ -91,6 +91,9 @@ interface EditorPanelProps {
   onAddTag: (tag: string, targetKey?: string) => void;
   onRemoveTag: (tag: string, targetKey?: string) => void;
   onSetKeyMode: (mode: ArrowKeyMode) => void;
+  onSetParticipantKind?: (kind: 'participant' | 'actor') => void;
+  onToggleActivation?: (endpoint: 'target' | 'source', active: boolean) => void;
+  onGroupParticipants?: (participantKeys: string[], title: string, color?: string) => void;
   onRequestDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
@@ -141,6 +144,9 @@ export default function EditorPanel({
   onAddTag,
   onRemoveTag,
   onSetKeyMode,
+  onSetParticipantKind,
+  onToggleActivation,
+  onGroupParticipants,
   onRequestDelete,
   onConfirmDelete,
   onCancelDelete,
@@ -186,6 +192,7 @@ export default function EditorPanel({
           actorKeys={actorKeys}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
+          onGroupParticipants={onGroupParticipants}
         />
       )}
       {!isMultiSelect && activeElement && isComponent(activeElement) && (
@@ -197,6 +204,7 @@ export default function EditorPanel({
           actorKeys={actorKeys}
           onEditLabel={onEditLabel}
           onSetColor={onSetColor}
+          onSetParticipantKind={onSetParticipantKind}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
           onRequestDelete={onRequestDelete}
@@ -217,6 +225,7 @@ export default function EditorPanel({
           onSetWidth={onSetWidth}
           onSetDash={onSetDash}
           onSetAnimation={onSetAnimation}
+          onToggleActivation={onToggleActivation}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
           onSetKeyMode={onSetKeyMode}
@@ -281,6 +290,7 @@ interface MultiElementFieldsProps {
   actorKeys: string[];
   onAddTag: (tag: string, targetKey?: string) => void;
   onRemoveTag: (tag: string, targetKey?: string) => void;
+  onGroupParticipants?: (participantKeys: string[], title: string, color?: string) => void;
 }
 
 function MultiElementFields({
@@ -289,9 +299,14 @@ function MultiElementFields({
   actorKeys,
   onAddTag,
   onRemoveTag,
+  onGroupParticipants,
 }: MultiElementFieldsProps) {
   const [tagInput, setTagInput] = useState('');
   const [existingTagSelect, setExistingTagSelect] = useState('');
+  const [boxTitle, setBoxTitle] = useState('Group');
+  const [boxColor, setBoxColor] = useState('');
+
+  const participants = elements.filter((el): el is ParticipantElement => el.kind === 'participant');
 
   const submitTag = () => {
     const tag = tagInput.trim();
@@ -316,6 +331,38 @@ function MultiElementFields({
           Hold Shift and click elements in the diagram to add or remove them.
         </p>
       </div>
+
+      {participants.length >= 2 && onGroupParticipants && (
+        <div className="space-y-2 border border-emerald-100 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20 rounded p-2.5">
+          <span className={fieldLabel}>Group into Box ({participants.length} participants)</span>
+          <div className="space-y-1.5">
+            <input
+              type="text"
+              className={fieldInput}
+              placeholder="Box title..."
+              value={boxTitle}
+              onChange={(e) => setBoxTitle(e.target.value)}
+              data-testid="group-box-title"
+            />
+            <input
+              type="text"
+              className={fieldInput}
+              placeholder="Color (e.g. LightBlue, #e0f2fe)"
+              value={boxColor}
+              onChange={(e) => setBoxColor(e.target.value)}
+              data-testid="group-box-color"
+            />
+            <button
+              type="button"
+              data-testid="group-box-button"
+              onClick={() => onGroupParticipants(participants.map(p => p.key), boxTitle, boxColor)}
+              className="w-full py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium transition-colors"
+            >
+              Group into Box
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2 border border-blue-100 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 rounded p-2.5">
         <span className={fieldLabel}>Add tag to all elements</span>
@@ -438,6 +485,7 @@ interface ComponentFieldsProps {
   actorKeys: string[];
   onEditLabel: (newLabel: string) => void;
   onSetColor: (color: string) => void;
+  onSetParticipantKind?: (kind: 'participant' | 'actor') => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
   onRequestDelete: () => void;
@@ -445,7 +493,7 @@ interface ComponentFieldsProps {
 
 function ParticipantFields({
   element, config, actorColors, actorKeys,
-  onEditLabel, onSetColor, onAddTag, onRemoveTag, onRequestDelete,
+  onEditLabel, onSetColor, onSetParticipantKind, onAddTag, onRemoveTag, onRequestDelete,
 }: ComponentFieldsProps) {
   const [tagInput, setTagInput] = useState('');
   const [existingTagSelect, setExistingTagSelect] = useState('');
@@ -482,6 +530,21 @@ function ParticipantFields({
           onChange={(e) => onEditLabel(e.target.value)}
         />
       </label>
+
+      {element.kind === 'participant' && onSetParticipantKind && (
+        <label className="block">
+          <span className={fieldLabel}>Type</span>
+          <select
+            className={fieldInput}
+            data-testid="participant-kind-select"
+            value={element.participantType ?? 'participant'}
+            onChange={(e) => onSetParticipantKind(e.target.value as 'participant' | 'actor')}
+          >
+            <option value="participant">Participant (Box)</option>
+            <option value="actor">Actor (Stick figure)</option>
+          </select>
+        </label>
+      )}
 
       <label className="block">
         <span className={fieldLabel}>Color</span>
@@ -621,6 +684,7 @@ interface ArrowFieldsProps {
   onSetWidth: (width: number | '') => void;
   onSetDash: (dash: Dash) => void;
   onSetAnimation?: (anim: ArrowAnimationType) => void;
+  onToggleActivation?: (endpoint: 'target' | 'source', active: boolean) => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
   onSetKeyMode: (mode: ArrowKeyMode) => void;
@@ -630,7 +694,7 @@ interface ArrowFieldsProps {
 function ArrowFields({
   element, diagramType, arrowStyle, arrowTags, arrowColors, actorKeys,
   onEditLabel, onSetColor, onSetType, onSetWidth, onSetDash, onSetAnimation,
-  onAddTag, onRemoveTag, onSetKeyMode, onRequestDelete,
+  onToggleActivation, onAddTag, onRemoveTag, onSetKeyMode, onRequestDelete,
 }: ArrowFieldsProps) {
   const vocabulary = diagramType === 'flowchart' ? FLOWCHART_OPERATORS : SEQUENCE_OPERATORS;
   const operators = vocabulary.includes(element.operator)
@@ -749,6 +813,32 @@ function ArrowFields({
           {DASH_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
       </label>
+
+      {diagramType === 'sequence' && element.kind === 'message' && onToggleActivation && (
+        <div className="space-y-1.5 pt-2 border-t border-gray-100 dark:border-slate-800">
+          <span className={fieldLabel}>Lifeline Activation</span>
+          <label className="flex items-center space-x-2 text-xs text-gray-700 dark:text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              data-testid="activate-target-checkbox"
+              checked={Boolean(element.activateTarget || element.activation === '+')}
+              onChange={(e) => onToggleActivation('target', e.target.checked)}
+              className="rounded border-gray-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500"
+            />
+            <span>Activate receiver (+)</span>
+          </label>
+          <label className="flex items-center space-x-2 text-xs text-gray-700 dark:text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              data-testid="deactivate-source-checkbox"
+              checked={Boolean(element.deactivateSource || element.activation === '-')}
+              onChange={(e) => onToggleActivation('source', e.target.checked)}
+              className="rounded border-gray-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500"
+            />
+            <span>Deactivate sender (-)</span>
+          </label>
+        </div>
+      )}
 
       {onSetAnimation && (
         <div className="pt-2 border-t border-gray-100 dark:border-slate-800">

@@ -407,5 +407,60 @@ describe('EditorPanel', () => {
     expect(colorToHex(undefined)).toBe('#000000');
     expect(colorToHex('', '#ffffff')).toBe('#ffffff');
   });
+
+  it('dispatches onSetParticipantKind when changing participant type', () => {
+    const onSetParticipantKind = vi.fn();
+    const props = makeProps({
+      element: participantA,
+      onSetParticipantKind,
+    });
+    render(<EditorPanel {...props} />);
+
+    const select = screen.getByTestId('participant-kind-select') as HTMLSelectElement;
+    expect(select.value).toBe('participant');
+    fireEvent.change(select, { target: { value: 'actor' } });
+    expect(onSetParticipantKind).toHaveBeenCalledWith('actor');
+  });
+
+  it('dispatches onToggleActivation for receiver (+) and sender (-)', () => {
+    const onToggleActivation = vi.fn();
+    const props = makeProps({
+      element: message0,
+      diagramType: 'sequence',
+      onToggleActivation,
+    });
+    render(<EditorPanel {...props} />);
+
+    const activateTarget = screen.getByTestId('activate-target-checkbox') as HTMLInputElement;
+    expect(activateTarget.checked).toBe(false);
+    fireEvent.click(activateTarget);
+    expect(onToggleActivation).toHaveBeenCalledWith('target', true);
+
+    const deactivateSource = screen.getByTestId('deactivate-source-checkbox') as HTMLInputElement;
+    expect(deactivateSource.checked).toBe(false);
+    fireEvent.click(deactivateSource);
+    expect(onToggleActivation).toHaveBeenCalledWith('source', true);
+  });
+
+  it('renders box grouping section and dispatches onGroupParticipants when 2+ participants are selected', () => {
+    const onGroupParticipants = vi.fn();
+    const participantB = el(seqModel, 'p:1');
+    const props = makeProps({
+      selectedElements: [participantA, participantB],
+      onGroupParticipants,
+    });
+    render(<EditorPanel {...props} />);
+
+    const titleInput = screen.getByTestId('group-box-title') as HTMLInputElement;
+    expect(titleInput.value).toBe('Group');
+    fireEvent.change(titleInput, { target: { value: 'Core Services' } });
+
+    const colorInput = screen.getByTestId('group-box-color') as HTMLInputElement;
+    fireEvent.change(colorInput, { target: { value: 'LightBlue' } });
+
+    fireEvent.click(screen.getByTestId('group-box-button'));
+    expect(onGroupParticipants).toHaveBeenCalledWith(['p:0', 'p:1'], 'Core Services', 'LightBlue');
+  });
 });
+
 

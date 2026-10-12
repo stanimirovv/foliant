@@ -32,7 +32,7 @@ const UNSUPPORTED = 'Unsupported diagram type (editing supports sequence and flo
 // Verbose line regexes: capture every whitespace segment so rebuilt lines
 // preserve the original spacing byte-for-byte outside the edited span.
 const SEQ_PARTICIPANT_V = /^(\s*)(participant|actor)\s+([A-Za-z0-9_-]+)(?:\s+as\s+(.*))?$/;
-const SEQ_MSG_V = /^(\s*)([A-Za-z0-9_-]+?)(\s*)(-->>|->>|--x|-x|--\)|-\)|-->|->|--|-)(\s*)([A-Za-z0-9_-]+?)(\s*)(?::([ \t]*)(.*))?$/;
+const SEQ_MSG_V = /^(\s*)([A-Za-z0-9_-]+?)(\s*)(-->>|->>|--x|-x|--\)|-\)|-->|->|--|-)([+-]?)(\s*)([A-Za-z0-9_-]+?)(\s*)(?::([ \t]*)(.*))?$/;
 const FC_EDGE_PIPE_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)(${FC_OPS})(\\s*)(\\|([^|]*)\\|)?(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
 const FC_EDGE_TEXT_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)(--|---|-\\.)(\\s+)(.+?)(\\s+)(\\.->|\\.-|${FC_OPS})(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
 const FC_NODE_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
@@ -279,30 +279,30 @@ function flowchartEdgeEndpoints(line: string): { indent: string; fromId: string;
 function rewriteSequenceMessageLabel(line: string, newLabel: string): string | null {
   const m = line.match(SEQ_MSG_V);
   if (!m) return null;
-  const head = `${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}${m[6]}`;
+  const head = `${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}${m[6]}${m[7]}`;
   if (newLabel === '') return head;
-  if (m[9] !== undefined) return `${head}${m[7]}:${m[8]}${newLabel}`;
+  if (m[10] !== undefined) return `${head}${m[8]}:${m[9]}${newLabel}`;
   return `${head}: ${newLabel}`;
 }
 
 // Replace the operator token on a sequence message line, preserving the
-// label and whitespace.
+// label, activation, and whitespace.
 function rewriteSequenceMessageOperator(line: string, operator: string): string | null {
   const m = line.match(SEQ_MSG_V);
   if (!m) return null;
-  const tail = m[9] !== undefined ? `${m[7]}:${m[8]}${m[9]}` : '';
-  return `${m[1]}${m[2]}${m[3]}${operator}${m[5]}${m[6]}${tail}`;
+  const tail = m[10] !== undefined ? `${m[8]}:${m[9]}${m[10]}` : '';
+  return `${m[1]}${m[2]}${m[3]}${operator}${m[5]}${m[6]}${m[7]}${tail}`;
 }
 
 // Replace one endpoint id on a sequence message line ('from' = origin/tail,
-// 'to' = recipient/arrow head), preserving the operator, label and
+// 'to' = recipient/arrow head), preserving the operator, activation, label and
 // whitespace.
 function rewriteSequenceMessageEndpoint(line: string, end: 'from' | 'to', newId: string): string | null {
   const m = line.match(SEQ_MSG_V);
   if (!m) return null;
-  const tail = m[9] !== undefined ? `${m[7]}:${m[8]}${m[9]}` : '';
-  if (end === 'from') return `${m[1]}${newId}${m[3]}${m[4]}${m[5]}${m[6]}${tail}`;
-  return `${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}${newId}${tail}`;
+  const tail = m[10] !== undefined ? `${m[8]}:${m[9]}${m[10]}` : '';
+  if (end === 'from') return `${m[1]}${newId}${m[3]}${m[4]}${m[5]}${m[6]}${m[7]}${tail}`;
+  return `${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}${m[6]}${newId}${tail}`;
 }
 
 export function renameParticipant(code: string, config: DiagramConfig | null, key: string, newAlias: string): EditResult {
@@ -467,6 +467,7 @@ export function addParticipant(
   config: DiagramConfig | null,
   afterKey?: string,
   color?: string,
+  kind: 'participant' | 'actor' = 'participant',
 ): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
@@ -511,11 +512,33 @@ export function addParticipant(
     afterLine = lastParticipant ? lastParticipant.lineEnd : lines.findIndex(l => /^\s*sequenceDiagram\b/.test(l));
   }
   const alias = id === 'New1' ? 'New Participant' : `New Participant ${id.slice(3)}`;
-  lines.splice(afterLine + 1, 0, `    participant ${id} as ${alias}`);
+  lines.splice(afterLine + 1, 0, `    ${kind} ${id} as ${alias}`);
   return {
     code: updateViewsData(lines.join('\n'), newConfig),
     config: newConfig,
   };
+}
+
+export function setParticipantKind(
+  code: string,
+  config: DiagramConfig | null,
+  key: string,
+  kind: 'participant' | 'actor',
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'participant') return fail(code, config, `Element ${key} is not a participant`);
+  if (kind !== 'participant' && kind !== 'actor') return fail(code, config, `Invalid participant kind: ${kind}`);
+
+  const line = code.split('\n')[el.lineStart];
+  const m = line.match(SEQ_PARTICIPANT_V);
+  if (!m) return fail(code, config, `Cannot parse participant line: ${line.trim()}`);
+  if (m[2] === kind) return { code, config };
+
+  const alias = m[4] !== undefined ? ` as ${m[4]}` : '';
+  const newLine = `${m[1]}${kind} ${m[3]}${alias}`;
+  return { code: replaceLines(code, el.lineStart, el.lineEnd, [newLine]), config };
 }
 
 // Where a new message/edge is inserted vertically (sequence diagrams):
@@ -529,30 +552,56 @@ export type MessageInsertPosition =
   | { type: 'before'; key: string }
   | { type: 'after'; key: string };
 
-export function addMessage(
+export function insertMessage(
   code: string,
   config: DiagramConfig | null,
-  fromKey: string,
-  toKey: string,
+  from: string,
+  to: string,
+  label: string = 'New message',
+  type?: string,
   position: MessageInsertPosition = { type: 'bottom' },
+  activation?: { activateTarget?: boolean; deactivateSource?: boolean },
 ): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
   const componentKind = model.type === 'sequence' ? 'participant' : 'node';
-  const fromEl = findElement(model, fromKey);
-  const toEl = findElement(model, toKey);
-  if (!fromEl || fromEl.kind !== componentKind) return fail(code, config, `Unknown ${componentKind} key: ${fromKey}`);
-  if (!toEl || toEl.kind !== componentKind) return fail(code, config, `Unknown ${componentKind} key: ${toKey}`);
+
+  let fromEl = findElement(model, from);
+  if (!fromEl || fromEl.kind !== componentKind) {
+    fromEl = model.elements.find(e => isComponent(e) && e.id === from);
+  }
+  let toEl = findElement(model, to);
+  if (!toEl || toEl.kind !== componentKind) {
+    toEl = model.elements.find(e => isComponent(e) && e.id === to);
+  }
+  if (!fromEl || !isComponent(fromEl)) return fail(code, config, `Unknown ${componentKind} key: ${from}`);
+  if (!toEl || !isComponent(toEl)) return fail(code, config, `Unknown ${componentKind} key: ${to}`);
+
+  const fromId = fromEl.id;
+  const toId = toEl.id;
+  const opType = type ?? (model.type === 'sequence' ? '->>' : '-->');
+
+  let op = opType;
+  let extraLine: string | null = null;
+  if (model.type === 'sequence') {
+    if (activation?.activateTarget && activation?.deactivateSource) {
+      op = `${opType}+`;
+      extraLine = `    deactivate ${fromId}`;
+    } else if (activation?.activateTarget) {
+      op = `${opType}+`;
+    } else if (activation?.deactivateSource) {
+      op = `${opType}-`;
+    }
+  }
 
   const lines = code.split('\n');
   const line = model.type === 'sequence'
-    ? `    ${fromEl.id}->>${toEl.id}: New message`
-    : `    ${fromEl.id} --> ${toEl.id}`;
+    ? (label ? `    ${fromId}${op}${toId}: ${label}` : `    ${fromId}${op}${toId}`)
+    : (label ? `    ${fromId} ${op}|${label}| ${toId}` : `    ${fromId} ${op} ${toId}`);
 
   let insertAt: number;
   switch (position.type) {
     case 'bottom':
-      // Keep a trailing newline last: insert before a trailing empty line.
       insertAt = lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length;
       break;
     case 'before': {
@@ -568,8 +617,6 @@ export function addMessage(
       break;
     }
     case 'top': {
-      // Insert right after the last participant declaration (sequence) or the
-      // type line (flowchart, no participants yet).
       const lastParticipant = [...model.elements].reverse().find(e => e.kind === 'participant');
       insertAt = lastParticipant
         ? lastParticipant.lineEnd + 1
@@ -577,14 +624,31 @@ export function addMessage(
       break;
     }
   }
-  lines.splice(insertAt, 0, line);
+
+  if (extraLine) {
+    lines.splice(insertAt, 0, line, extraLine);
+  } else {
+    lines.splice(insertAt, 0, line);
+  }
+
   const newCode = lines.join('\n');
-  // Report the created element's key so the UI can select it: re-parse and find
-  // the message/edge sitting on the inserted line.
   const created = parseModel(newCode).elements.find(
     e => e.lineStart === insertAt && (e.kind === 'message' || e.kind === 'edge')
   );
   return { code: newCode, config, newKey: created?.key };
+}
+
+export function addMessage(
+  code: string,
+  config: DiagramConfig | null,
+  fromKey: string,
+  toKey: string,
+  position: MessageInsertPosition = { type: 'bottom' },
+): EditResult {
+  const model = parseModel(code);
+  const defaultOp = model.type === 'sequence' ? '->>' : '-->';
+  const defaultLabel = model.type === 'sequence' ? 'New message' : '';
+  return insertMessage(code, config, fromKey, toKey, defaultLabel, defaultOp, position);
 }
 
 // Move a message to a new position among the messages (sequence diagrams only).
@@ -1317,4 +1381,159 @@ export function convertDiagramToAnimatedArrows(
     code: updateViewsData(code, newConfig),
     config: newConfig,
   };
+}
+
+export function toggleActivation(
+  code: string,
+  config: DiagramConfig | null,
+  messageKey: string,
+  endpoint: 'target' | 'source',
+  active: boolean,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, messageKey);
+  if (!el || el.kind !== 'message') return fail(code, config, `Element ${messageKey} is not a message`);
+
+  const lines = code.split('\n');
+  const line = lines[el.lineStart];
+  const m = line.match(SEQ_MSG_V);
+  if (!m) return fail(code, config, `Cannot parse message line: ${line.trim()}`);
+
+  const indent = m[1];
+  const from = m[2];
+  const wsBeforeOp = m[3];
+  const op = m[4];
+  const currAct = m[5]; // '+', '-', or ''
+  const wsAfterOp = m[6];
+  const to = m[7];
+  const tail = m[10] !== undefined ? `${m[8]}:${m[9]}${m[10]}` : '';
+
+  const nextLineIdx = el.lineStart + 1;
+  const nextLine = nextLineIdx < lines.length ? lines[nextLineIdx] : null;
+  const hasNextActivateTo = nextLine !== null && new RegExp(`^\\s*activate\\s+${to}\\s*$`).test(nextLine);
+  const hasNextDeactivateFrom = nextLine !== null && new RegExp(`^\\s*deactivate\\s+${from}\\s*$`).test(nextLine);
+
+  if (endpoint === 'target') {
+    if (active) {
+      if (currAct === '+' || hasNextActivateTo) return { code, config };
+      if (currAct === '') {
+        lines[el.lineStart] = `${indent}${from}${wsBeforeOp}${op}+${wsAfterOp}${to}${tail}`;
+        return { code: lines.join('\n'), config };
+      }
+      lines.splice(nextLineIdx, 0, `${indent}activate ${to}`);
+      return { code: lines.join('\n'), config };
+    } else {
+      let changed = false;
+      if (currAct === '+') {
+        lines[el.lineStart] = `${indent}${from}${wsBeforeOp}${op}${wsAfterOp}${to}${tail}`;
+        changed = true;
+      }
+      if (hasNextActivateTo) {
+        lines.splice(nextLineIdx, 1);
+        changed = true;
+      }
+      if (!changed) return { code, config };
+      return { code: lines.join('\n'), config };
+    }
+  } else {
+    if (active) {
+      if (currAct === '-' || hasNextDeactivateFrom) return { code, config };
+      if (currAct === '') {
+        lines[el.lineStart] = `${indent}${from}${wsBeforeOp}${op}-${wsAfterOp}${to}${tail}`;
+        return { code: lines.join('\n'), config };
+      }
+      lines.splice(nextLineIdx, 0, `${indent}deactivate ${from}`);
+      return { code: lines.join('\n'), config };
+    } else {
+      let changed = false;
+      if (currAct === '-') {
+        lines[el.lineStart] = `${indent}${from}${wsBeforeOp}${op}${wsAfterOp}${to}${tail}`;
+        changed = true;
+      }
+      if (hasNextDeactivateFrom) {
+        lines.splice(nextLineIdx, 1);
+        changed = true;
+      }
+      if (!changed) return { code, config };
+      return { code: lines.join('\n'), config };
+    }
+  }
+}
+
+export function groupParticipants(
+  code: string,
+  config: DiagramConfig | null,
+  participantKeys: string[],
+  title: string,
+  color?: string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  if (participantKeys.length < 2) {
+    return fail(code, config, 'At least two participants must be selected to create a box group');
+  }
+
+  const elements = participantKeys.map(k => findElement(model, k));
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el || el.kind !== 'participant') {
+      return fail(code, config, `Unknown or non-participant key: ${participantKeys[i]}`);
+    }
+  }
+
+  const validElements = elements as ParticipantElement[];
+  validElements.sort((a, b) => a.lineStart - b.lineStart);
+
+  const lines = code.split('\n');
+  const targetIndices = new Set(validElements.map(e => e.lineStart));
+  const participantLines = validElements.map(e => lines[e.lineStart]);
+
+  const indentMatch = participantLines[0].match(/^(\s*)/);
+  const baseIndent = indentMatch ? indentMatch[1] : '    ';
+  const innerIndent = `${baseIndent}    `;
+
+  const boxHeader = color && color.trim()
+    ? `${baseIndent}box ${color.trim()} ${title.trim()}`
+    : `${baseIndent}box ${title.trim()}`;
+  const boxEnd = `${baseIndent}end`;
+
+  const boxedLines = [
+    boxHeader,
+    ...participantLines.map(l => `${innerIndent}${l.trim()}`),
+    boxEnd,
+  ];
+
+  const firstLineIdx = validElements[0].lineStart;
+  const newLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (i === firstLineIdx) {
+      newLines.push(...boxedLines);
+    } else if (targetIndices.has(i)) {
+      continue;
+    } else {
+      newLines.push(lines[i]);
+    }
+  }
+
+  return {
+    code: newLines.join('\n'),
+    config,
+  };
+}
+
+export function toggleDiagramOrientation(code: string): string {
+  const regex = /^(\s*(?:flowchart|graph)\s+)(TD|TB|LR|RL|BT)\b/im;
+  const match = code.match(regex);
+  if (match) {
+    const currentDir = match[2].toUpperCase();
+    const newDir = (currentDir === 'TD' || currentDir === 'TB' || currentDir === 'BT') ? 'LR' : 'TD';
+    return code.replace(regex, `$1${newDir}`);
+  }
+  const bareRegex = /^(\s*(?:flowchart|graph))(\s*$)/im;
+  if (bareRegex.test(code)) {
+    return code.replace(bareRegex, '$1 LR');
+  }
+  return code;
 }

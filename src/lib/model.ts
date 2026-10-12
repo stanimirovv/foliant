@@ -16,6 +16,7 @@ export interface ParticipantElement extends BaseElement {
   kind: 'participant';
   id: string;
   alias?: string;
+  participantType?: 'participant' | 'actor';
 }
 
 export interface MessageElement extends BaseElement {
@@ -24,6 +25,9 @@ export interface MessageElement extends BaseElement {
   to: string;
   operator: string;
   label?: string;
+  activation?: '+' | '-';
+  activateTarget?: boolean;
+  deactivateSource?: boolean;
 }
 
 export interface NoteElement extends BaseElement {
@@ -84,10 +88,10 @@ const CONFIG_LINE_RE = /^%% (?:CONFIG|VIEWS): /;
 const REGION_START_RE = /^%%\s*@region-start:\s*([a-zA-Z0-9_-]+)(?:=([a-zA-Z0-9_-]+))?/;
 
 // Sequence diagrams
-const PARTICIPANT_RE = new RegExp(`^(\\s*)(?:participant|actor)\\s+(${ID})(?:\\s+as\\s+(.*))?$`);
+const PARTICIPANT_RE = new RegExp(`^(\\s*)(participant|actor)\\s+(${ID})(?:\\s+as\\s+(.*))?$`);
 const NOTE_RE = new RegExp(`^\\s*Note\\s+(over|left of|right of)\\s+(${ID}(?:\\s*,\\s*${ID})*)\\s*:\\s*(.*)$`);
-// Full operator set of Section 4.8, including bare `-` / `--` lines.
-const MESSAGE_RE = new RegExp(`^\\s*([A-Za-z0-9_-]+?)\\s*(-->>|->>|--x|-x|--\\)|-\\)|-->|->|--|-)\\s*([A-Za-z0-9_-]+?)(?:\\s*:\\s*(.*))?$`);
+// Full operator set of Section 4.8, including bare `-` / `--` lines and activation +/-.
+const MESSAGE_RE = new RegExp(`^\\s*([A-Za-z0-9_-]+?)\\s*(-->>|->>|--x|-x|--\\)|-\\)|-->|->|--|-)([+-]?)\\s*([A-Za-z0-9_-]+?)(?:\\s*:\\s*(.*))?$`);
 
 // Blocks (both diagram types). `box` is emitted by transformActors in
 // processed sequence code, so it must be tracked for end-matching.
@@ -224,12 +228,13 @@ export function parseModel(code: string): DiagramModel {
     if (type === 'sequence') {
       const participant = line.match(PARTICIPANT_RE);
       if (participant) {
-        const alias = participant[3] ? participant[3].trim() : undefined;
+        const alias = participant[4] ? participant[4].trim() : undefined;
         elements.push({
           key: nextKey('p'),
           kind: 'participant',
-          id: participant[2],
-          alias,
+          id: participant[3],
+          ...(alias !== undefined ? { alias } : {}),
+          ...(participant[2] === 'actor' ? { participantType: 'actor' } : {}),
           lineStart: i,
           lineEnd: i,
         });
@@ -254,14 +259,28 @@ export function parseModel(code: string): DiagramModel {
 
       const message = line.match(MESSAGE_RE);
       if (message) {
-        const label = message[4] !== undefined && message[4] !== '' ? message[4] : undefined;
+        const label = message[5] !== undefined && message[5] !== '' ? message[5] : undefined;
+        const activation = (message[3] === '+' || message[3] === '-') ? (message[3] as '+' | '-') : undefined;
+        let activateTarget = activation === '+';
+        let deactivateSource = activation === '-';
+
+        // Check if immediately following line is `activate <to>` or `deactivate <from>`
+        if (i + 1 < lines.length) {
+          const nextTrimmed = lines[i + 1].trim();
+          if (nextTrimmed === `activate ${message[4]}`) activateTarget = true;
+          if (nextTrimmed === `deactivate ${message[1]}`) deactivateSource = true;
+        }
+
         elements.push({
           key: nextKey('m'),
           kind: 'message',
           from: message[1],
-          to: message[3],
+          to: message[4],
           operator: message[2],
-          label,
+          ...(label !== undefined ? { label } : {}),
+          ...(activation !== undefined ? { activation } : {}),
+          ...(activateTarget ? { activateTarget: true } : {}),
+          ...(deactivateSource ? { deactivateSource: true } : {}),
           lineStart: i,
           lineEnd: i,
         });

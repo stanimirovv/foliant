@@ -1837,6 +1837,83 @@ sequenceDiagram
     expect(createObjectURLSpy).toHaveBeenCalled();
     expect(revokeObjectURLSpy).toHaveBeenCalled();
   });
+
+  it('toggles diagram orientation via toolbar button', async () => {
+    const FLOW_DEMO = `flowchart TD\n    A[Alice] --> B[Bob]`;
+    const viewer = await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+    expect(viewer.getAttribute('data-code')).toContain('flowchart TD');
+
+    const toggleBtn = screen.getByTestId('toggle-orientation');
+    fireEvent.click(toggleBtn);
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('flowchart LR');
+    });
+
+    fireEvent.click(toggleBtn);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('flowchart TD');
+    });
+  });
+
+  it('toggles participant type between participant and actor', async () => {
+    const viewer = await renderInEditMode(DEMO, 'participant A as Alice');
+    expect(viewer.getAttribute('data-code')).toContain('participant A as Alice');
+
+    // Select participant A
+    fireEvent.click(screen.getByTestId('select-p:0'));
+
+    const kindSelect = await screen.findByTestId('participant-kind-select');
+    expect((kindSelect as HTMLSelectElement).value).toBe('participant');
+
+    fireEvent.change(kindSelect, { target: { value: 'actor' } });
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('actor A as Alice');
+    });
+  });
+
+  it('toggles message activation for receiver and sender', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+
+    // Select message m:0
+    fireEvent.click(screen.getByTestId('select-m:0'));
+
+    const activateTarget = await screen.findByTestId('activate-target-checkbox');
+    fireEvent.click(activateTarget);
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>+B: Hello');
+    });
+
+    const deactivateSource = screen.getByTestId('deactivate-source-checkbox');
+    fireEvent.click(deactivateSource);
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('deactivate A');
+    });
+  });
+
+  it('groups multiple participants into a box block', async () => {
+    const viewer = await renderInEditMode(DEMO, 'participant A as Alice');
+
+    // Shift-click participant A (p:0) then B (p:1)
+    fireEvent.click(screen.getByTestId('select-p:0'), { shiftKey: true });
+    fireEvent.click(screen.getByTestId('select-p:1'), { shiftKey: true });
+
+    const groupBoxBtn = await screen.findByTestId('group-box-button');
+    const titleInput = screen.getByTestId('group-box-title');
+    fireEvent.change(titleInput, { target: { value: 'Auth Services' } });
+
+    fireEvent.click(groupBoxBtn);
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') || '';
+      expect(code).toContain('box Auth Services');
+      expect(code).toContain('end');
+    });
+  });
 });
 
 

@@ -4,6 +4,7 @@ import {
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
   getArrowTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
+  setParticipantKind, toggleActivation, groupParticipants, toggleDiagramOrientation, insertMessage,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
@@ -1763,3 +1764,167 @@ describe('soft-fail on a broken diagram (NFR-01, Step 13)', () => {
     expect(multiline.code).toBe(BROKEN);
   });
 });
+
+describe('setParticipantKind', () => {
+  it('toggles participant to actor in sequence diagram', () => {
+    const code = `sequenceDiagram\n    participant A as Alice\n    participant B as Bob`;
+    const res = setParticipantKind(code, null, 'p:0', 'actor');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    actor A as Alice\n    participant B as Bob`);
+  });
+
+  it('toggles actor to participant', () => {
+    const code = `sequenceDiagram\n    actor A as Alice\n    participant B as Bob`;
+    const res = setParticipantKind(code, null, 'p:0', 'participant');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    participant A as Alice\n    participant B as Bob`);
+  });
+
+  it('is a no-op when already same kind', () => {
+    const code = `sequenceDiagram\n    actor A as Alice`;
+    const res = setParticipantKind(code, null, 'p:0', 'actor');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(code);
+  });
+
+  it('fails gracefully for flowchart diagrams', () => {
+    const res = setParticipantKind(FLOW, FLOW_CFG, 'n:0', 'actor');
+    expect(res.warning).toBe('Unsupported diagram type (editing supports sequence and flowchart diagrams)');
+  });
+});
+
+describe('addParticipant with kind', () => {
+  it('adds actor participant when kind is actor', () => {
+    const code = `sequenceDiagram\n    participant A as Alice`;
+    const res = addParticipant(code, null, undefined, undefined, 'actor');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('    actor New1 as New Participant');
+  });
+});
+
+describe('toggleActivation', () => {
+  it('activates target endpoint by adding + to sequence message operator', () => {
+    const code = `sequenceDiagram\n    A->>B: Request`;
+    const res = toggleActivation(code, null, 'm:0', 'target', true);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    A->>+B: Request`);
+  });
+
+  it('deactivates target endpoint by removing + from operator', () => {
+    const code = `sequenceDiagram\n    A->>+B: Request`;
+    const res = toggleActivation(code, null, 'm:0', 'target', false);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    A->>B: Request`);
+  });
+
+  it('deactivates source endpoint by adding - to sequence message operator', () => {
+    const code = `sequenceDiagram\n    B-->>A: Response`;
+    const res = toggleActivation(code, null, 'm:0', 'source', true);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    B-->>-A: Response`);
+  });
+
+  it('removes - when deactivating source endpoint is set to false', () => {
+    const code = `sequenceDiagram\n    B-->>-A: Response`;
+    const res = toggleActivation(code, null, 'm:0', 'source', false);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    B-->>A: Response`);
+  });
+
+  it('inserts activate line when target activated on message that already deactivates source', () => {
+    const code = `sequenceDiagram\n    B-->>-A: Response`;
+    const res = toggleActivation(code, null, 'm:0', 'target', true);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    B-->>-A: Response\n    activate A`);
+  });
+
+  it('inserts deactivate line when source deactivated on message that already activates target', () => {
+    const code = `sequenceDiagram\n    A->>+B: Request`;
+    const res = toggleActivation(code, null, 'm:0', 'source', true);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    A->>+B: Request\n    deactivate A`);
+  });
+
+  it('removes inserted activate/deactivate line when toggled to false', () => {
+    const code = `sequenceDiagram\n    B-->>-A: Response\n    activate A`;
+    const res = toggleActivation(code, null, 'm:0', 'target', false);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    B-->>-A: Response`);
+  });
+});
+
+describe('groupParticipants', () => {
+  it('wraps multiple participants inside a box block with color and title', () => {
+    const code = `sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    participant C as Charlie\n    A->>B: Hi`;
+    const res = groupParticipants(code, null, ['p:0', 'p:1'], 'Auth Services', 'rgba(0,100,255,0.1)');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('box rgba(0,100,255,0.1) Auth Services');
+    expect(res.code).toContain('    participant A as Alice');
+    expect(res.code).toContain('    participant B as Bob');
+    expect(res.code).toContain('end');
+    expect(res.code).toContain('participant C as Charlie');
+  });
+
+  it('wraps multiple participants inside a box block without color', () => {
+    const code = `sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: Hi`;
+    const res = groupParticipants(code, null, ['p:0', 'p:1'], 'Core');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('box Core');
+    expect(res.code).toContain('    participant A as Alice');
+    expect(res.code).toContain('    participant B as Bob');
+    expect(res.code).toContain('end');
+  });
+
+  it('fails when fewer than 2 participants are provided', () => {
+    const code = `sequenceDiagram\n    participant A as Alice`;
+    const res = groupParticipants(code, null, ['p:0'], 'Core');
+    expect(res.warning).toBe('At least two participants must be selected to create a box group');
+  });
+});
+
+describe('toggleDiagramOrientation', () => {
+  it('toggles flowchart TD to LR', () => {
+    const res = toggleDiagramOrientation('flowchart TD\n    A --> B');
+    expect(res).toBe('flowchart LR\n    A --> B');
+  });
+
+  it('toggles flowchart LR to TD', () => {
+    const res = toggleDiagramOrientation('flowchart LR\n    A --> B');
+    expect(res).toBe('flowchart TD\n    A --> B');
+  });
+
+  it('toggles graph TB to LR', () => {
+    const res = toggleDiagramOrientation('graph TB\n    A --> B');
+    expect(res).toBe('graph LR\n    A --> B');
+  });
+
+  it('is a no-op for sequence diagrams', () => {
+    const seq = 'sequenceDiagram\n    A->>B: Hi';
+    const res = toggleDiagramOrientation(seq);
+    expect(res).toBe(seq);
+  });
+});
+
+describe('insertMessage', () => {
+  it('inserts message at bottom by default', () => {
+    const code = `sequenceDiagram\n    participant A\n    participant B\n    A->>B: One`;
+    const res = insertMessage(code, null, 'p:0', 'p:1', 'Two');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    participant A\n    participant B\n    A->>B: One\n    A->>B: Two`);
+  });
+
+  it('inserts message with target activation (+)', () => {
+    const code = `sequenceDiagram\n    participant A\n    participant B`;
+    const res = insertMessage(code, null, 'p:0', 'p:1', 'Call', '->>', { type: 'bottom' }, { activateTarget: true });
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('A->>+B: Call');
+  });
+
+  it('inserts message with deactivate source (-)', () => {
+    const code = `sequenceDiagram\n    participant A\n    participant B`;
+    const res = insertMessage(code, null, 'p:0', 'p:1', 'Return', '-->>', { type: 'bottom' }, { deactivateSource: true });
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('A-->>-B: Return');
+  });
+});
+

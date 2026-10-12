@@ -214,7 +214,7 @@ function endpointHitAt(
 
 // Draggable/movable SVG elements, keyed by a stable id so the same element can
 // be found across renders: participants (top boxes, lifelines, bottom boxes,
-// bottom actor men) and flowchart nodes.
+// bottom actor men), flowchart nodes, and sequence messages.
 function movableElementsOf(svg: Element): Map<string, Element> {
   const map = new Map<string, Element>();
   const add = (key: string, el: Element) => { if (!map.has(key)) map.set(key, el); };
@@ -239,6 +239,21 @@ function movableElementsOf(svg: Element): Map<string, Element> {
     const nodeId = svgId ? flowchartNodeIdOf(svgId) : null;
     if (nodeId) add(`node:${nodeId}`, el);
   });
+  const messageElements = Array.from(svg.querySelectorAll('[data-et="message"]'));
+  const messageTexts = Array.from(svg.querySelectorAll('text.messageText'));
+  const occurrences = new Map<string, number>();
+  messageElements.forEach((el, i) => {
+    const from = el.getAttribute('data-from') ?? '';
+    const to = el.getAttribute('data-to') ?? '';
+    const textEl = messageTexts[i] ?? null;
+    const text = textEl?.textContent?.trim() ?? '';
+    const occKey = `${from}->${to}:${text}`;
+    const occ = occurrences.get(occKey) ?? 0;
+    occurrences.set(occKey, occ + 1);
+    const key = `msg:${occKey}:${occ}`;
+    add(`${key}:line`, el);
+    if (textEl) add(`${key}:text`, textEl);
+  });
   return map;
 }
 
@@ -260,7 +275,7 @@ function captureMovableSnapshot(svg: Element | null): MovableSnapshot | null {
   const nodeIds = new Set<string>();
   elements.forEach((_, key) => {
     if (key.startsWith('node:')) nodeIds.add(key.slice(5));
-    else participantIds.add(key.slice(key.indexOf(':') + 1));
+    else if (!key.startsWith('msg:')) participantIds.add(key.slice(key.indexOf(':') + 1));
   });
   return { positions, participantIds, nodeIds };
 }
@@ -314,21 +329,38 @@ function animateMovedElements(svg: Element, prevPositions: Map<string, { x: numb
   // jsdom has no Web Animations API; skip silently there.
   if (typeof (Element.prototype as unknown as { animate?: unknown }).animate !== 'function') return;
   const scale = contentScaleOf(svg);
-  movableElementsOf(svg).forEach((el, key) => {
+  const currentElements = movableElementsOf(svg);
+  currentElements.forEach((el, key) => {
     const prev = prevPositions.get(key);
-    if (!prev) return;
-    const r = el.getBoundingClientRect();
-    const dx = (prev.x - r.left) / scale;
-    const dy = (prev.y - r.top) / scale;
-    if (Math.abs(dx) + Math.abs(dy) < 2) return; // did not move
-    const base = baseTranslateOf(el);
-    el.animate(
-      [
-        { transform: `translate(${base.x + dx}px, ${base.y + dy}px)` },
-        { transform: `translate(${base.x}px, ${base.y}px)` },
-      ],
-      { duration: 400, easing: 'ease-out' },
-    );
+    if (prev) {
+      const r = el.getBoundingClientRect();
+      const dx = (prev.x - r.left) / scale;
+      const dy = (prev.y - r.top) / scale;
+      if (Math.abs(dx) + Math.abs(dy) < 2) return; // did not move
+      const base = baseTranslateOf(el);
+      const isMsg = key.startsWith('msg:');
+      el.animate(
+        [
+          { transform: `translate(${base.x + dx}px, ${base.y + dy}px)` },
+          { transform: `translate(${base.x}px, ${base.y}px)` },
+        ],
+        isMsg
+          ? { duration: 350, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+          : { duration: 400, easing: 'ease-out' },
+      );
+    } else if (key.startsWith('msg:')) {
+      el.animate(
+        [
+          { opacity: 0, transform: 'scaleY(0.7)' },
+          { opacity: 1, transform: 'scaleY(1)' },
+        ],
+        { duration: 300, easing: 'ease-out' },
+      );
+      el.classList.add('new-message-accent-pulse');
+      setTimeout(() => {
+        el.classList.remove('new-message-accent-pulse');
+      }, 4000);
+    }
   });
 }
 
@@ -354,6 +386,7 @@ export default function DiagramViewer({
   const [svgStr, setSvgStr] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [dragOverlay, setDragOverlay] = useState<DragOverlay | null>(null);
+  const [hoverLifeline, setHoverLifeline] = useState<{ x: number; y: number; participantKey: string; participantId: string } | null>(null);
 
   // In edit mode, dragging a participant (sequence) or a node (flowchart)
   // must not pan the screen — exclude those elements from TransformWrapper
@@ -469,6 +502,16 @@ export default function DiagramViewer({
     return [selection];
   }, [selection]);
 
+  const selectedEndpoints = useMemo(() => {
+    if (!editMode || isVisualLocked || !isSequenceDiagram || selectedProcessedKeys.length !== 1) return null;
+    const container = document.getElementById('diagram-container');
+    const svgRoot = container?.querySelector('svg');
+    if (!svgRoot) return null;
+    const model = parseModel(code);
+    const eps = getMessageEndpointScreenInfo(svgRoot, model);
+    return eps.find(ep => ep.key === selectedProcessedKeys[0]) ?? null;
+  }, [editMode, isVisualLocked, isSequenceDiagram, selectedProcessedKeys, code, svgStr]);
+
   // Selection highlight: re-applied after every render via the zip (plan 4.7).
   // Coexists with the search highlight (different elements/properties).
   useEffect(() => {
@@ -514,6 +557,39 @@ export default function DiagramViewer({
     const svgRoot = container?.querySelector('svg');
     if (!svgRoot) return null;
     return { svgRoot, model: parseModel(code) };
+  };
+
+  const handleContainerMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!editMode || isVisualLocked || !isSequenceDiagram || dragRef.current?.isDragging) {
+      if (hoverLifeline) setHoverLifeline(null);
+      return;
+    }
+    const ctx = getSvgAndModel();
+    if (!ctx || ctx.model.type !== 'sequence') return;
+    const participants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
+    const nearest = nearestParticipantAtX(participants, e.clientX);
+    if (
+      nearest &&
+      Math.abs(nearest.centerX - e.clientX) < LIFELINE_HIT_THRESHOLD &&
+      e.clientY > nearest.bottom
+    ) {
+      const svgRect = ctx.svgRoot.getBoundingClientRect();
+      if (e.clientY < svgRect.bottom) {
+        const pEl = ctx.model.elements.find(
+          e2 => e2.kind === 'participant' && (e2 as ParticipantElement).id === nearest.id
+        );
+        if (pEl) {
+          setHoverLifeline({
+            x: nearest.centerX,
+            y: e.clientY,
+            participantKey: pEl.key,
+            participantId: nearest.id,
+          });
+          return;
+        }
+      }
+    }
+    if (hoverLifeline) setHoverLifeline(null);
   };
 
   // Capture phase: stopPropagation prevents TransformWrapper from starting a
@@ -639,6 +715,7 @@ export default function DiagramViewer({
       endpointFixedY: endpointHit ? endpointHit.fixedY : 0,
     };
     suppressClickRef.current = false;
+    setHoverLifeline(null);
 
     // Select the participant/node (or the grabbed message) on press.
     onSelect(participantKey);
@@ -904,7 +981,12 @@ export default function DiagramViewer({
       insertX1: insX1,
       insertX2: insX2,
       hasTarget: validTarget !== null,
-      targetRect: null,
+      targetRect: validTarget ? {
+        left: validTarget.left - 4,
+        top: validTarget.top - 4,
+        width: validTarget.right - validTarget.left + 8,
+        height: validTarget.bottom - validTarget.top + 8,
+      } : null,
     };
   };
 
@@ -931,6 +1013,7 @@ export default function DiagramViewer({
       dragRef.current = null;
       screenCacheRef.current = null;
       setDragOverlay(null);
+      setHoverLifeline(null);
       if (!drag.isDragging) {
         // A plain click: let the click handler manage selection.
         return;
@@ -1035,6 +1118,8 @@ export default function DiagramViewer({
         className={`w-full h-full ${editMode ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
         onClick={handleDiagramClick}
         onMouseDownCapture={handleMouseDownCapture}
+        onMouseMove={handleContainerMouseMove}
+        onMouseLeave={() => setHoverLifeline(null)}
       >
         <TransformWrapper
           panning={{ excluded: panExclusions }}
@@ -1072,6 +1157,68 @@ export default function DiagramViewer({
           </TransformComponent>
         </TransformWrapper>
       </div>
+      {hoverLifeline && !dragOverlay && (
+        <svg
+          data-testid="lifeline-hover-overlay"
+          className="fixed inset-0 pointer-events-none z-30"
+          style={{ width: '100vw', height: '100vh', overflow: 'visible' }}
+        >
+          <circle
+            data-testid="lifeline-hover-handle"
+            cx={hoverLifeline.x}
+            cy={hoverLifeline.y}
+            r={6}
+            fill="#3b82f6"
+            stroke="#ffffff"
+            strokeWidth={2}
+            className="drop-shadow-md animate-pulse"
+          />
+        </svg>
+      )}
+      {selectedEndpoints && !dragOverlay && (
+        <svg
+          data-testid="selected-message-handles"
+          className="fixed inset-0 pointer-events-none z-30"
+          style={{ width: '100vw', height: '100vh', overflow: 'visible' }}
+        >
+          <circle
+            data-testid="message-tail-handle"
+            cx={selectedEndpoints.fromX}
+            cy={selectedEndpoints.fromY}
+            r={5}
+            fill="#3b82f6"
+            stroke="#ffffff"
+            strokeWidth={2}
+            className="drop-shadow cursor-grab"
+          />
+          <circle
+            data-testid="message-head-handle"
+            cx={selectedEndpoints.toX}
+            cy={selectedEndpoints.toY}
+            r={5}
+            fill="#10b981"
+            stroke="#ffffff"
+            strokeWidth={2}
+            className="drop-shadow cursor-grab"
+          />
+        </svg>
+      )}
+      <style>{`
+        @keyframes accentPulseGlow {
+          0% {
+            filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.9)) drop-shadow(0 0 12px rgba(6, 182, 212, 0.8));
+          }
+          30% {
+            filter: drop-shadow(0 0 10px rgba(16, 185, 129, 1)) drop-shadow(0 0 18px rgba(6, 182, 212, 0.9));
+          }
+          100% {
+            filter: drop-shadow(0 0 0px transparent);
+          }
+        }
+        .new-message-accent-pulse {
+          animation: accentPulseGlow 3.5s ease-out forwards;
+        }
+      `}</style>
       {dragOverlay && (
         <svg
           data-testid="drag-overlay"
@@ -1104,6 +1251,20 @@ export default function DiagramViewer({
           )}
           {dragOverlay.type === 'message' && (
             <>
+              {dragOverlay.targetRect && (
+                <rect
+                  data-testid="target-lifeline-snap-rect"
+                  x={dragOverlay.targetRect.left}
+                  y={dragOverlay.targetRect.top}
+                  width={dragOverlay.targetRect.width}
+                  height={dragOverlay.targetRect.height}
+                  fill="none"
+                  stroke="#22c55e"
+                  strokeWidth={2}
+                  strokeDasharray="4 3"
+                  rx={4}
+                />
+              )}
               <line
                 data-testid="message-drag-line"
                 x1={dragOverlay.lineX1}
