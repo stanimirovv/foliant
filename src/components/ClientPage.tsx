@@ -6,7 +6,7 @@ import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
 import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
-import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
+import { processMermaid, transformActors, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
@@ -213,7 +213,26 @@ export default function ClientPage() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
-  const toggleHiddenPath = (path: string) => toggleSetParam('hidden', path, hiddenPaths);
+  const toggleHiddenPath = (path: string) => {
+    const newSet = new Set(hiddenPaths);
+    if (isPathHidden(path, newSet)) {
+      newSet.delete(path);
+      const segments = path.split('/');
+      newSet.delete(segments[segments.length - 1]);
+      for (let i = 1; i < segments.length; i++) {
+        newSet.delete(segments.slice(i).join('/'));
+      }
+    } else {
+      newSet.add(path);
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    if (newSet.size > 0) {
+      params.set('hidden', Array.from(newSet).join(','));
+    } else {
+      params.delete('hidden');
+    }
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
 
   const setActorState = (type: 'color' | 'key', id: string, state: 'on' | 'off' | 'merged' | 'merged_clean') => {
     const params = new URLSearchParams(searchParams.toString());
@@ -443,7 +462,7 @@ export default function ClientPage() {
     const actorTransformed = transformActors(debouncedCode, viewsData, actorOptions);
 
     return processMermaid(actorTransformed, {
-      isRegionVisible: (region) => !hiddenPaths.has(region.path)
+      isRegionVisible: (region) => !isPathHidden(region.path, hiddenPaths)
     });
   }, [debouncedCode, hiddenPaths, viewsData, actorOptions]);
 
@@ -576,7 +595,7 @@ export default function ClientPage() {
       {
         config: viewsData,
         actorOptions,
-        isRegionVisible: (region) => !hiddenPaths.has(region.path),
+        isRegionVisible: (region) => !isPathHidden(region.path, hiddenPaths),
       },
     ));
   };
@@ -658,7 +677,7 @@ export default function ClientPage() {
       const config = parseViewsData(newCode);
       const transformed = transformActors(newCode, config, actorOptions);
       const processed = processMermaid(transformed, {
-        isRegionVisible: (region) => !hiddenPaths.has(region.path),
+        isRegionVisible: (region) => !isPathHidden(region.path, hiddenPaths),
       });
       if (typeof mermaid !== 'undefined' && mermaid.parse) {
         await mermaid.parse(processed.code);
@@ -1043,7 +1062,13 @@ export default function ClientPage() {
 
     const newView: SavedView = {
       name,
-      hiddenPaths: Array.from(hiddenPaths)
+      hiddenPaths: Array.from(hiddenPaths),
+      ...(mergeColors.size > 0 && { mergeColors: Array.from(mergeColors) }),
+      ...(mergeCleanColors.size > 0 && { mergeCleanColors: Array.from(mergeCleanColors) }),
+      ...(hideColors.size > 0 && { hideColors: Array.from(hideColors) }),
+      ...(mergeKeys.size > 0 && { mergeKeys: Array.from(mergeKeys) }),
+      ...(mergeCleanKeys.size > 0 && { mergeCleanKeys: Array.from(mergeCleanKeys) }),
+      ...(hideKeys.size > 0 && { hideKeys: Array.from(hideKeys) }),
     };
 
     if (existingIndex >= 0) {
@@ -1094,11 +1119,36 @@ export default function ClientPage() {
 
   const loadView = (view: SavedView) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (view.hiddenPaths.length > 0) {
+    if (view.hiddenPaths && view.hiddenPaths.length > 0) {
       params.set('hidden', view.hiddenPaths.join(','));
     } else {
       params.delete('hidden');
     }
+
+    const mergeColors = view.mergeColors || view.mergeByColor || [];
+    if (mergeColors.length > 0) params.set('merge_color', mergeColors.join(','));
+    else params.delete('merge_color');
+
+    const mergeCleanColors = view.mergeCleanColors || view.mergeCleanByColor || [];
+    if (mergeCleanColors.length > 0) params.set('merge_clean_color', mergeCleanColors.join(','));
+    else params.delete('merge_clean_color');
+
+    const hideColors = view.hideColors || [];
+    if (hideColors.length > 0) params.set('hide_color', hideColors.join(','));
+    else params.delete('hide_color');
+
+    const mergeKeys = view.mergeKeys || view.mergeByKeys || [];
+    if (mergeKeys.length > 0) params.set('merge_key', mergeKeys.join(','));
+    else params.delete('merge_key');
+
+    const mergeCleanKeys = view.mergeCleanKeys || view.mergeCleanByKeys || [];
+    if (mergeCleanKeys.length > 0) params.set('merge_clean_key', mergeCleanKeys.join(','));
+    else params.delete('merge_clean_key');
+
+    const hideKeys = view.hideKeys || [];
+    if (hideKeys.length > 0) params.set('hide_key', hideKeys.join(','));
+    else params.delete('hide_key');
+
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
@@ -1106,7 +1156,7 @@ export default function ClientPage() {
     return (
       <ul className="pl-4 space-y-1">
         {nodes.map(node => {
-          const isHidden = hiddenPaths.has(node.path);
+          const isHidden = isPathHidden(node.path, hiddenPaths);
           return (
             <li key={node.path} className="text-sm">
               <label className="flex items-center space-x-2 cursor-pointer">

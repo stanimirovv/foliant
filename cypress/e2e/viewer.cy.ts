@@ -31,4 +31,19 @@ describe('Mermaid Viewer', () => {
     // Check URL for search query
     cy.url().should('include', 'q=Fetch+User+Data');
   });
+
+  it('loads a saved view and applies its filters', () => {
+    cy.visit('/?file=tagged-diagram.mmd');
+
+    cy.get('#diagram-container svg').should('exist');
+    cy.get('#diagram-container').contains('Biometrics Service').should('exist');
+
+    cy.contains('li', 'Hide Tags').within(() => {
+      cy.get('button[title="Load View"]').click({ force: true });
+    });
+
+    cy.url().should('include', 'hidden=tag%3Dbeta%2Ctag%3Dexperimental');
+    cy.get('#diagram-container').contains('Biometrics Service').should('not.exist');
+    cy.get('#diagram-container').contains('Auth Service').should('exist');
+  });
 });

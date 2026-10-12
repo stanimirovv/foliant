@@ -191,3 +191,27 @@ describe('CONFIG notes (StickyNote)', () => {
   });
 });
 
+describe('CONFIG views with actor options', () => {
+  it('parses and round-trips saved views with actor merge/hide settings', () => {
+    const code = `sequenceDiagram\n  A->>B: Hello`;
+    const config: DiagramConfig = {
+      version: 1,
+      views: [
+        {
+          name: 'Backend Clean View',
+          hiddenPaths: ['flow=login/edge'],
+          mergeColors: ['red'],
+          mergeCleanColors: ['blue'],
+          hideColors: ['yellow'],
+          mergeKeys: ['backend'],
+          mergeCleanKeys: ['db'],
+          hideKeys: ['legacy'],
+        },
+      ],
+    };
+    const newCode = updateViewsData(code, config);
+    const parsed = parseViewsData(newCode);
+    expect(parsed?.views).toEqual(config.views);
+  });
+});
+

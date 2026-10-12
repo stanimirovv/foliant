@@ -11,6 +11,22 @@ export interface PreprocessorOptions {
   isRegionVisible: (region: RegionContext) => boolean;
 }
 
+/**
+ * Checks whether a hierarchical region path is hidden by the given hiddenPaths set.
+ * Supports exact path matches, leaf segment matches (e.g. 'tag=beta' matching 'flow=login/tag=beta'),
+ * and suffix subpath matches.
+ */
+export function isPathHidden(path: string, hiddenPaths: Set<string>): boolean {
+  if (hiddenPaths.has(path)) return true;
+  const segments = path.split('/');
+  if (hiddenPaths.has(segments[segments.length - 1])) return true;
+  for (let i = 1; i < segments.length; i++) {
+    const subpath = segments.slice(i).join('/');
+    if (hiddenPaths.has(subpath)) return true;
+  }
+  return false;
+}
+
 export interface ProcessResult {
   code: string;
   warnings: string[];

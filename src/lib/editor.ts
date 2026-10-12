@@ -49,7 +49,20 @@ function cloneConfig(config: DiagramConfig | null): DiagramConfig | null {
   if (!config) return null;
   return {
     ...config,
-    views: config.views?.map(v => ({ ...v, hiddenPaths: [...v.hiddenPaths] })),
+    views: config.views?.map(v => ({
+      ...v,
+      hiddenPaths: [...v.hiddenPaths],
+      mergeColors: v.mergeColors ? [...v.mergeColors] : undefined,
+      mergeCleanColors: v.mergeCleanColors ? [...v.mergeCleanColors] : undefined,
+      hideColors: v.hideColors ? [...v.hideColors] : undefined,
+      mergeKeys: v.mergeKeys ? [...v.mergeKeys] : undefined,
+      mergeCleanKeys: v.mergeCleanKeys ? [...v.mergeCleanKeys] : undefined,
+      hideKeys: v.hideKeys ? [...v.hideKeys] : undefined,
+      mergeByColor: v.mergeByColor ? [...v.mergeByColor] : undefined,
+      mergeCleanByColor: v.mergeCleanByColor ? [...v.mergeCleanByColor] : undefined,
+      mergeByKeys: v.mergeByKeys ? [...v.mergeByKeys] : undefined,
+      mergeCleanByKeys: v.mergeCleanByKeys ? [...v.mergeCleanByKeys] : undefined,
+    })),
     actors: config.actors
       ? Object.fromEntries(Object.entries(config.actors).map(([k, v]) => [k, { ...v, keys: v.keys ? [...v.keys] : undefined }]))
       : undefined,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { processMermaid, transformActors } from './preprocessor';
+import { processMermaid, transformActors, isPathHidden } from './preprocessor';
 
 describe('processMermaid', () => {
   it('keeps all lines if no regions are defined', () => {
@@ -342,5 +342,46 @@ describe('transformActors message/edge tags', () => {
     const merged = transformActors(code, config, { mergeByKeys: ['backend'] });
     expect(merged).toContain('MergedKey_backend->>B: Call');
     expect(merged).toContain('B->>C: Forward');
+  });
+});
+
+describe('isPathHidden', () => {
+  it('matches exact paths', () => {
+    const hidden = new Set(['flow=login/edge-case=invalid']);
+    expect(isPathHidden('flow=login/edge-case=invalid', hidden)).toBe(true);
+    expect(isPathHidden('flow=login', hidden)).toBe(false);
+  });
+
+  it('matches leaf segment tag names in nested regions', () => {
+    const hidden = new Set(['tag=beta', 'tag=experimental']);
+    expect(isPathHidden('flow=login/tag=beta', hidden)).toBe(true);
+    expect(isPathHidden('flow=login/tag=experimental', hidden)).toBe(true);
+    expect(isPathHidden('flow=login', hidden)).toBe(false);
+  });
+
+  it('matches subpath suffixes', () => {
+    const hidden = new Set(['nested/tag=beta']);
+    expect(isPathHidden('flow=login/nested/tag=beta', hidden)).toBe(true);
+    expect(isPathHidden('flow=login/other/tag=beta', hidden)).toBe(false);
+  });
+
+  it('hides nested region lines in processMermaid when leaf tag is in hiddenPaths', () => {
+    const diagram = `flowchart TD
+    %% @region-start: flow=login
+    subgraph Login
+      A --> B
+      %% @region-start: tag=beta
+      B --> C
+      %% @region-end
+    end
+    %% @region-end`;
+
+    const hidden = new Set(['tag=beta']);
+    const result = processMermaid(diagram, {
+      isRegionVisible: (r) => !isPathHidden(r.path, hidden),
+    });
+
+    expect(result.code).toContain('A --> B');
+    expect(result.code).not.toContain('B --> C');
   });
 });

@@ -6,11 +6,12 @@ import { parseViewsData, StickyNote } from '@/lib/views';
 import { createSequenceDiagram } from '@/lib/editorTestHarness';
 import mermaid from 'mermaid';
 
+let currentMockParams: Record<string, string> = { dir: '/old/dir' };
 const mockReplace = vi.fn();
-const mockGet = vi.fn();
+const mockGet = vi.fn((key: string) => currentMockParams[key] ?? null);
 const mockSearchParams = {
   get: mockGet,
-  toString: () => 'dir=/old/dir'
+  toString: () => new URLSearchParams(currentMockParams).toString()
 };
 const mockRouter = {
   replace: mockReplace
@@ -191,7 +192,8 @@ const postCalls = () => {
 };
 
 const mockParams = (params: Record<string, string>) => {
-  mockGet.mockImplementation((key: string) => params[key] ?? null);
+  currentMockParams = { dir: '/old/dir', ...params };
+  mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
 };
 
 // Renders ClientPage in edit mode with the given file content and waits for
@@ -869,6 +871,75 @@ sequenceDiagram
     expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/file/'))).toBe(true); // refetch happened
     expect(screen.queryByTestId('reload-notice')).toBeNull();
     expect(viewer.getAttribute('data-code')).toContain('"views"');
+  }, 10000);
+
+  it('loading a saved view applies hiddenPaths and actor filters to URL params', async () => {
+    const codeWithView = `%% CONFIG: {"version":1,"views":[{"name":"Custom View","hiddenPaths":["tag=beta"],"mergeKeys":["backend"],"hideColors":["red"]}]}
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello`;
+
+    await renderInEditMode(codeWithView, 'A->>B: Hello');
+    mockReplace.mockClear();
+
+    const loadBtn = screen.getByTitle('Load View');
+    fireEvent.click(loadBtn);
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalled();
+    });
+    const url = decodeURIComponent(mockReplace.mock.calls.at(-1)?.[0] as string);
+    expect(url).toContain('hidden=tag=beta');
+    expect(url).toContain('merge_key=backend');
+    expect(url).toContain('hide_color=red');
+  }, 10000);
+
+  it('loading a saved view clears stale actor filter params', async () => {
+    const codeWithView = `%% CONFIG: {"version":1,"views":[{"name":"Regions Only","hiddenPaths":["path1"]}]}
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello`;
+
+    mockParams({ file: 'demo.mmd', edit: '1', merge_key: 'old_key', hide_color: 'old_color' });
+    mockFetchWithFile(codeWithView);
+    render(<ClientPage />);
+    await screen.findByTestId('diagram-viewer');
+    mockReplace.mockClear();
+
+    const loadBtn = screen.getByTitle('Load View');
+    fireEvent.click(loadBtn);
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalled();
+    });
+    const url = decodeURIComponent(mockReplace.mock.calls.at(-1)?.[0] as string);
+    expect(url).toContain('hidden=path1');
+    expect(url).not.toContain('merge_key=');
+    expect(url).not.toContain('hide_color=');
+  }, 10000);
+
+  it('saving a view captures active actor filters into the saved view config', async () => {
+    mockParams({ file: 'demo.mmd', edit: '1', hidden: 'flow=1', merge_key: 'backend', hide_color: 'red' });
+    mockFetchWithFile(DEMO);
+    render(<ClientPage />);
+    await screen.findByTestId('diagram-viewer');
+    (window as unknown as { prompt: unknown }).prompt = vi.fn(() => 'Actor Snapshot');
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockClear();
+
+    fireEvent.click(screen.getByTitle('Save Current View'));
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+
+    const lastPost = postCalls().at(-1);
+    const savedContent = JSON.parse((lastPost?.[1] as { body: string }).body).content as string;
+    expect(savedContent).toContain('"name":"Actor Snapshot"');
+    expect(savedContent).toContain('"mergeKeys":["backend"]');
+    expect(savedContent).toContain('"hideColors":["red"]');
+    expect(savedContent).toContain('"hiddenPaths":["flow=1"]');
   }, 10000);
 
   it('undo reverts an edit and redo reapplies it (toolbar buttons)', async () => {

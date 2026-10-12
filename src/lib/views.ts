@@ -1,6 +1,16 @@
 export interface SavedView {
   name: string;
   hiddenPaths: string[];
+  mergeColors?: string[];
+  mergeCleanColors?: string[];
+  hideColors?: string[];
+  mergeKeys?: string[];
+  mergeCleanKeys?: string[];
+  hideKeys?: string[];
+  mergeByColor?: string[];
+  mergeCleanByColor?: string[];
+  mergeByKeys?: string[];
+  mergeCleanByKeys?: string[];
 }
 
 export interface ActorMetadata {
