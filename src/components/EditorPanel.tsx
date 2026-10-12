@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
 import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, DiagramType } from '@/lib/model';
 import { ArrowStylePatch, ArrowTagInfo } from '@/lib/editor';
-import { DiagramConfig, ArrowKeyMode } from '@/lib/views';
+import { DiagramConfig, ArrowKeyMode, ArrowAnimationType } from '@/lib/views';
+import AnimatedArrowSelector from './AnimatedArrowSelector';
 
 // Operator vocabularies (EDITING_PLAN.md Section 4.8); keep in sync with
 // editor.ts (setArrowType validates against the same sets).
@@ -86,6 +87,7 @@ interface EditorPanelProps {
   onSetType: (operator: string) => void;
   onSetWidth: (width: number | '') => void;
   onSetDash: (dash: Dash) => void;
+  onSetAnimation?: (anim: ArrowAnimationType) => void;
   onAddTag: (tag: string, targetKey?: string) => void;
   onRemoveTag: (tag: string, targetKey?: string) => void;
   onSetKeyMode: (mode: ArrowKeyMode) => void;
@@ -135,6 +137,7 @@ export default function EditorPanel({
   onSetType,
   onSetWidth,
   onSetDash,
+  onSetAnimation,
   onAddTag,
   onRemoveTag,
   onSetKeyMode,
@@ -213,6 +216,7 @@ export default function EditorPanel({
           onSetType={onSetType}
           onSetWidth={onSetWidth}
           onSetDash={onSetDash}
+          onSetAnimation={onSetAnimation}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
           onSetKeyMode={onSetKeyMode}
@@ -616,6 +620,7 @@ interface ArrowFieldsProps {
   onSetType: (operator: string) => void;
   onSetWidth: (width: number | '') => void;
   onSetDash: (dash: Dash) => void;
+  onSetAnimation?: (anim: ArrowAnimationType) => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
   onSetKeyMode: (mode: ArrowKeyMode) => void;
@@ -624,7 +629,7 @@ interface ArrowFieldsProps {
 
 function ArrowFields({
   element, diagramType, arrowStyle, arrowTags, arrowColors, actorKeys,
-  onEditLabel, onSetColor, onSetType, onSetWidth, onSetDash,
+  onEditLabel, onSetColor, onSetType, onSetWidth, onSetDash, onSetAnimation,
   onAddTag, onRemoveTag, onSetKeyMode, onRequestDelete,
 }: ArrowFieldsProps) {
   const vocabulary = diagramType === 'flowchart' ? FLOWCHART_OPERATORS : SEQUENCE_OPERATORS;
@@ -744,6 +749,19 @@ function ArrowFields({
           {DASH_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
       </label>
+
+      {onSetAnimation && (
+        <div className="pt-2 border-t border-gray-100">
+          <AnimatedArrowSelector
+            currentAnimation={arrowStyle?.animation ?? 'none'}
+            currentColor={arrowStyle?.color}
+            onSelectAnimation={onSetAnimation}
+            onSelectColor={onSetColor}
+            hasSelectedArrow={true}
+            compact={true}
+          />
+        </div>
+      )}
 
       <div>
         <span className={fieldLabel}>Tags</span>

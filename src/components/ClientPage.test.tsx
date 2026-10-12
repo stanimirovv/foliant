@@ -1646,5 +1646,61 @@ sequenceDiagram
       expect(parsed?.notes ?? []).toHaveLength(0);
     });
   });
+
+  it('selects animation style and base color from bottom bar for selected arrow', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+
+    // Expand bottom bar
+    const bar = screen.getByTestId('bottom-animated-arrow-bar');
+    fireEvent.click(within(bar).getByTestId('toggle-animated-arrows-bar'));
+
+    // Select cyber animation and teal color within the bottom bar
+    const cyberBtn = await within(bar).findByTestId('select-animation-cyber');
+    fireEvent.click(cyberBtn);
+    fireEvent.click(within(bar).getByTestId('color-positive-teal'));
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const parsed = parseViewsData(code);
+      expect(parsed?.arrows).toEqual([
+        { from: 'A', to: 'B', label: 'Hello', animation: 'cyber', color: '#06b6d4' },
+      ]);
+    }, { timeout: 3000 });
+  });
+
+  it('converts entire diagram to animated arrows via bottom bar Convert button', async () => {
+    const DEMO_ERR = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: Request
+    B-x A: Error occurred`;
+    const viewer = await renderInEditMode(DEMO_ERR, 'A->>B: Request');
+
+    fireEvent.click(screen.getByTestId('convert-diagram-bar-btn'));
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const parsed = parseViewsData(code);
+      expect(parsed?.arrows).toHaveLength(2);
+      // Happy path request has positive animation/color
+      expect(parsed?.arrows?.[0]).toMatchObject({
+        from: 'A',
+        to: 'B',
+        label: 'Request',
+        animation: 'flow',
+        color: '#10b981',
+      });
+      // Error arrow has ricochet animation and error color
+      expect(parsed?.arrows?.[1]).toMatchObject({
+        from: 'B',
+        to: 'A',
+        label: 'Error occurred',
+        animation: 'ricochet',
+        color: '#f43f5e',
+      });
+    }, { timeout: 3000 });
+  });
 });
 

@@ -4,8 +4,9 @@
 // (NFR-02), and malformed input is a no-op with a warning, never a
 // corruption (NFR-01).
 
-import { parseModel, parseShapeToken, SHAPE_DELIMITERS, ModelElement, MessageElement } from './model';
-import { ArrowStyle, ArrowKeyMode, DiagramConfig, updateViewsData } from './views';
+import { parseModel, parseShapeToken, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement } from './model';
+import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, DiagramConfig, updateViewsData } from './views';
+import { ANIMATED_ARROW_COLORS } from './styling';
 
 export interface EditResult {
   code: string;
@@ -16,7 +17,7 @@ export interface EditResult {
 }
 
 // The complete desired arrow style; empty/undefined fields mean "no style".
-export type ArrowStylePatch = Pick<ArrowStyle, 'color' | 'width' | 'dash'>;
+export type ArrowStylePatch = Pick<ArrowStyle, 'color' | 'width' | 'dash' | 'animation'>;
 
 const ID = '[A-Za-z0-9_-]+';
 const SHAPE = String.raw`(?:\[.*?\]|\(\(.*?\)\)|\(.*?\)|\{.*?\}|>.*?\])`;
@@ -59,7 +60,7 @@ function cloneConfig(config: DiagramConfig | null): DiagramConfig | null {
 // An arrow entry with no style, no tags and no explicit 'clean' mode carries no
 // state ('merged' is the default and is stored as absent).
 function arrowEntryIsEmpty(a: ArrowStyle): boolean {
-  return !a.color && !a.width && !a.dash && (!a.keys || a.keys.length === 0) && a.keyMode !== 'clean';
+  return !a.color && !a.width && !a.dash && (!a.animation || a.animation === 'none') && (!a.keys || a.keys.length === 0) && a.keyMode !== 'clean';
 }
 
 // Drop actor entries that carry no state, and empty containers.
@@ -1162,13 +1163,14 @@ export function setArrowStyle(code: string, config: DiagramConfig | null, key: s
   const color = style.color !== undefined && style.color.trim() !== '' ? style.color.trim() : undefined;
   const width = style.width;
   const dash = style.dash !== undefined && style.dash !== 'solid' ? style.dash : undefined;
+  const animation = style.animation !== undefined && style.animation !== 'none' ? style.animation : undefined;
 
   const occurrence = elementOccurrence(model, el);
   const newConfig = cloneConfig(config) ?? { version: 1 };
   const arrows = newConfig.arrows ? [...newConfig.arrows] : [];
   const idx = arrows.findIndex(a => arrowsMatchEntry(a, el.from, el.to, el.label, occurrence));
 
-  const hasStyle = color !== undefined || width !== undefined || dash !== undefined;
+  const hasStyle = color !== undefined || width !== undefined || dash !== undefined || animation !== undefined;
   let changed = false;
   if (hasStyle) {
     const entry: ArrowStyle = { from: el.from, to: el.to };
@@ -1177,6 +1179,7 @@ export function setArrowStyle(code: string, config: DiagramConfig | null, key: s
     if (color !== undefined) entry.color = color;
     if (width !== undefined) entry.width = width;
     if (dash !== undefined) entry.dash = dash;
+    if (animation !== undefined) entry.animation = animation;
     // Tags and tag behavior live on the same entry: carry them over.
     const prev = idx >= 0 ? arrows[idx] : undefined;
     if (prev?.keys) entry.keys = prev.keys;
@@ -1225,5 +1228,90 @@ export function getArrowStyle(code: string, config: DiagramConfig | null, key: s
     color: entry.color,
     width: entry.width,
     dash: entry.dash ?? 'solid',
+    ...(entry.animation ? { animation: entry.animation } : {}),
+  };
+}
+
+export function convertDiagramToAnimatedArrows(
+  code: string,
+  config: DiagramConfig | null,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
+  const arrows = model.elements.filter(e => e.kind === 'message' || e.kind === 'edge') as (MessageElement | EdgeElement)[];
+  if (arrows.length === 0) return { code, config };
+
+  const newConfig = cloneConfig(config) ?? { version: 1 };
+  newConfig.arrows = newConfig.arrows ? [...newConfig.arrows] : [];
+
+  const posColors = ANIMATED_ARROW_COLORS.positive.map(c => c.hex);
+  const errColors = ANIMATED_ARROW_COLORS.error.map(c => c.hex);
+
+  const isErrorOp = (op: string) => op === '-x' || op === '--x';
+  const isErrorText = (label?: string) => {
+    if (!label) return false;
+    return /\b(error|fail|timeout|5\d\d|4\d\d|reject|exception|fatal|denied|broken)\b/i.test(label);
+  };
+  const isRetryText = (label?: string) => {
+    if (!label) return false;
+    return /\b(retry|backoff|reattempt)\b/i.test(label);
+  };
+
+  let happyPathIndex = 0;
+  let errorIndex = 0;
+
+  arrows.forEach((el) => {
+    const occurrence = elementOccurrence(model, el);
+    const label = el.label ?? undefined;
+    const isError = isErrorOp(el.operator) || isErrorText(label);
+    const isRetry = isRetryText(label);
+
+    let chosenAnimation: ArrowAnimationType;
+    let chosenColor: string;
+
+    if (isError) {
+      if (isErrorOp(el.operator) || /timeout/i.test(label ?? '')) {
+        chosenAnimation = 'ricochet';
+        chosenColor = errColors[2 % errColors.length]; // Rose (#f43f5e)
+      } else {
+        chosenAnimation = 'stutter';
+        chosenColor = errColors[errorIndex % errColors.length];
+        errorIndex++;
+      }
+    } else if (isRetry) {
+      chosenAnimation = 'hesitate';
+      chosenColor = errColors[0]; // Amber (#f59e0b)
+    } else {
+      const posAnims: ArrowAnimationType[] = ['flow', 'pulse', 'cyber'];
+      chosenAnimation = posAnims[happyPathIndex % posAnims.length];
+      chosenColor = posColors[happyPathIndex % posColors.length];
+      happyPathIndex++;
+    }
+
+    const idx = newConfig.arrows!.findIndex(a => arrowsMatchEntry(a, el.from, el.to, label, occurrence));
+    if (idx >= 0) {
+      newConfig.arrows![idx] = {
+        ...newConfig.arrows![idx],
+        animation: chosenAnimation,
+        color: chosenColor,
+        dash: newConfig.arrows![idx].dash ?? 'solid',
+      };
+    } else {
+      newConfig.arrows!.push({
+        from: el.from,
+        to: el.to,
+        label,
+        occurrence: occurrence > 0 ? occurrence : undefined,
+        animation: chosenAnimation,
+        color: chosenColor,
+        dash: 'solid',
+      });
+    }
+  });
+
+  pruneConfig(newConfig);
+  return {
+    code: updateViewsData(code, newConfig),
+    config: newConfig,
   };
 }

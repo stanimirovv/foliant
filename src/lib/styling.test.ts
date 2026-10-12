@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rewriteArrowStyles, applyArrowStyles, applyNodeColors } from './styling';
+import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
 import { buildActorRewriteMap, transformActors } from './preprocessor';
 import { parseModel, MessageElement, EdgeElement } from './model';
 import { updateViewsData, DiagramConfig } from './views';
@@ -271,6 +271,23 @@ describe('applyArrowStyles (sequence fixture)', () => {
     });
     const solidLine = parseSvgRoot(solid).querySelector('line[data-id="i2"]')!;
     expect(styleOf(solidLine).strokeDasharray).toBe('none');
+  });
+
+  it('applies animation class to the styled SVG line', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      arrows: [{ from: 'A', to: 'B', label: 'm1', animation: 'flow' }],
+    });
+    const root = parseSvgRoot(out);
+    const line = root.querySelector('line[data-id="i1"]')!;
+    expect(line.classList.contains('arrow-anim-flow')).toBe(true);
+  });
+
+  it('exports 6 animated arrow presets and 10 base colors (5 positive, 5 error)', () => {
+    expect(ANIMATED_ARROW_PRESETS).toHaveLength(6);
+    expect(ANIMATED_ARROW_COLORS.positive).toHaveLength(5);
+    expect(ANIMATED_ARROW_COLORS.error).toHaveLength(5);
+    expect(ALL_ANIMATED_ARROW_COLORS).toHaveLength(10);
   });
 
   it('disambiguates same-endpoint arrows by occurrence', () => {

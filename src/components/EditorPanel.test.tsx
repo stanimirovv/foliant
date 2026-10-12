@@ -365,6 +365,40 @@ describe('EditorPanel', () => {
     expect(inheritedOnMsg).toBeTruthy();
   });
 
+  it('dispatches animation style and base color edits for arrows when onSetAnimation is provided', () => {
+    const onSetAnimation = vi.fn();
+    const props = makeProps({
+      element: message0,
+      arrowStyle: { color: '#10b981', animation: 'flow' },
+      onSetAnimation,
+    });
+    render(<EditorPanel {...props} />);
+
+    // Renders the animation options
+    expect(screen.getByTestId('select-animation-flow')).toBeTruthy();
+    expect(screen.getByTestId('select-animation-pulse')).toBeTruthy();
+    expect(screen.getByTestId('select-animation-cyber')).toBeTruthy();
+    expect(screen.getByTestId('select-animation-stutter')).toBeTruthy();
+    expect(screen.getByTestId('select-animation-ricochet')).toBeTruthy();
+    expect(screen.getByTestId('select-animation-hesitate')).toBeTruthy();
+
+    // Clicking pulse dispatches onSetAnimation
+    fireEvent.click(screen.getByTestId('select-animation-pulse'));
+    expect(onSetAnimation).toHaveBeenCalledWith('pulse');
+
+    // Clicking a positive color swatch dispatches onSetColor
+    fireEvent.click(screen.getByTestId('color-positive-teal'));
+    expect(props.onSetColor).toHaveBeenCalledWith('#06b6d4');
+
+    // Clicking an error color swatch dispatches onSetColor
+    fireEvent.click(screen.getByTestId('color-error-crimson'));
+    expect(props.onSetColor).toHaveBeenCalledWith('#ef4444');
+
+    // Clicking reset animation dispatches 'none'
+    fireEvent.click(screen.getByTestId('clear-arrow-animation'));
+    expect(onSetAnimation).toHaveBeenCalledWith('none');
+  });
+
   it('colorToHex helper converts named colors, hex codes and defaults', () => {
     expect(colorToHex('#e11d48')).toBe('#e11d48');
     expect(colorToHex('#FFF')).toBe('#ffffff');

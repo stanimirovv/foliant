@@ -4,15 +4,16 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
+import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon } from 'lucide-react';
-import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
+import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  getArrowTags, setArrowKeyMode,
+  getArrowTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
@@ -716,6 +717,7 @@ export default function ClientPage() {
       color: cur.color,
       width: cur.width,
       dash: cur.dash && cur.dash !== 'solid' ? cur.dash : undefined,
+      animation: cur.animation,
     };
   };
 
@@ -753,6 +755,17 @@ export default function ClientPage() {
     const patch = currentArrowPatch();
     patch.dash = dash === 'solid' ? undefined : dash;
     applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+  };
+
+  const handleSetAnimation = (animation: ArrowAnimationType) => {
+    if (!selectedArrow) return;
+    const patch = currentArrowPatch();
+    patch.animation = animation === 'none' ? undefined : animation;
+    applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+  };
+
+  const handleConvertDiagram = () => {
+    applyEditResult(convertDiagramToAnimatedArrows(rawCode, viewsData));
   };
 
   const handleAddTag = (tag: string, targetKey?: string) => {
@@ -1391,6 +1404,14 @@ export default function ClientPage() {
               onUpdateNote={handleUpdateNote}
               onDeleteNote={handleDeleteNote}
             />
+            <BottomAnimatedArrowBar
+              currentAnimation={selectedArrowStyle?.animation}
+              currentColor={selectedArrowStyle?.color}
+              hasSelectedArrow={Boolean(selectedArrow)}
+              onSelectAnimation={handleSetAnimation}
+              onSelectColor={handleSetColor}
+              onConvertDiagram={handleConvertDiagram}
+            />
           </div>
           {editMode && (
             <div className="w-72 flex-shrink-0 border-l border-gray-200  bg-white  overflow-y-auto">
@@ -1409,6 +1430,7 @@ export default function ClientPage() {
                 onSetType={handleSetType}
                 onSetWidth={handleSetWidth}
                 onSetDash={handleSetDash}
+                onSetAnimation={handleSetAnimation}
                 onAddTag={handleAddTag}
                 onRemoveTag={handleRemoveTag}
                 onSetKeyMode={handleSetArrowKeyMode}

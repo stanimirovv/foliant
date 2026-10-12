@@ -3,9 +3,47 @@
 // against post-transform actor names, so they follow the rules of merging.
 
 import { ActorTransformOptions, buildActorRewriteMap } from './preprocessor';
-import { ArrowStyle, DiagramConfig } from './views';
+import { ArrowStyle, DiagramConfig, ArrowAnimationType } from './views';
 import { DiagramModel, ModelElement } from './model';
 import { zipModelToSvg } from './svgmap';
+
+export interface AnimatedArrowPreset {
+  id: ArrowAnimationType;
+  name: string;
+  description: string;
+  isError?: boolean;
+}
+
+export const ANIMATED_ARROW_PRESETS: AnimatedArrowPreset[] = [
+  { id: 'flow', name: 'Stream', description: 'Smooth continuous flow' },
+  { id: 'pulse', name: 'Pulse', description: 'Traveling signal wave' },
+  { id: 'cyber', name: 'Cyber Glow', description: 'High-velocity neon tracer' },
+  { id: 'stutter', name: 'Stutter', description: 'Glitch / unstable channel', isError: true },
+  { id: 'ricochet', name: 'Ricochet', description: 'Recoil / rejection bounce', isError: true },
+  { id: 'hesitate', name: 'Hesitate', description: 'Retry with backoff pause', isError: true },
+];
+
+export const ANIMATED_ARROW_COLORS = {
+  positive: [
+    { name: 'Emerald', hex: '#10b981' },
+    { name: 'Teal', hex: '#06b6d4' },
+    { name: 'Ocean', hex: '#0ea5e9' },
+    { name: 'Indigo', hex: '#3b82f6' },
+    { name: 'Mint', hex: '#059669' },
+  ],
+  error: [
+    { name: 'Amber', hex: '#f59e0b' },
+    { name: 'Flame', hex: '#f97316' },
+    { name: 'Rose', hex: '#f43f5e' },
+    { name: 'Crimson', hex: '#ef4444' },
+    { name: 'Ruby', hex: '#dc2626' },
+  ],
+} as const;
+
+export const ALL_ANIMATED_ARROW_COLORS = [
+  ...ANIMATED_ARROW_COLORS.positive,
+  ...ANIMATED_ARROW_COLORS.error,
+];
 
 // Map every arrows[].from/to through the same actor-rewrite map transformActors
 // uses. Entries whose endpoints were hidden are kept as-is: they are inert,
@@ -166,6 +204,9 @@ export function applyArrowStyles(svg: string, model: DiagramModel, config: Diagr
         // 'none' (not removal): mermaid's class CSS is dashed for some arrow
         // types, and the explicit solid style must win in every case.
         styleable.style.strokeDasharray = 'none';
+      }
+      if (style.animation && style.animation !== 'none') {
+        target.classList.add(`arrow-anim-${style.animation}`);
       }
       changed = true;
     });

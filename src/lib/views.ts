@@ -8,6 +8,8 @@ export interface ActorMetadata {
   keys?: string[];
 }
 
+export type ArrowAnimationType = 'none' | 'flow' | 'pulse' | 'cyber' | 'stutter' | 'ricochet' | 'hesitate';
+
 export interface ArrowStyle {
   from: string;                 // participant/node id in the RAW file
   to: string;                   // participant/node id in the RAW file
@@ -16,6 +18,7 @@ export interface ArrowStyle {
   color?: string;               // stroke color, any CSS color
   width?: number;               // stroke width, 1–10
   dash?: 'solid' | 'dashed' | 'dotted';
+  animation?: ArrowAnimationType;
   keys?: string[];              // the arrow's own tags (merge/hide keys)
   keyMode?: ArrowKeyMode;       // how tags are computed: 'merged' (own + origin's, default) | 'clean' (own only)
 }

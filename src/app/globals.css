@@ -24,3 +24,86 @@ body {
 .editor-selected {
   filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.9));
 }
+
+/* --- Mermaid Animated Arrows (6 styles) --- */
+@keyframes mermaid-arrow-flow {
+  from { stroke-dashoffset: 28; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes mermaid-arrow-pulse {
+  0% { stroke-dashoffset: 36; opacity: 0.85; }
+  50% { opacity: 1; filter: drop-shadow(0 0 3px currentColor); }
+  100% { stroke-dashoffset: 0; opacity: 0.85; }
+}
+
+@keyframes mermaid-arrow-cyber {
+  from { stroke-dashoffset: 32; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes mermaid-arrow-stutter {
+  0%, 100% { opacity: 0.95; stroke-dashoffset: 24; }
+  20% { opacity: 0.25; }
+  40% { opacity: 1; stroke-dashoffset: 12; }
+  60% { opacity: 0.2; }
+  80% { opacity: 0.9; stroke-dashoffset: 4; }
+}
+
+@keyframes mermaid-arrow-ricochet {
+  0% { stroke-dashoffset: 32; }
+  45% { stroke-dashoffset: 0; }
+  55% { stroke-dashoffset: -4; }
+  90% { stroke-dashoffset: 28; }
+  100% { stroke-dashoffset: 32; }
+}
+
+@keyframes mermaid-arrow-hesitate {
+  0% { stroke-dashoffset: 32; }
+  35% { stroke-dashoffset: 16; }
+  50% { stroke-dashoffset: 20; }
+  75% { stroke-dashoffset: 6; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.arrow-anim-flow {
+  stroke-dasharray: 8 6 !important;
+  animation: mermaid-arrow-flow 1.2s linear infinite !important;
+}
+
+.arrow-anim-pulse {
+  stroke-dasharray: 12 8 !important;
+  animation: mermaid-arrow-pulse 1.8s ease-in-out infinite !important;
+}
+
+.arrow-anim-cyber {
+  stroke-dasharray: 16 6 4 6 !important;
+  animation: mermaid-arrow-cyber 0.9s linear infinite !important;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+.arrow-anim-stutter {
+  stroke-dasharray: 6 4 !important;
+  animation: mermaid-arrow-stutter 1.2s steps(6) infinite !important;
+}
+
+.arrow-anim-ricochet {
+  stroke-dasharray: 10 10 !important;
+  animation: mermaid-arrow-ricochet 2s ease-in-out infinite !important;
+}
+
+.arrow-anim-hesitate {
+  stroke-dasharray: 6 6 !important;
+  animation: mermaid-arrow-hesitate 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arrow-anim-flow,
+  .arrow-anim-pulse,
+  .arrow-anim-cyber,
+  .arrow-anim-stutter,
+  .arrow-anim-ricochet,
+  .arrow-anim-hesitate {
+    animation: none !important;
+  }
+}

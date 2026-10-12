@@ -3,7 +3,7 @@ import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
   getArrowTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
-  PRESET_ACTOR_COLORS, getNextFreeActorColor,
+  PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
@@ -544,8 +544,8 @@ describe('addParticipant', () => {
   });
 
   it('assigns free preset colors in order to newly added participants', () => {
-    let code = `sequenceDiagram\n    A->>B: Hello`;
-    let cfg: DiagramConfig | null = null;
+    const code = `sequenceDiagram\n    A->>B: Hello`;
+    const cfg: DiagramConfig | null = null;
 
     // Add first participant: gets preset color 0
     const res1 = addParticipant(code, cfg);
@@ -562,23 +562,14 @@ describe('addParticipant', () => {
 
   it('reuses a freed preset color when an actor is deleted', () => {
     const code = `sequenceDiagram\n    participant A as Alice\n    participant B as Bob`;
-    // Config where color 0 and color 1 are taken
-    const cfg: DiagramConfig = {
-      version: 1,
-      actors: {
-        A: { color: PRESET_ACTOR_COLORS[0] },
-        B: { color: PRESET_ACTOR_COLORS[1] },
-      },
-    };
-
-    // If A is removed (color 0 is now free)
-    const cfgWithAالسلام = {
+    // If A is removed (color 0 is now free, color 1 is taken by B)
+    const cfgWithARemoved: DiagramConfig = {
       version: 1,
       actors: {
         B: { color: PRESET_ACTOR_COLORS[1] },
       },
     };
-    const res = addParticipant(code, cfgWithAالسلام);
+    const res = addParticipant(code, cfgWithARemoved);
     expect(res.config?.actors?.New1?.color).toBe(PRESET_ACTOR_COLORS[0]);
   });
 
@@ -1376,6 +1367,19 @@ describe('setArrowStyle', () => {
     expect(parseConfig(res.code)?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', color: 'red' }]);
   });
 
+  it('styles arrows with animations and reads them back', () => {
+    const styled = setArrowStyle(SEQ, SEQ_CFG, 'm:0', { color: '#10b981', animation: 'flow' });
+    expect(styled.config?.arrows).toEqual([
+      { from: 'A', to: 'B', label: 'Hello', color: '#10b981', animation: 'flow' },
+    ]);
+    expect(getArrowStyle(styled.code, styled.config, 'm:0')).toEqual({
+      color: '#10b981',
+      width: undefined,
+      dash: 'solid',
+      animation: 'flow',
+    });
+  });
+
   it('styles flowchart edges by their raw endpoints', () => {
     const res = setArrowStyle(FLOW, FLOW_CFG, 'e:1', { color: 'blue', dash: 'dotted' });
     expect(res.config?.arrows).toEqual([{ from: 'B', to: 'A', label: 'Reply', color: 'blue', dash: 'dotted' }]);
@@ -1389,6 +1393,61 @@ describe('setArrowStyle', () => {
     }
     expect(setArrowStyle(SEQ, SEQ_CFG, 'p:0', { color: 'red' }).warning).toBeTruthy();
     expect(setArrowStyle(SEQ, SEQ_CFG, 'm:99', { color: 'red' }).warning).toBeTruthy();
+  });
+});
+
+describe('convertDiagramToAnimatedArrows', () => {
+  it('deterministically converts normal arrows to happy-path and error arrows to failure animations', () => {
+    const code = `sequenceDiagram
+    participant Client
+    participant API
+    participant DB
+    Client->>API: 1. Login Request
+    API->>DB: 2. Query
+    DB--xAPI: 3. Connection timeout
+    API-->>Client: 4. 500 Internal Error
+    Client->>API: 5. Retry attempt`;
+
+    const res = convertDiagramToAnimatedArrows(code, null);
+    expect(res.warning).toBeUndefined();
+    expect(res.config?.arrows).toHaveLength(5);
+
+    // Messages 1 and 2: happy paths -> positive colors (green/blue) and flow/pulse animations
+    expect(res.config?.arrows?.[0]).toMatchObject({
+      from: 'Client',
+      to: 'API',
+      animation: 'flow',
+      color: '#10b981', // Emerald
+    });
+    expect(res.config?.arrows?.[1]).toMatchObject({
+      from: 'API',
+      to: 'DB',
+      animation: 'pulse',
+      color: '#06b6d4', // Teal
+    });
+
+    // Message 3: timeout (--x) -> error animation (ricochet) and error color
+    expect(res.config?.arrows?.[2]).toMatchObject({
+      from: 'DB',
+      to: 'API',
+      animation: 'ricochet',
+      color: '#f43f5e', // Rose
+    });
+
+    // Message 4: 500 error -> stutter animation and error color
+    expect(res.config?.arrows?.[3]).toMatchObject({
+      from: 'API',
+      to: 'Client',
+      animation: 'stutter',
+      color: '#f59e0b', // Amber / error
+    });
+
+    // Message 5: Retry -> hesitate animation
+    expect(res.config?.arrows?.[4]).toMatchObject({
+      from: 'Client',
+      to: 'API',
+      animation: 'hesitate',
+    });
   });
 });
 
