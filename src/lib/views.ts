@@ -8,7 +8,17 @@ export interface ActorMetadata {
   keys?: string[];
 }
 
-export type ArrowAnimationType = 'none' | 'flow' | 'pulse' | 'cyber' | 'stutter' | 'ricochet' | 'hesitate';
+export type ArrowAnimationType =
+  | 'none'
+  | 'flow'
+  | 'pulse'
+  | 'cyber'
+  | 'broken-sender'
+  | 'broken-network'
+  | 'broken-receiver'
+  | 'stutter'
+  | 'ricochet'
+  | 'hesitate';
 
 export interface ArrowStyle {
   from: string;                 // participant/node id in the RAW file

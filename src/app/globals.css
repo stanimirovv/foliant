@@ -31,10 +31,11 @@ body {
   to { stroke-dashoffset: 0; }
 }
 
-@keyframes mermaid-arrow-pulse {
-  0% { stroke-dashoffset: 36; opacity: 0.85; }
-  50% { opacity: 1; filter: drop-shadow(0 0 3px currentColor); }
-  100% { stroke-dashoffset: 0; opacity: 0.85; }
+@keyframes mermaid-arrow-packet {
+  0% { stroke-dashoffset: 6; opacity: 0; }
+  10% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { stroke-dashoffset: -100; opacity: 0; }
 }
 
 @keyframes mermaid-arrow-cyber {
@@ -42,28 +43,33 @@ body {
   to { stroke-dashoffset: 0; }
 }
 
-@keyframes mermaid-arrow-stutter {
-  0%, 100% { opacity: 0.95; stroke-dashoffset: 24; }
-  20% { opacity: 0.25; }
-  40% { opacity: 1; stroke-dashoffset: 12; }
-  60% { opacity: 0.2; }
-  80% { opacity: 0.9; stroke-dashoffset: 4; }
+@keyframes mermaid-broken-sender {
+  0%, 100% { opacity: 1; stroke-dashoffset: 24; }
+  25% { opacity: 0.25; }
+  50% { opacity: 0.9; stroke-dashoffset: 12; }
+  75% { opacity: 0.2; }
 }
 
-@keyframes mermaid-arrow-ricochet {
-  0% { stroke-dashoffset: 32; }
-  45% { stroke-dashoffset: 0; }
-  55% { stroke-dashoffset: -4; }
-  90% { stroke-dashoffset: 28; }
-  100% { stroke-dashoffset: 32; }
+@keyframes mermaid-broken-network {
+  0% { stroke-dashoffset: 28; opacity: 0.9; }
+  40% { stroke-dashoffset: 0; opacity: 1; }
+  55% { stroke-dashoffset: -4; opacity: 0.3; }
+  70% { stroke-dashoffset: 14; opacity: 0.2; }
+  100% { stroke-dashoffset: 28; opacity: 0.9; }
 }
 
-@keyframes mermaid-arrow-hesitate {
-  0% { stroke-dashoffset: 32; }
-  35% { stroke-dashoffset: 16; }
-  50% { stroke-dashoffset: 20; }
-  75% { stroke-dashoffset: 6; }
-  100% { stroke-dashoffset: 0; }
+@keyframes mermaid-broken-receiver {
+  0% { stroke-dashoffset: 36; opacity: 0.8; }
+  45% { stroke-dashoffset: 0; opacity: 1; }
+  50% { opacity: 0.3; filter: drop-shadow(0 0 6px currentColor); }
+  60% { opacity: 1; }
+  75% { stroke-dashoffset: 12; opacity: 0.6; }
+  100% { stroke-dashoffset: 36; opacity: 0.8; }
+}
+
+@keyframes mermaid-x-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.22); opacity: 0.75; }
 }
 
 .arrow-anim-flow {
@@ -72,8 +78,17 @@ body {
 }
 
 .arrow-anim-pulse {
-  stroke-dasharray: 12 8 !important;
-  animation: mermaid-arrow-pulse 1.8s ease-in-out infinite !important;
+  /* Full solid line underneath traveling packet */
+  stroke-dasharray: none !important;
+  opacity: 0.55 !important;
+}
+
+.arrow-anim-packet-runner {
+  stroke-dasharray: 6 100 !important;
+  stroke-linecap: round !important;
+  animation: mermaid-arrow-packet 1.4s ease-in-out infinite !important;
+  filter: drop-shadow(0 0 5px currentColor) drop-shadow(0 0 2px #ffffff) !important;
+  pointer-events: none !important;
 }
 
 .arrow-anim-cyber {
@@ -82,28 +97,42 @@ body {
   filter: drop-shadow(0 0 4px currentColor);
 }
 
+.arrow-anim-broken-sender,
 .arrow-anim-stutter {
-  stroke-dasharray: 6 4 !important;
-  animation: mermaid-arrow-stutter 1.2s steps(6) infinite !important;
+  stroke-dasharray: 4 6 !important;
+  animation: mermaid-broken-sender 1.1s steps(4) infinite !important;
 }
 
+.arrow-anim-broken-network,
 .arrow-anim-ricochet {
-  stroke-dasharray: 10 10 !important;
-  animation: mermaid-arrow-ricochet 2s ease-in-out infinite !important;
+  stroke-dasharray: 8 6 !important;
+  animation: mermaid-broken-network 1.6s ease-in-out infinite !important;
 }
 
+.arrow-anim-broken-receiver,
 .arrow-anim-hesitate {
-  stroke-dasharray: 6 6 !important;
-  animation: mermaid-arrow-hesitate 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+  stroke-dasharray: 12 6 !important;
+  animation: mermaid-broken-receiver 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite !important;
+}
+
+.arrow-x-mark {
+  transform-origin: center;
+  animation: mermaid-x-pulse 1.3s ease-in-out infinite;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .arrow-anim-flow,
   .arrow-anim-pulse,
+  .arrow-anim-packet-runner,
   .arrow-anim-cyber,
+  .arrow-anim-broken-sender,
   .arrow-anim-stutter,
+  .arrow-anim-broken-network,
   .arrow-anim-ricochet,
-  .arrow-anim-hesitate {
+  .arrow-anim-broken-receiver,
+  .arrow-anim-hesitate,
+  .arrow-x-mark {
     animation: none !important;
   }
 }

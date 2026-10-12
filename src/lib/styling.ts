@@ -16,11 +16,11 @@ export interface AnimatedArrowPreset {
 
 export const ANIMATED_ARROW_PRESETS: AnimatedArrowPreset[] = [
   { id: 'flow', name: 'Stream', description: 'Smooth continuous flow' },
-  { id: 'pulse', name: 'Pulse', description: 'Traveling signal wave' },
+  { id: 'pulse', name: 'Glowing Orb', description: 'Full line with traveling glowing packet' },
   { id: 'cyber', name: 'Cyber Glow', description: 'High-velocity neon tracer' },
-  { id: 'stutter', name: 'Stutter', description: 'Glitch / unstable channel', isError: true },
-  { id: 'ricochet', name: 'Ricochet', description: 'Recoil / rejection bounce', isError: true },
-  { id: 'hesitate', name: 'Hesitate', description: 'Retry with backoff pause', isError: true },
+  { id: 'broken-sender', name: 'Broken Sender', description: 'X at origin: sender fails or sends broken request', isError: true },
+  { id: 'broken-network', name: 'Broken Network', description: 'X in transit: network severed / dropped mid-flight', isError: true },
+  { id: 'broken-receiver', name: 'Broken Receiver', description: 'X on arrival: receiver crashes / rejects receipt', isError: true },
 ];
 
 export const ANIMATED_ARROW_COLORS = {
@@ -207,6 +207,8 @@ export function applyArrowStyles(svg: string, model: DiagramModel, config: Diagr
       }
       if (style.animation && style.animation !== 'none') {
         target.classList.add(`arrow-anim-${style.animation}`);
+        const effectiveColor = style.color || '#ef4444';
+        injectArrowEnhancement(target, style.animation, effectiveColor, style.width);
       }
       changed = true;
     });
@@ -214,6 +216,88 @@ export function applyArrowStyles(svg: string, model: DiagramModel, config: Diagr
     return changed ? root.outerHTML : svg;
   } catch {
     return svg;
+  }
+}
+
+function createXMark(doc: Document, cx: number, cy: number, color: string, className: string, withBg = false): Element {
+  const g = doc.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('class', `arrow-x-mark ${className}`);
+  g.setAttribute('transform', `translate(${cx}, ${cy})`);
+  if (withBg) {
+    const circle = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('r', '8');
+    circle.setAttribute('fill', '#ffffff');
+    circle.setAttribute('stroke', color);
+    circle.setAttribute('stroke-width', '1.5');
+    g.appendChild(circle);
+  }
+  const l1 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+  l1.setAttribute('x1', '-4.5');
+  l1.setAttribute('y1', '-4.5');
+  l1.setAttribute('x2', '4.5');
+  l1.setAttribute('y2', '4.5');
+  l1.setAttribute('stroke', color);
+  l1.setAttribute('stroke-width', '2.2');
+  l1.setAttribute('stroke-linecap', 'round');
+  g.appendChild(l1);
+
+  const l2 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+  l2.setAttribute('x1', '-4.5');
+  l2.setAttribute('y1', '4.5');
+  l2.setAttribute('x2', '4.5');
+  l2.setAttribute('y2', '-4.5');
+  l2.setAttribute('stroke', color);
+  l2.setAttribute('stroke-width', '2.2');
+  l2.setAttribute('stroke-linecap', 'round');
+  g.appendChild(l2);
+
+  return g;
+}
+
+function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color: string, width?: number) {
+  const doc = target.ownerDocument;
+  if (!doc) return;
+  const isLine = target.tagName.toLowerCase() === 'line';
+
+  if (anim === 'pulse') {
+    // Glowing Orb: target remains the full solid line rail; runner carries the glowing orb from start to end
+    const runner = target.cloneNode(false) as Element;
+    runner.removeAttribute('id');
+    runner.removeAttribute('marker-end');
+    runner.removeAttribute('marker-start');
+    runner.setAttribute('pathLength', '100');
+    runner.setAttribute('class', 'arrow-anim-packet-runner');
+    const runnerStyle = runner as Styleable;
+    runnerStyle.style.stroke = color;
+    runnerStyle.style.strokeWidth = `${Math.max((width ?? 2) + 2, 4)}px`;
+    runnerStyle.style.opacity = '1';
+    target.parentNode?.insertBefore(runner, target.nextSibling);
+    return;
+  }
+
+  if (isLine) {
+    const x1 = parseFloat(target.getAttribute('x1') || '0');
+    const y1 = parseFloat(target.getAttribute('y1') || '0');
+    const x2 = parseFloat(target.getAttribute('x2') || '0');
+    const y2 = parseFloat(target.getAttribute('y2') || '0');
+    const dx = x2 >= x1 ? 1 : -1;
+
+    if (anim === 'broken-sender' || anim === 'stutter') {
+      const cx = x1 + dx * 14;
+      const cy = y1;
+      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-sender', false);
+      target.parentNode?.insertBefore(xMark, target.nextSibling);
+    } else if (anim === 'broken-network' || anim === 'ricochet') {
+      const cx = (x1 + x2) / 2;
+      const cy = (y1 + y2) / 2;
+      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-network', true);
+      target.parentNode?.insertBefore(xMark, target.nextSibling);
+    } else if (anim === 'broken-receiver' || anim === 'hesitate') {
+      const cx = x2 - dx * 14;
+      const cy = y2;
+      const xMark = createXMark(doc, cx, cy, color, 'arrow-x-receiver', false);
+      target.parentNode?.insertBefore(xMark, target.nextSibling);
+    }
   }
 }
 

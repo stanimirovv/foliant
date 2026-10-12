@@ -1692,12 +1692,12 @@ sequenceDiagram
         animation: 'flow',
         color: '#10b981',
       });
-      // Error arrow has ricochet animation and error color
+      // Error arrow has broken-receiver animation and error color
       expect(parsed?.arrows?.[1]).toMatchObject({
         from: 'B',
         to: 'A',
         label: 'Error occurred',
-        animation: 'ricochet',
+        animation: 'broken-receiver',
         color: '#f43f5e',
       });
     }, { timeout: 3000 });

@@ -1426,27 +1426,27 @@ describe('convertDiagramToAnimatedArrows', () => {
       color: '#06b6d4', // Teal
     });
 
-    // Message 3: timeout (--x) -> error animation (ricochet) and error color
+    // Message 3: timeout (--x) -> error animation (broken-receiver) and error color
     expect(res.config?.arrows?.[2]).toMatchObject({
       from: 'DB',
       to: 'API',
-      animation: 'ricochet',
+      animation: 'broken-receiver',
       color: '#f43f5e', // Rose
     });
 
-    // Message 4: 500 error -> stutter animation and error color
+    // Message 4: 500 error -> broken-sender animation and error color
     expect(res.config?.arrows?.[3]).toMatchObject({
       from: 'API',
       to: 'Client',
-      animation: 'stutter',
+      animation: 'broken-sender',
       color: '#f59e0b', // Amber / error
     });
 
-    // Message 5: Retry -> hesitate animation
+    // Message 5: Retry -> broken-network animation
     expect(res.config?.arrows?.[4]).toMatchObject({
       from: 'Client',
       to: 'API',
-      animation: 'hesitate',
+      animation: 'broken-network',
     });
   });
 });

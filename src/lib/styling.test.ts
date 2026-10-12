@@ -283,6 +283,40 @@ describe('applyArrowStyles (sequence fixture)', () => {
     expect(line.classList.contains('arrow-anim-flow')).toBe(true);
   });
 
+  it('injects packet runner for pulse animation on a full line', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      arrows: [{ from: 'A', to: 'B', label: 'm1', color: '#10b981', animation: 'pulse' }],
+    });
+    const root = parseSvgRoot(out);
+    const line = root.querySelector('line[data-id="i1"]')!;
+    expect(line.classList.contains('arrow-anim-pulse')).toBe(true);
+    const runner = root.querySelector('.arrow-anim-packet-runner')!;
+    expect(runner).toBeTruthy();
+    expect(runner.getAttribute('pathLength')).toBe('100');
+    expect(styleOf(runner).stroke).toBe(rgb('#10b981'));
+  });
+
+  it('injects X mark at sender, network middle, and receiver for failure modes', () => {
+    const outSender = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      arrows: [{ from: 'A', to: 'B', label: 'm1', color: '#ef4444', animation: 'broken-sender' }],
+    });
+    expect(parseSvgRoot(outSender).querySelector('.arrow-x-sender')).toBeTruthy();
+
+    const outNetwork = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      arrows: [{ from: 'A', to: 'B', label: 'm1', color: '#f97316', animation: 'broken-network' }],
+    });
+    expect(parseSvgRoot(outNetwork).querySelector('.arrow-x-network circle')).toBeTruthy();
+
+    const outReceiver = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      arrows: [{ from: 'A', to: 'B', label: 'm1', color: '#dc2626', animation: 'broken-receiver' }],
+    });
+    expect(parseSvgRoot(outReceiver).querySelector('.arrow-x-receiver')).toBeTruthy();
+  });
+
   it('exports 6 animated arrow presets and 10 base colors (5 positive, 5 error)', () => {
     expect(ANIMATED_ARROW_PRESETS).toHaveLength(6);
     expect(ANIMATED_ARROW_COLORS.positive).toHaveLength(5);

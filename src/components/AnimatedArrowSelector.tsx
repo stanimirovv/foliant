@@ -98,16 +98,62 @@ export default function AnimatedArrowSelector({
                         <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill={previewColor} />
                       </marker>
                     </defs>
-                    <line
-                      x1="4"
-                      y1="9"
-                      x2="68"
-                      y2="9"
-                      stroke={previewColor}
-                      strokeWidth="2.2"
-                      markerEnd={`url(#${markerId})`}
-                      className={`arrow-anim-${preset.id}`}
-                    />
+                    {preset.id === 'pulse' ? (
+                      <>
+                        <line
+                          x1="4"
+                          y1="9"
+                          x2="68"
+                          y2="9"
+                          stroke={previewColor}
+                          strokeWidth="2.2"
+                          opacity="0.45"
+                          markerEnd={`url(#${markerId})`}
+                        />
+                        <line
+                          x1="4"
+                          y1="9"
+                          x2="68"
+                          y2="9"
+                          stroke={previewColor}
+                          strokeWidth="3.5"
+                          pathLength="100"
+                          className="arrow-anim-packet-runner"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <line
+                          x1="4"
+                          y1="9"
+                          x2="68"
+                          y2="9"
+                          stroke={previewColor}
+                          strokeWidth="2.2"
+                          markerEnd={`url(#${markerId})`}
+                          className={`arrow-anim-${preset.id}`}
+                        />
+                        {(preset.id === 'broken-sender' || preset.id === 'stutter') && (
+                          <g className="arrow-x-mark" transform="translate(14, 9)">
+                            <line x1="-3.5" y1="-3.5" x2="3.5" y2="3.5" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
+                            <line x1="-3.5" y1="3.5" x2="3.5" y2="-3.5" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
+                          </g>
+                        )}
+                        {(preset.id === 'broken-network' || preset.id === 'ricochet') && (
+                          <g className="arrow-x-mark" transform="translate(36, 9)">
+                            <circle r="6" fill="#ffffff" stroke={previewColor} strokeWidth="1.2" />
+                            <line x1="-3" y1="-3" x2="3" y2="3" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
+                            <line x1="-3" y1="3" x2="3" y2="-3" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
+                          </g>
+                        )}
+                        {(preset.id === 'broken-receiver' || preset.id === 'hesitate') && (
+                          <g className="arrow-x-mark" transform="translate(56, 9)">
+                            <line x1="-3.5" y1="-3.5" x2="3.5" y2="3.5" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
+                            <line x1="-3.5" y1="3.5" x2="3.5" y2="-3.5" stroke={previewColor} strokeWidth="2" strokeLinecap="round" />
+                          </g>
+                        )}
+                      </>
+                    )}
                   </svg>
                 </div>
               </button>

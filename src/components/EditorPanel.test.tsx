@@ -378,9 +378,9 @@ describe('EditorPanel', () => {
     expect(screen.getByTestId('select-animation-flow')).toBeTruthy();
     expect(screen.getByTestId('select-animation-pulse')).toBeTruthy();
     expect(screen.getByTestId('select-animation-cyber')).toBeTruthy();
-    expect(screen.getByTestId('select-animation-stutter')).toBeTruthy();
-    expect(screen.getByTestId('select-animation-ricochet')).toBeTruthy();
-    expect(screen.getByTestId('select-animation-hesitate')).toBeTruthy();
+    expect(screen.getByTestId('select-animation-broken-sender')).toBeTruthy();
+    expect(screen.getByTestId('select-animation-broken-network')).toBeTruthy();
+    expect(screen.getByTestId('select-animation-broken-receiver')).toBeTruthy();
 
     // Clicking pulse dispatches onSetAnimation
     fireEvent.click(screen.getByTestId('select-animation-pulse'));
