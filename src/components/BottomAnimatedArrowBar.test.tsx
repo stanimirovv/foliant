@@ -36,7 +36,7 @@ describe('BottomAnimatedArrowBar', () => {
 
     // Selecting a color dispatches callback
     fireEvent.click(screen.getByTestId('color-positive-emerald'));
-    expect(onSelectColor).toHaveBeenCalledWith('#10b981');
+    expect(onSelectColor).toHaveBeenCalledWith('#00ff9d');
   });
 
   it('dispatches onConvertDiagram from the header button', () => {

@@ -27,7 +27,7 @@ export default function AnimatedArrowSelector({
   hasSelectedArrow = false,
   compact = false,
 }: AnimatedArrowSelectorProps) {
-  const activeColor = currentColor?.trim().toLowerCase() || '#10b981';
+  const activeColor = currentColor?.trim().toLowerCase() || '#00ff9d';
 
   return (
     <div className={`space-y-3 ${compact ? 'text-xs' : 'text-sm'}`}>
@@ -53,7 +53,7 @@ export default function AnimatedArrowSelector({
         <div className={`grid ${compact ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-6'} gap-1.5`}>
           {ANIMATED_ARROW_PRESETS.map((preset) => {
             const isSelected = currentAnimation === preset.id;
-            const previewColor = isSelected ? activeColor : (preset.isError ? '#f43f5e' : '#10b981');
+            const previewColor = isSelected ? activeColor : (preset.isError ? '#ff2a85' : '#00ff9d');
             const markerId = `marker-${preset.id}-${compact ? 'compact' : 'full'}`;
 
             return (
@@ -214,7 +214,7 @@ export default function AnimatedArrowSelector({
                         />
                         <circle cx="68" cy="9" r="3" fill="none" stroke={previewColor} strokeWidth="1.8" className="arrow-shockwave-burst" />
                         <g className="arrow-x-mark" transform="translate(54, 9)">
-                          <circle r="5.5" fill="#ffffff" stroke={previewColor} strokeWidth="1.4" />
+                          <circle r="5.5" fill="#090d16" stroke={previewColor} strokeWidth="1.4" />
                           <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                           <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                         </g>
@@ -268,13 +268,20 @@ export default function AnimatedArrowSelector({
                     type="button"
                     data-testid={`color-positive-${c.name.toLowerCase()}`}
                     onClick={() => onSelectColor(c.hex)}
-                    style={{ backgroundColor: c.hex }}
-                    className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform hover:scale-110 shadow-xs ${
-                      isSelected ? 'ring-2 ring-offset-2 ring-gray-900 dark:ring-white dark:ring-offset-slate-900 scale-105' : 'border border-black/10'
+                    style={{
+                      backgroundColor: c.hex,
+                      boxShadow: isSelected
+                        ? `0 0 12px ${c.hex}, 0 0 4px ${c.hex}`
+                        : `0 0 6px ${c.hex}66`,
+                    }}
+                    className={`w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-115 ${
+                      isSelected
+                        ? 'ring-2 ring-white scale-110 shadow-lg'
+                        : 'border border-white/20 hover:brightness-125'
                     }`}
                     title={`${c.name} (${c.hex}) - Happy Path`}
                   >
-                    {isSelected && <Check size={12} className="text-white drop-shadow-sm" />}
+                    {isSelected && <Check size={12} className="text-slate-950 stroke-[3.5] drop-shadow-xs" />}
                   </button>
                 );
               })}
@@ -296,13 +303,20 @@ export default function AnimatedArrowSelector({
                     type="button"
                     data-testid={`color-error-${c.name.toLowerCase()}`}
                     onClick={() => onSelectColor(c.hex)}
-                    style={{ backgroundColor: c.hex }}
-                    className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform hover:scale-110 shadow-xs ${
-                      isSelected ? 'ring-2 ring-offset-2 ring-gray-900 dark:ring-white dark:ring-offset-slate-900 scale-105' : 'border border-black/10'
+                    style={{
+                      backgroundColor: c.hex,
+                      boxShadow: isSelected
+                        ? `0 0 12px ${c.hex}, 0 0 4px ${c.hex}`
+                        : `0 0 6px ${c.hex}66`,
+                    }}
+                    className={`w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-115 ${
+                      isSelected
+                        ? 'ring-2 ring-white scale-110 shadow-lg'
+                        : 'border border-white/20 hover:brightness-125'
                     }`}
                     title={`${c.name} (${c.hex}) - Error / Failure`}
                   >
-                    {isSelected && <Check size={12} className="text-white drop-shadow-sm" />}
+                    {isSelected && <Check size={12} className="text-slate-950 stroke-[3.5] drop-shadow-xs" />}
                   </button>
                 );
               })}

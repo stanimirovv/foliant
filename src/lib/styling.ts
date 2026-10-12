@@ -25,18 +25,18 @@ export const ANIMATED_ARROW_PRESETS: AnimatedArrowPreset[] = [
 
 export const ANIMATED_ARROW_COLORS = {
   positive: [
-    { name: 'Emerald', hex: '#10b981' },
-    { name: 'Teal', hex: '#06b6d4' },
-    { name: 'Ocean', hex: '#0ea5e9' },
-    { name: 'Indigo', hex: '#3b82f6' },
-    { name: 'Mint', hex: '#059669' },
+    { name: 'Emerald', hex: '#00ff9d' },
+    { name: 'Teal', hex: '#00f0ff' },
+    { name: 'Ocean', hex: '#00bfff' },
+    { name: 'Indigo', hex: '#4f8cff' },
+    { name: 'Mint', hex: '#38ef7d' },
   ],
   error: [
-    { name: 'Amber', hex: '#f59e0b' },
-    { name: 'Flame', hex: '#f97316' },
-    { name: 'Rose', hex: '#f43f5e' },
-    { name: 'Crimson', hex: '#ef4444' },
-    { name: 'Ruby', hex: '#dc2626' },
+    { name: 'Amber', hex: '#ffbe0b' },
+    { name: 'Flame', hex: '#ff6600' },
+    { name: 'Rose', hex: '#ff2a85' },
+    { name: 'Crimson', hex: '#ff3366' },
+    { name: 'Ruby', hex: '#ff1744' },
   ],
 } as const;
 
@@ -276,7 +276,7 @@ function createXMark(
   if (variant === 'badge') {
     const circle = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('r', '8.5');
-    circle.setAttribute('fill', '#ffffff');
+    circle.setAttribute('fill', '#090d16');
     circle.setAttribute('stroke', color);
     circle.setAttribute('stroke-width', '2');
     g.appendChild(circle);

@@ -1665,7 +1665,7 @@ sequenceDiagram
       const code = viewer.getAttribute('data-code') ?? '';
       const parsed = parseViewsData(code);
       expect(parsed?.arrows).toEqual([
-        { from: 'A', to: 'B', label: 'Hello', animation: 'cyber', color: '#06b6d4' },
+        { from: 'A', to: 'B', label: 'Hello', animation: 'cyber', color: '#00f0ff' },
       ]);
     }, { timeout: 3000 });
   });
@@ -1690,7 +1690,7 @@ sequenceDiagram
         to: 'B',
         label: 'Request',
         animation: 'flow',
-        color: '#10b981',
+        color: '#00ff9d',
       });
       // Error arrow has broken-receiver animation and error color
       expect(parsed?.arrows?.[1]).toMatchObject({
@@ -1698,7 +1698,7 @@ sequenceDiagram
         to: 'A',
         label: 'Error occurred',
         animation: 'broken-receiver',
-        color: '#f43f5e',
+        color: '#ff2a85',
       });
     }, { timeout: 3000 });
   });

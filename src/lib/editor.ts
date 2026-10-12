@@ -1272,10 +1272,10 @@ export function convertDiagramToAnimatedArrows(
     if (isError) {
       if (isErrorOp(el.operator) || /reject|crash|fail/i.test(label ?? '')) {
         chosenAnimation = 'broken-receiver';
-        chosenColor = errColors[2 % errColors.length]; // Rose (#f43f5e)
+        chosenColor = errColors[2 % errColors.length]; // Rose (#ff2a85)
       } else if (/timeout|lost|drop|disconnect|net/i.test(label ?? '')) {
         chosenAnimation = 'broken-network';
-        chosenColor = errColors[1 % errColors.length]; // Flame (#f97316)
+        chosenColor = errColors[1 % errColors.length]; // Flame (#ff6600)
       } else {
         chosenAnimation = 'broken-sender';
         chosenColor = errColors[errorIndex % errColors.length];
@@ -1283,7 +1283,7 @@ export function convertDiagramToAnimatedArrows(
       }
     } else if (isRetry) {
       chosenAnimation = 'broken-network';
-      chosenColor = errColors[0]; // Amber (#f59e0b)
+      chosenColor = errColors[0]; // Amber (#ffbe0b)
     } else {
       const posAnims: ArrowAnimationType[] = ['flow', 'pulse', 'cyber'];
       chosenAnimation = posAnims[happyPathIndex % posAnims.length];

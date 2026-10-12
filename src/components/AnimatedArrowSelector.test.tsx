@@ -59,10 +59,10 @@ describe('AnimatedArrowSelector', () => {
     );
 
     fireEvent.click(screen.getByTestId('color-positive-emerald'));
-    expect(onSelectColor).toHaveBeenCalledWith('#10b981');
+    expect(onSelectColor).toHaveBeenCalledWith('#00ff9d');
 
     fireEvent.click(screen.getByTestId('color-error-flame'));
-    expect(onSelectColor).toHaveBeenCalledWith('#f97316');
+    expect(onSelectColor).toHaveBeenCalledWith('#ff6600');
   });
 
   it('resets animation when reset animation button is clicked', () => {

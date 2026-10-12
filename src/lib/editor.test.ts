@@ -1417,13 +1417,13 @@ describe('convertDiagramToAnimatedArrows', () => {
       from: 'Client',
       to: 'API',
       animation: 'flow',
-      color: '#10b981', // Emerald
+      color: '#00ff9d', // Emerald
     });
     expect(res.config?.arrows?.[1]).toMatchObject({
       from: 'API',
       to: 'DB',
       animation: 'pulse',
-      color: '#06b6d4', // Teal
+      color: '#00f0ff', // Teal
     });
 
     // Message 3: timeout (--x) -> error animation (broken-receiver) and error color
@@ -1431,7 +1431,7 @@ describe('convertDiagramToAnimatedArrows', () => {
       from: 'DB',
       to: 'API',
       animation: 'broken-receiver',
-      color: '#f43f5e', // Rose
+      color: '#ff2a85', // Rose
     });
 
     // Message 4: 500 error -> broken-sender animation and error color
@@ -1439,7 +1439,7 @@ describe('convertDiagramToAnimatedArrows', () => {
       from: 'API',
       to: 'Client',
       animation: 'broken-sender',
-      color: '#f59e0b', // Amber / error
+      color: '#ffbe0b', // Amber / error
     });
 
     // Message 5: Retry -> broken-network animation

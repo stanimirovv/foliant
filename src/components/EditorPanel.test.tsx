@@ -369,7 +369,7 @@ describe('EditorPanel', () => {
     const onSetAnimation = vi.fn();
     const props = makeProps({
       element: message0,
-      arrowStyle: { color: '#10b981', animation: 'flow' },
+      arrowStyle: { color: '#00ff9d', animation: 'flow' },
       onSetAnimation,
     });
     render(<EditorPanel {...props} />);
@@ -388,11 +388,11 @@ describe('EditorPanel', () => {
 
     // Clicking a positive color swatch dispatches onSetColor
     fireEvent.click(screen.getByTestId('color-positive-teal'));
-    expect(props.onSetColor).toHaveBeenCalledWith('#06b6d4');
+    expect(props.onSetColor).toHaveBeenCalledWith('#00f0ff');
 
     // Clicking an error color swatch dispatches onSetColor
     fireEvent.click(screen.getByTestId('color-error-crimson'));
-    expect(props.onSetColor).toHaveBeenCalledWith('#ef4444');
+    expect(props.onSetColor).toHaveBeenCalledWith('#ff3366');
 
     // Clicking reset animation dispatches 'none'
     fireEvent.click(screen.getByTestId('clear-arrow-animation'));
