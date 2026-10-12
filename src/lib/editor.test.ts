@@ -3,6 +3,7 @@ import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
   getArrowTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
+  PRESET_ACTOR_COLORS, getNextFreeActorColor,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
@@ -483,15 +484,17 @@ describe('moveMessage', () => {
 });
 
 describe('addParticipant', () => {
-  it('appends after the last participant in a sequence diagram', () => {
+  it('appends after the last participant in a sequence diagram and assigns a free preset color', () => {
     const res = addParticipant(SEQ, SEQ_CFG);
     expect(res.warning).toBeUndefined();
     const lines = res.code.split('\n');
     expect(lines[5]).toBe('    participant New1 as New Participant');
     expect(lines.length).toBe(SEQ.split('\n').length + 1);
-    // everything else is byte-identical
-    SEQ.split('\n').forEach((line, i) => {
-      expect(lines[i < 5 ? i : i + 1]).toBe(line);
+    expect(res.config?.actors?.New1?.color).toBe(PRESET_ACTOR_COLORS[0]);
+    // body lines (lines > 0) are byte-identical
+    SEQ.split('\n').slice(1).forEach((line, i) => {
+      const idx = i + 1;
+      expect(lines[idx < 5 ? idx : idx + 1]).toBe(line);
     });
     const model = parseModel(res.code);
     expect(model.elements.filter(e => e.kind === 'participant').map(e => (e as { id: string }).id)).toEqual(['A', 'B', 'New1']);
@@ -504,10 +507,11 @@ describe('addParticipant', () => {
     expect(lines[5]).toBe('    participant B as Bob');
   });
 
-  it('inserts after the sequenceDiagram line when there are no participants', () => {
+  it('inserts after the sequenceDiagram line when there are no participants and writes CONFIG header', () => {
     const code = `sequenceDiagram\n    A->>B: Hello`;
     const res = addParticipant(code, null);
-    expect(res.code).toBe(`sequenceDiagram\n    participant New1 as New Participant\n    A->>B: Hello`);
+    expect(res.config?.actors?.New1?.color).toBe(PRESET_ACTOR_COLORS[0]);
+    expect(res.code).toBe(`%% CONFIG: {"version":1,"actors":{"New1":{"color":"${PRESET_ACTOR_COLORS[0]}"}}}\nsequenceDiagram\n    participant New1 as New Participant\n    A->>B: Hello`);
   });
 
   it('deduplicates the generated id against participants and message endpoints', () => {
@@ -518,10 +522,11 @@ describe('addParticipant', () => {
     expect(res2.code).toContain('    participant New4 as New Participant 4');
   });
 
-  it('appends a node line at the end of a flowchart', () => {
+  it('appends a node line at the end of a flowchart with assigned color in CONFIG', () => {
     const res = addParticipant(FLOW, FLOW_CFG);
     expect(res.warning).toBeUndefined();
-    expect(res.code).toBe(FLOW + '\n    New1[New Participant]');
+    expect(res.config?.actors?.New1?.color).toBe(PRESET_ACTOR_COLORS[0]);
+    expect(res.code).toContain('    New1[New Participant]');
     const model = parseModel(res.code);
     const nodes = model.elements.filter(e => e.kind === 'node');
     expect(nodes[nodes.length - 1]).toMatchObject({ id: 'New1', label: 'New Participant', shape: 'rect' });
@@ -536,6 +541,76 @@ describe('addParticipant', () => {
     const res = addParticipant(SEQ, SEQ_CFG, 'p:99');
     expect(res.warning).toBeTruthy();
     expect(res.code).toBe(SEQ);
+  });
+
+  it('assigns free preset colors in order to newly added participants', () => {
+    let code = `sequenceDiagram\n    A->>B: Hello`;
+    let cfg: DiagramConfig | null = null;
+
+    // Add first participant: gets preset color 0
+    const res1 = addParticipant(code, cfg);
+    expect(res1.config?.actors?.New1?.color).toBe(PRESET_ACTOR_COLORS[0]);
+
+    // Add second participant: gets preset color 1
+    const res2 = addParticipant(res1.code, res1.config);
+    expect(res2.config?.actors?.New2?.color).toBe(PRESET_ACTOR_COLORS[1]);
+
+    // Add third participant: gets preset color 2
+    const res3 = addParticipant(res2.code, res2.config);
+    expect(res3.config?.actors?.New3?.color).toBe(PRESET_ACTOR_COLORS[2]);
+  });
+
+  it('reuses a freed preset color when an actor is deleted', () => {
+    const code = `sequenceDiagram\n    participant A as Alice\n    participant B as Bob`;
+    // Config where color 0 and color 1 are taken
+    const cfg: DiagramConfig = {
+      version: 1,
+      actors: {
+        A: { color: PRESET_ACTOR_COLORS[0] },
+        B: { color: PRESET_ACTOR_COLORS[1] },
+      },
+    };
+
+    // If A is removed (color 0 is now free)
+    const cfgWithAالسلام = {
+      version: 1,
+      actors: {
+        B: { color: PRESET_ACTOR_COLORS[1] },
+      },
+    };
+    const res = addParticipant(code, cfgWithAالسلام);
+    expect(res.config?.actors?.New1?.color).toBe(PRESET_ACTOR_COLORS[0]);
+  });
+
+  it('starts rotating preset colors again once all 40 colors have been assigned', () => {
+    const cfg: DiagramConfig = {
+      version: 1,
+      actors: {},
+    };
+    // Assign all 40 colors
+    PRESET_ACTOR_COLORS.forEach((color, idx) => {
+      cfg.actors![`Actor${idx}`] = { color };
+    });
+
+    // 41st actor rotates back to PRESET_ACTOR_COLORS[0]
+    const nextColor = getNextFreeActorColor(cfg);
+    expect(nextColor).toBe(PRESET_ACTOR_COLORS[0]);
+
+    // If Actor0 is assigned twice, next is PRESET_ACTOR_COLORS[1]
+    cfg.actors!['ActorExtra'] = { color: PRESET_ACTOR_COLORS[0] };
+    const nextColor2 = getNextFreeActorColor(cfg);
+    expect(nextColor2).toBe(PRESET_ACTOR_COLORS[1]);
+  });
+
+  it('has 40 unique acrylic muted preset colors with distinct adjacent hues', () => {
+    expect(PRESET_ACTOR_COLORS.length).toBe(40);
+    const unique = new Set(PRESET_ACTOR_COLORS.map(c => c.toLowerCase()));
+    expect(unique.size).toBe(40);
+
+    // Validate hex format #rrggbb
+    for (const c of PRESET_ACTOR_COLORS) {
+      expect(c).toMatch(/^#[0-9a-f]{6}$/i);
+    }
   });
 });
 

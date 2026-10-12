@@ -706,10 +706,10 @@ sequenceDiagram
     }, { timeout: 3000 });
 
     // delete a participant -> its messages cascade away with it, no confirmation.
-    // A is colored, so transformActors regroups it into a box block injected
-    // after the uncolored participants: the processed order is B, New1, A,
-    // i.e. processed key p:2 is A.
-    fireEvent.click(screen.getByTestId('select-p:2'));
+    // Both A and New1 are colored, B is uncolored. The processed order is
+    // uncolored (B), then box groups in order (A, then New1),
+    // i.e. processed key p:1 is A.
+    fireEvent.click(screen.getByTestId('select-p:1'));
     await screen.findByDisplayValue('Alice');
     fireEvent.click(screen.getByTestId('panel-delete'));
     expect(screen.queryByTestId('delete-dialog')).toBeNull();
@@ -1102,7 +1102,7 @@ sequenceDiagram
     // the Actors panel reads CONFIG: both controls appear (Step 11, R-04/R-06)
     await screen.findByText('By Color');
     await screen.findByText('By Key');
-    expect(screen.getByText('#e11d48')).toBeTruthy(); // By Color item
+    expect(screen.getAllByText('#e11d48').length).toBeGreaterThanOrEqual(1); // By Color item
     // the panel tag chip and the sidebar By Key item both render the key
     expect(screen.getAllByText('backend').length).toBeGreaterThanOrEqual(2);
   }, 10000);

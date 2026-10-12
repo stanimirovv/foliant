@@ -412,7 +412,61 @@ export function moveMessageEndpoint(
   return { code: updateViewsData(newCode, newConfig), config: newConfig, newKey: el.key };
 }
 
-export function addParticipant(code: string, config: DiagramConfig | null, afterKey?: string): EditResult {
+export const PRESET_ACTOR_COLORS: string[] = [
+  '#dbbfb3', '#c6e6db', '#e4bee4', '#d3e3b5', '#acbce2',
+  '#e5c9c8', '#bfe3ce', '#d7b7e1', '#dbe0ae', '#c3d8ea',
+  '#e2c1c7', '#b8e0be', '#c7afde', '#e9e3c4', '#bbdee7',
+  '#debaca', '#b5ddb1', '#cec5e7', '#e6d5bc', '#b4e4e2',
+  '#dbb3cf', '#d1e6c6', '#bebee4', '#e3c5b5', '#ace2d2',
+  '#e5c8e3', '#d5e3bf', '#b7c1e1', '#e0b3ae', '#c3ead4',
+  '#dbc1e2', '#dae0b8', '#afc7de', '#e9c4c9', '#bbe7c4',
+  '#cebade', '#ddd8b1', '#c5dfe7', '#e6bccd', '#b6e4b4',
+];
+
+export function getNextFreeActorColor(config: DiagramConfig | null): string {
+  const actors = config?.actors ?? {};
+  const colorUsage = new Map<string, number>();
+  for (const c of PRESET_ACTOR_COLORS) {
+    colorUsage.set(c.toLowerCase(), 0);
+  }
+
+  for (const meta of Object.values(actors)) {
+    if (meta.color) {
+      const lower = meta.color.trim().toLowerCase();
+      if (colorUsage.has(lower)) {
+        colorUsage.set(lower, (colorUsage.get(lower) ?? 0) + 1);
+      }
+    }
+  }
+
+  // Find the first preset color that is free
+  for (const color of PRESET_ACTOR_COLORS) {
+    if (colorUsage.get(color.toLowerCase()) === 0) {
+      return color;
+    }
+  }
+
+  // If all colors are added, start rotating again:
+  // Find minimum usage count, and pick the first preset color matching that minimum usage
+  let minCount = Infinity;
+  for (const count of colorUsage.values()) {
+    if (count < minCount) minCount = count;
+  }
+  for (const color of PRESET_ACTOR_COLORS) {
+    if (colorUsage.get(color.toLowerCase()) === minCount) {
+      return color;
+    }
+  }
+
+  return PRESET_ACTOR_COLORS[0];
+}
+
+export function addParticipant(
+  code: string,
+  config: DiagramConfig | null,
+  afterKey?: string,
+  color?: string,
+): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
 
@@ -428,10 +482,22 @@ export function addParticipant(code: string, config: DiagramConfig | null, after
   while (taken.has(`New${n}`)) n++;
   const id = `New${n}`;
 
+  const assignedColor = color ?? getNextFreeActorColor(config);
+  const newConfig = cloneConfig(config) ?? { version: 1 };
+  newConfig.actors = newConfig.actors ?? {};
+  newConfig.actors[id] = {
+    ...(newConfig.actors[id] ?? {}),
+    color: assignedColor,
+  };
+
   const lines = code.split('\n');
 
   if (model.type === 'flowchart') {
-    return { code: appendLine(lines, `    ${id}[New Participant]`), config };
+    const codeWithNode = appendLine(lines, `    ${id}[New Participant]`);
+    return {
+      code: updateViewsData(codeWithNode, newConfig),
+      config: newConfig,
+    };
   }
 
   let afterLine: number;
@@ -445,7 +511,10 @@ export function addParticipant(code: string, config: DiagramConfig | null, after
   }
   const alias = id === 'New1' ? 'New Participant' : `New Participant ${id.slice(3)}`;
   lines.splice(afterLine + 1, 0, `    participant ${id} as ${alias}`);
-  return { code: lines.join('\n'), config };
+  return {
+    code: updateViewsData(lines.join('\n'), newConfig),
+    config: newConfig,
+  };
 }
 
 // Where a new message/edge is inserted vertically (sequence diagrams):
