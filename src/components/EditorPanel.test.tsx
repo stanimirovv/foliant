@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { ComponentProps } from 'react';
-import EditorPanel from './EditorPanel';
+import EditorPanel, { colorToHex } from './EditorPanel';
 import { parseModel } from '@/lib/model';
 
 // Elements come from freshly parsed diagrams (EDITING_PLAN.md 4.13: create,
@@ -92,9 +92,13 @@ describe('EditorPanel', () => {
     expect(props.onEditLabel).toHaveBeenCalledWith('Alicia');
 
     const color = screen.getByLabelText('Color') as HTMLInputElement;
+    expect(color.type).toBe('color');
     expect(color.value).toBe('#e11d48');
     fireEvent.change(color, { target: { value: '#2563eb' } });
     expect(props.onSetColor).toHaveBeenCalledWith('#2563eb');
+    // clearing color dispatches empty string
+    fireEvent.click(screen.getByTestId('clear-actor-color'));
+    expect(props.onSetColor).toHaveBeenCalledWith('');
     // datalist offers the colors already present in CONFIG
     expect(optionValues('editor-actor-color-list')).toEqual(['#e11d48', '#2563eb']);
 
@@ -153,13 +157,18 @@ describe('EditorPanel', () => {
     expect(props.onSetType).toHaveBeenCalledWith('-->>');
 
     // Color/Width/Dash show the current style and dispatch edits
-    expect((screen.getByLabelText('Color') as HTMLInputElement).value).toBe('#e11d48');
+    const arrowColor = screen.getByLabelText('Color') as HTMLInputElement;
+    expect(arrowColor.type).toBe('color');
+    expect(arrowColor.value).toBe('#e11d48');
     expect((screen.getByLabelText('Width') as HTMLInputElement).value).toBe('3');
     expect((screen.getByLabelText('Dash') as HTMLSelectElement).value).toBe('dashed');
     expect(optionValues('editor-arrow-color-list')).toEqual(['#e11d48', '#2563eb']);
 
-    fireEvent.change(screen.getByLabelText('Color'), { target: { value: '#2563eb' } });
+    fireEvent.change(arrowColor, { target: { value: '#2563eb' } });
     expect(props.onSetColor).toHaveBeenCalledWith('#2563eb');
+    // clearing arrow color dispatches empty string
+    fireEvent.click(screen.getByTestId('clear-arrow-color'));
+    expect(props.onSetColor).toHaveBeenCalledWith('');
     fireEvent.change(screen.getByLabelText('Width'), { target: { value: '5' } });
     expect(props.onSetWidth).toHaveBeenCalledWith(5);
     fireEvent.change(screen.getByLabelText('Width'), { target: { value: '' } });
@@ -354,6 +363,15 @@ describe('EditorPanel', () => {
     const inheritedChips = screen.getAllByText('backend');
     const inheritedOnMsg = inheritedChips.find(c => c.getAttribute('title')?.includes('Inherited'));
     expect(inheritedOnMsg).toBeTruthy();
+  });
+
+  it('colorToHex helper converts named colors, hex codes and defaults', () => {
+    expect(colorToHex('#e11d48')).toBe('#e11d48');
+    expect(colorToHex('#FFF')).toBe('#ffffff');
+    expect(colorToHex('red')).toBe('#ff0000');
+    expect(colorToHex('blue')).toBe('#0000ff');
+    expect(colorToHex(undefined)).toBe('#000000');
+    expect(colorToHex('', '#ffffff')).toBe('#ffffff');
   });
 });
 

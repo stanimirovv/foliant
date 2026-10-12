@@ -24,6 +24,53 @@ export interface ElementTagItem {
   inheritedTags?: string[];
 }
 
+export const NAMED_COLORS: Record<string, string> = {
+  black: '#000000',
+  silver: '#c0c0c0',
+  gray: '#808080',
+  grey: '#808080',
+  white: '#ffffff',
+  maroon: '#800000',
+  red: '#ff0000',
+  purple: '#800080',
+  fuchsia: '#ff00ff',
+  green: '#008000',
+  lime: '#00ff00',
+  olive: '#808000',
+  yellow: '#ffff00',
+  navy: '#000080',
+  blue: '#0000ff',
+  teal: '#008080',
+  aqua: '#00ffff',
+  cyan: '#00ffff',
+  orange: '#ffa500',
+  pink: '#ffc0cb',
+  brown: '#a52a2a',
+  coral: '#ff7f50',
+  crimson: '#dc143c',
+  gold: '#ffd700',
+  indigo: '#4b0082',
+  khaki: '#f0e68c',
+  lavender: '#e6e6fa',
+  magenta: '#ff00ff',
+  plum: '#dda0dd',
+  salmon: '#fa8072',
+  tan: '#d2b48c',
+  turquoise: '#40e0d0',
+  violet: '#ee82ee',
+};
+
+export function colorToHex(color?: string, fallback = '#000000'): string {
+  if (!color) return fallback;
+  const trimmed = color.trim().toLowerCase();
+  if (NAMED_COLORS[trimmed]) return NAMED_COLORS[trimmed];
+  if (/^#[0-9a-f]{6}$/i.test(trimmed)) return trimmed;
+  if (/^#[0-9a-f]{3}$/i.test(trimmed)) {
+    return `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`.toLowerCase();
+  }
+  return fallback;
+}
+
 interface EditorPanelProps {
   element: ModelElement | null;   // selected raw element (null = nothing selected)
   selectedElements?: ModelElement[];  // all selected raw elements
@@ -434,14 +481,42 @@ function ParticipantFields({
 
       <label className="block">
         <span className={fieldLabel}>Color</span>
-        <input
-          type="text"
-          className={fieldInput}
-          placeholder="#rrggbb or name"
-          list="editor-actor-color-list"
-          value={meta?.color ?? ''}
-          onChange={(e) => onSetColor(e.target.value)}
-        />
+        <div className="flex items-center space-x-2">
+          <input
+            type="color"
+            aria-label="Color"
+            data-testid="actor-color-picker"
+            className="h-8 w-12 cursor-pointer rounded border border-gray-200 bg-white p-0.5"
+            list="editor-actor-color-list"
+            value={colorToHex(meta?.color)}
+            onChange={(e) => onSetColor(e.target.value)}
+          />
+          <span className="text-xs text-gray-500 font-mono flex-1">
+            {meta?.color || 'Default'}
+          </span>
+          {meta?.color && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Clear color"
+              data-testid="clear-actor-color"
+              title="Reset to default color"
+              onClick={(e) => {
+                e.preventDefault();
+                onSetColor('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSetColor('');
+                }
+              }}
+              className="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-100 cursor-pointer select-none"
+            >
+              Clear
+            </span>
+          )}
+        </div>
         <datalist id="editor-actor-color-list">
           {actorColors.map(c => <option key={c} value={c} />)}
         </datalist>
@@ -605,14 +680,42 @@ function ArrowFields({
 
       <label className="block">
         <span className={fieldLabel}>Color</span>
-        <input
-          type="text"
-          className={fieldInput}
-          placeholder="#rrggbb or name"
-          list="editor-arrow-color-list"
-          value={arrowStyle?.color ?? ''}
-          onChange={(e) => onSetColor(e.target.value)}
-        />
+        <div className="flex items-center space-x-2">
+          <input
+            type="color"
+            aria-label="Color"
+            data-testid="arrow-color-picker"
+            className="h-8 w-12 cursor-pointer rounded border border-gray-200 bg-white p-0.5"
+            list="editor-arrow-color-list"
+            value={colorToHex(arrowStyle?.color)}
+            onChange={(e) => onSetColor(e.target.value)}
+          />
+          <span className="text-xs text-gray-500 font-mono flex-1">
+            {arrowStyle?.color || 'Default'}
+          </span>
+          {arrowStyle?.color && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Clear color"
+              data-testid="clear-arrow-color"
+              title="Reset to default color"
+              onClick={(e) => {
+                e.preventDefault();
+                onSetColor('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSetColor('');
+                }
+              }}
+              className="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-100 cursor-pointer select-none"
+            >
+              Clear
+            </span>
+          )}
+        </div>
         <datalist id="editor-arrow-color-list">
           {arrowColors.map(c => <option key={c} value={c} />)}
         </datalist>

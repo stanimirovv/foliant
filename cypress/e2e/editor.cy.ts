@@ -58,7 +58,7 @@ describe('Visual editing (e2e)', () => {
         // change label / type / color / width / dash
         cy.contains('label', 'Label').find('input').clear().type('Greetings');
         cy.contains('label', 'Type').find('select').select('-->>');
-        cy.contains('label', 'Color').find('input').clear().type('#e11d48');
+        cy.contains('label', 'Color').find('input').invoke('val', '#e11d48').trigger('input').trigger('change');
         cy.contains('label', 'Width').find('input').clear().type('3');
         cy.contains('label', 'Dash').find('select').select('dashed');
 
@@ -175,21 +175,21 @@ describe('Visual editing (e2e)', () => {
         // node color
         cy.contains('#diagram-container g.node', 'Alice').click();
         cy.contains('label', 'Label').find('input').should('have.value', 'Alice');
-        cy.contains('label', 'Color').find('input').clear().type('red');
+        cy.contains('label', 'Color').find('input').invoke('val', '#e11d48').trigger('input').trigger('change');
         saved();
         cy.request(fileApi(name, dir)).then((res) => {
           const content = (res.body as { content: string }).content;
-          expect(content).to.contain('"A":{"color":"red"}');
+          expect(content).to.contain('"A":{"color":"#e11d48"}');
         });
         // the node fill changed in the rendered SVG
         cy.contains('#diagram-container g.node', 'Alice').find('.label-container').should(($el) => {
-          expect(($el[0] as unknown as SVGElement).style.fill).to.eq('red');
+          expect(($el[0] as unknown as SVGElement).style.fill).to.eq('rgb(225, 29, 72)');
         });
 
         // edge style (the labeled edge)
         cy.contains('#diagram-container g.edgeLabel', 'Reply').click();
         cy.contains('label', 'Label').find('input').should('have.value', 'Reply');
-        cy.contains('label', 'Color').find('input').clear().type('#0ea5e9');
+        cy.contains('label', 'Color').find('input').invoke('val', '#0ea5e9').trigger('input').trigger('change');
         cy.contains('label', 'Width').find('input').clear().type('2');
         cy.contains('label', 'Dash').find('select').select('dotted');
         saved();
