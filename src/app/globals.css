@@ -148,7 +148,8 @@ body {
 }
 
 .arrow-breaker-cap {
-  filter: drop-shadow(0 0 4px currentColor);
+  stroke-linecap: round !important;
+  filter: drop-shadow(0 0 4px currentColor) !important;
   pointer-events: none;
 }
 
@@ -161,26 +162,36 @@ body {
 }
 
 .arrow-barrier-wall {
-  filter: drop-shadow(0 0 5px currentColor);
+  stroke-linecap: round !important;
+  filter: drop-shadow(0 0 5px currentColor) !important;
   pointer-events: none;
 }
 
 .arrow-shockwave-burst {
+  transform-box: fill-box;
+  transform-origin: center;
   animation: mermaid-shockwave-burst 2.6s cubic-bezier(0.1, 0.7, 0.3, 1) infinite;
   pointer-events: none;
   filter: drop-shadow(0 0 5px currentColor);
 }
 
 .arrow-alarm-ping {
+  transform-box: fill-box;
+  transform-origin: center;
   animation: mermaid-alarm-ping 2.2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
   pointer-events: none;
 }
 
 .arrow-x-mark {
+  transform-box: fill-box;
   transform-origin: center;
   animation: mermaid-x-pulse 1.8s ease-in-out infinite;
   pointer-events: none;
   filter: drop-shadow(0 0 5px currentColor);
+}
+
+.arrow-x-mark circle {
+  fill: var(--background, #090d16);
 }
 
 @media (prefers-reduced-motion: reduce) {

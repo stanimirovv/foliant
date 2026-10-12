@@ -230,6 +230,8 @@ function createXMark(
   const g = doc.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('class', `arrow-x-mark ${className}`);
   g.setAttribute('transform', `translate(${cx}, ${cy})`);
+  const gStyle = g as Styleable;
+  gStyle.style.color = color;
 
   if (variant === 'alarm') {
     // Ping radar wave radiating from origin lifeline
@@ -239,6 +241,9 @@ function createXMark(
     ping.setAttribute('fill', 'none');
     ping.setAttribute('stroke', color);
     ping.setAttribute('stroke-width', '1.6');
+    const pingStyle = ping as Styleable;
+    pingStyle.style.color = color;
+    pingStyle.style.stroke = color;
     g.appendChild(ping);
 
     // Alarm badge background
@@ -276,9 +281,11 @@ function createXMark(
   if (variant === 'badge') {
     const circle = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
     circle.setAttribute('r', '8.5');
-    circle.setAttribute('fill', '#090d16');
+    circle.setAttribute('fill', 'var(--background, #090d16)');
     circle.setAttribute('stroke', color);
     circle.setAttribute('stroke-width', '2');
+    const cStyle = circle as Styleable;
+    cStyle.style.stroke = color;
     g.appendChild(circle);
   }
 
@@ -290,6 +297,8 @@ function createXMark(
   l1.setAttribute('stroke', color);
   l1.setAttribute('stroke-width', '2.2');
   l1.setAttribute('stroke-linecap', 'round');
+  const l1Style = l1 as Styleable;
+  l1Style.style.stroke = color;
   g.appendChild(l1);
 
   const l2 = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -300,9 +309,55 @@ function createXMark(
   l2.setAttribute('stroke', color);
   l2.setAttribute('stroke-width', '2.2');
   l2.setAttribute('stroke-linecap', 'round');
+  const l2Style = l2 as Styleable;
+  l2Style.style.stroke = color;
   g.appendChild(l2);
 
   return g;
+}
+
+function injectShockwaveBurst(
+  doc: Document,
+  cx: number,
+  cy: number,
+  color: string,
+  extraClass: string = ''
+): Element {
+  const shockwave = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  shockwave.setAttribute('class', `arrow-shockwave-burst ${extraClass}`.trim());
+  shockwave.setAttribute('cx', String(cx));
+  shockwave.setAttribute('cy', String(cy));
+  shockwave.setAttribute('r', '3');
+  shockwave.setAttribute('fill', 'none');
+  shockwave.setAttribute('stroke', color);
+  shockwave.setAttribute('stroke-width', '2');
+  const sStyle = shockwave as Styleable;
+  sStyle.style.stroke = color;
+  sStyle.style.color = color;
+
+  // Cross-browser SMIL animations for reliable circle expansion (WebKit/Safari and Chromium)
+  const animR = doc.createElementNS('http://www.w3.org/2000/svg', 'animate');
+  animR.setAttribute('attributeName', 'r');
+  animR.setAttribute('values', '3;24');
+  animR.setAttribute('dur', '2.6s');
+  animR.setAttribute('repeatCount', 'indefinite');
+  shockwave.appendChild(animR);
+
+  const animOp = doc.createElementNS('http://www.w3.org/2000/svg', 'animate');
+  animOp.setAttribute('attributeName', 'opacity');
+  animOp.setAttribute('values', '0.9;0');
+  animOp.setAttribute('dur', '2.6s');
+  animOp.setAttribute('repeatCount', 'indefinite');
+  shockwave.appendChild(animOp);
+
+  const animSw = doc.createElementNS('http://www.w3.org/2000/svg', 'animate');
+  animSw.setAttribute('attributeName', 'stroke-width');
+  animSw.setAttribute('values', '2.2;0.5');
+  animSw.setAttribute('dur', '2.6s');
+  animSw.setAttribute('repeatCount', 'indefinite');
+  shockwave.appendChild(animSw);
+
+  return shockwave;
 }
 
 function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color: string, width?: number) {
@@ -345,17 +400,14 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
       barrier.setAttribute('stroke', color);
       barrier.setAttribute('stroke-width', '3');
       barrier.setAttribute('stroke-linecap', 'round');
+      const bStyle = barrier as Styleable;
+      bStyle.style.stroke = color;
+      bStyle.style.color = color;
+      bStyle.style.strokeWidth = '3px';
       target.parentNode?.insertBefore(barrier, target.nextSibling);
 
       // 2. Expanding neon shockwave burst circle at sender origin (identical to receiver!)
-      const shockwave = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      shockwave.setAttribute('class', 'arrow-shockwave-burst arrow-sender-burst');
-      shockwave.setAttribute('cx', String(x1));
-      shockwave.setAttribute('cy', String(y1));
-      shockwave.setAttribute('r', '3');
-      shockwave.setAttribute('fill', 'none');
-      shockwave.setAttribute('stroke', color);
-      shockwave.setAttribute('stroke-width', '2');
+      const shockwave = injectShockwaveBurst(doc, x1, y1, color, 'arrow-sender-burst');
       target.parentNode?.insertBefore(shockwave, target.nextSibling);
 
       // 3. Sender origin error mark badge
@@ -386,6 +438,10 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
       cap1.setAttribute('stroke', color);
       cap1.setAttribute('stroke-width', '2.8');
       cap1.setAttribute('stroke-linecap', 'round');
+      const cap1Style = cap1 as Styleable;
+      cap1Style.style.stroke = color;
+      cap1Style.style.color = color;
+      cap1Style.style.strokeWidth = '2.8px';
       target.parentNode?.insertBefore(cap1, target.nextSibling);
 
       // Right cutoff breaker cap
@@ -398,6 +454,10 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
       cap2.setAttribute('stroke', color);
       cap2.setAttribute('stroke-width', '2.8');
       cap2.setAttribute('stroke-linecap', 'round');
+      const cap2Style = cap2 as Styleable;
+      cap2Style.style.stroke = color;
+      cap2Style.style.color = color;
+      cap2Style.style.strokeWidth = '2.8px';
       target.parentNode?.insertBefore(cap2, target.nextSibling);
 
       // Central floating broken connection badge
@@ -414,17 +474,14 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
       barrier.setAttribute('stroke', color);
       barrier.setAttribute('stroke-width', '3');
       barrier.setAttribute('stroke-linecap', 'round');
+      const bStyle = barrier as Styleable;
+      bStyle.style.stroke = color;
+      bStyle.style.color = color;
+      bStyle.style.strokeWidth = '3px';
       target.parentNode?.insertBefore(barrier, target.nextSibling);
 
       // Expanding neon shockwave burst ring on collision
-      const shockwave = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      shockwave.setAttribute('class', 'arrow-shockwave-burst');
-      shockwave.setAttribute('cx', String(x2));
-      shockwave.setAttribute('cy', String(y2));
-      shockwave.setAttribute('r', '3');
-      shockwave.setAttribute('fill', 'none');
-      shockwave.setAttribute('stroke', color);
-      shockwave.setAttribute('stroke-width', '2');
+      const shockwave = injectShockwaveBurst(doc, x2, y2, color);
       target.parentNode?.insertBefore(shockwave, target.nextSibling);
 
       // Rejection crosshead badge
@@ -435,6 +492,7 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
     }
   }
 }
+
 
 // Applies CONFIG.actors colors to flowchart node shapes (plan 4.6).
 // Sequence-diagram component colors need no post-processing — they flow

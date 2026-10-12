@@ -307,6 +307,14 @@ describe('applyArrowStyles (sequence fixture)', () => {
     expect(rootSender.querySelector('.arrow-barrier-wall')).toBeTruthy();
     expect(rootSender.querySelector('.arrow-shockwave-burst')).toBeTruthy();
     expect(rootSender.querySelector('.arrow-sender-burst')).toBeTruthy();
+    // shockwave includes SMIL animations for cross-browser circle expansion
+    expect(rootSender.querySelector('.arrow-shockwave-burst animate[attributeName="r"]')).toBeTruthy();
+    // decorations carry explicit color property for currentColor drop-shadow
+    const senderShockwave = rootSender.querySelector('.arrow-shockwave-burst') as HTMLElement;
+    expect(senderShockwave.style.color).toBe(rgb('#ef4444'));
+    const senderBarrier = rootSender.querySelector('.arrow-barrier-wall') as HTMLElement;
+    expect(senderBarrier.style.color).toBe(rgb('#ef4444'));
+    expect(senderBarrier.style.stroke).toBe(rgb('#ef4444'));
 
     const outNetwork = applyArrowStyles(SEQ_SVG, model, {
       version: 1,
@@ -315,6 +323,9 @@ describe('applyArrowStyles (sequence fixture)', () => {
     const rootNetwork = parseSvgRoot(outNetwork);
     expect(rootNetwork.querySelector('.arrow-x-network circle')).toBeTruthy();
     expect(rootNetwork.querySelector('.arrow-breaker-cap')).toBeTruthy();
+    const breakerCap = rootNetwork.querySelector('.arrow-breaker-cap') as HTMLElement;
+    expect(breakerCap.style.color).toBe(rgb('#f97316'));
+    expect(breakerCap.style.stroke).toBe(rgb('#f97316'));
 
     const outReceiver = applyArrowStyles(SEQ_SVG, model, {
       version: 1,
@@ -324,6 +335,7 @@ describe('applyArrowStyles (sequence fixture)', () => {
     expect(rootReceiver.querySelector('.arrow-x-receiver')).toBeTruthy();
     expect(rootReceiver.querySelector('.arrow-barrier-wall')).toBeTruthy();
     expect(rootReceiver.querySelector('.arrow-shockwave-burst')).toBeTruthy();
+    expect(rootReceiver.querySelector('.arrow-shockwave-burst animate[attributeName="r"]')).toBeTruthy();
   });
 
   it('exports 6 animated arrow presets and 10 base colors (5 positive, 5 error)', () => {
