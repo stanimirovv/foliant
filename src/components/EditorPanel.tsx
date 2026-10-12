@@ -165,7 +165,7 @@ export default function EditorPanel({
   const activeElement = isMultiSelect ? null : (element ?? (selectedElements && selectedElements.length === 1 ? selectedElements[0] : null));
 
   return (
-    <div className="p-4">
+    <div className="p-4" data-testid="editor-panel">
       <h2 className="text-xs font-bold uppercase text-gray-500 dark:text-slate-400 mb-2">Editor</h2>
       {!isMultiSelect && !activeElement && (
         <>

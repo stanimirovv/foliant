@@ -196,7 +196,65 @@ body {
   .arrow-anim-hesitate,
   .arrow-shockwave-burst,
   .arrow-alarm-ping,
-  .arrow-x-mark {
+  .arrow-x-mark,
+  .diff-line-changed,
+  .diff-gutter-changed {
     animation: none !important;
   }
 }
+
+/* Source Code Diff line & gutter highlight styles with 5s gentle fade */
+@keyframes diff-line-fade {
+  0% {
+    background-color: rgba(16, 185, 129, 0.32);
+  }
+  25% {
+    background-color: rgba(16, 185, 129, 0.26);
+  }
+  60% {
+    background-color: rgba(16, 185, 129, 0.18);
+  }
+  85% {
+    background-color: rgba(16, 185, 129, 0.08);
+  }
+  100% {
+    background-color: rgba(16, 185, 129, 0.02);
+  }
+}
+
+@keyframes diff-gutter-fade {
+  0% {
+    background-color: #10b981;
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.7);
+  }
+  25% {
+    background-color: #10b981;
+    opacity: 1;
+    box-shadow: 0 0 4px rgba(16, 185, 129, 0.4);
+  }
+  60% {
+    background-color: #10b981;
+    opacity: 0.85;
+    box-shadow: none;
+  }
+  85% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 0.15;
+  }
+}
+
+.diff-line-changed {
+  background-color: rgba(16, 185, 129, 0.25) !important;
+  animation: diff-line-fade 5s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
+}
+
+.diff-gutter-changed {
+  background-color: #10b981 !important;
+  width: 4px !important;
+  margin-left: 2px;
+  animation: diff-gutter-fade 5s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
+}
+

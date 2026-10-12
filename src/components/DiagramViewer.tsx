@@ -13,6 +13,7 @@ import {
 } from '@/lib/svgmap';
 import { DiagramConfig, StickyNote as StickyNoteType } from '@/lib/views';
 import { MessageInsertPosition } from '@/lib/editor';
+import { Lock } from 'lucide-react';
 import StickyNote from './StickyNote';
 
 interface DiagramViewerProps {
@@ -20,6 +21,7 @@ interface DiagramViewerProps {
   searchQuery: string;
   theme: 'default' | 'dark';
   editMode?: boolean;
+  isVisualLocked?: boolean;
   arrowStyles?: DiagramConfig | null;  // resolved config (rewriteArrowStyles); its arrows are applied
   nodeColors?: DiagramConfig | null;   // raw config; actors colors applied to flowchart nodes
   selection?: string | string[] | null;           // selected processed element key(s)
@@ -335,6 +337,7 @@ export default function DiagramViewer({
   searchQuery,
   theme,
   editMode = false,
+  isVisualLocked = false,
   arrowStyles = null,
   nodeColors = null,
   selection = null,
@@ -358,7 +361,7 @@ export default function DiagramViewer({
   const diagramType = useMemo(() => parseModel(code).type, [code]);
   const isSequenceDiagram = diagramType === 'sequence';
   const isFlowchartDiagram = diagramType === 'flowchart';
-  const panExcluded = editMode && (isSequenceDiagram || isFlowchartDiagram) && !!onSelect;
+  const panExcluded = editMode && !isVisualLocked && (isSequenceDiagram || isFlowchartDiagram) && !!onSelect;
   const panExclusions = useMemo(() => {
     const base = isFlowchartDiagram ? NODE_PAN_EXCLUSIONS : PARTICIPANT_PAN_EXCLUSIONS;
     return [...STICKY_PAN_EXCLUSIONS, ...(panExcluded ? base : [])];
@@ -519,7 +522,7 @@ export default function DiagramViewer({
     if ((e.target as Element).closest('.sticky-note-card')) {
       return;
     }
-    if (!editMode || e.button !== 0) return;
+    if (!editMode || isVisualLocked || e.button !== 0) return;
     const ctx = getSvgAndModel();
     if (!ctx || (ctx.model.type !== 'sequence' && ctx.model.type !== 'flowchart')) return;
     if (!onSelect) return;
@@ -988,7 +991,7 @@ export default function DiagramViewer({
     if ((e.target as Element).closest('.sticky-note-card')) {
       return;
     }
-    if (!editMode || !onSelect) return;
+    if (!editMode || isVisualLocked || !onSelect) return;
     const ctx = getSvgAndModel();
     if (!ctx) return;
     const key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model);
@@ -1007,6 +1010,15 @@ export default function DiagramViewer({
           : 'bg-white border-gray-200 text-gray-900'
       }`}
     >
+      {isVisualLocked && (
+        <div
+          data-testid="visual-locked-banner"
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center space-x-2 px-3 py-1.5 rounded-full shadow-lg border border-amber-500/40 bg-amber-500/10 backdrop-blur-md text-amber-500 dark:text-amber-400 text-xs font-medium pointer-events-none select-none transition-all"
+        >
+          <Lock size={13} className="flex-shrink-0" />
+          <span>Visual edits locked (editing source code)</span>
+        </div>
+      )}
       {error && (
         <div
           className={`absolute top-0 left-0 w-full p-2 z-10 text-sm overflow-auto max-h-32 ${
@@ -1020,7 +1032,7 @@ export default function DiagramViewer({
       )}
       <div
         id="diagram-container"
-        className={`w-full h-full ${editMode ? 'cursor-pointer' : ''}`}
+        className={`w-full h-full ${editMode ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
         onClick={handleDiagramClick}
         onMouseDownCapture={handleMouseDownCapture}
       >

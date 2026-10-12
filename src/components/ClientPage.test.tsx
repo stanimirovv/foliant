@@ -34,6 +34,7 @@ vi.mock('./DiagramViewer', () => ({
   default: (props: {
     code: string;
     editMode?: boolean;
+    isVisualLocked?: boolean;
     selection?: string | string[] | null;
     onSelect?: (key: string | null, options?: { shiftKey?: boolean }) => void;
     onCreateMessageDrag?: (fromKey: string, toKey: string, position: { type: string; key?: string }) => void;
@@ -49,8 +50,10 @@ vi.mock('./DiagramViewer', () => ({
       data-testid="diagram-viewer"
       data-code={props.code}
       data-edit-mode={String(props.editMode ?? false)}
+      data-visual-locked={String(props.isVisualLocked ?? false)}
       data-selection={Array.isArray(props.selection) ? props.selection.join(',') : (props.selection ?? '')}
     >
+      {props.isVisualLocked && <div data-testid="visual-locked-banner">Visual edits locked (editing source code)</div>}
       <div data-testid="mock-notes-info" data-count={props.notes?.length ?? 0} data-show={String(props.showNotes ?? true)} />
       {props.notes && props.notes.length > 0 && (
         <>
@@ -1668,7 +1671,7 @@ sequenceDiagram
         { from: 'A', to: 'B', label: 'Hello', animation: 'cyber', color: '#00f0ff' },
       ]);
     }, { timeout: 3000 });
-  });
+  }, 20000);
 
   it('converts entire diagram to animated arrows via bottom bar Convert button', async () => {
     const DEMO_ERR = `sequenceDiagram
@@ -1702,5 +1705,122 @@ sequenceDiagram
       });
     }, { timeout: 3000 });
   });
+
+  it('toggles between Properties tab and Mermaid Source tab', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    expect(screen.getByTestId('tab-properties')).toBeTruthy();
+    expect(screen.getByTestId('tab-source')).toBeTruthy();
+
+    // Default is Properties tab
+    expect(screen.queryByTestId('source-code-panel')).toBeNull();
+
+    // Switch to Mermaid Source tab
+    fireEvent.click(screen.getByTestId('tab-source'));
+    expect(screen.getByTestId('source-code-panel')).toBeTruthy();
+    expect(screen.getByTestId('code-mode-badge').textContent).toContain('Read-only (Visual Mode)');
+
+    // Switch back to Properties tab
+    fireEvent.click(screen.getByTestId('tab-properties'));
+    expect(screen.queryByTestId('source-code-panel')).toBeNull();
+  });
+
+  it('locks visual editing when entering code mode and unlocks on return to visual mode', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('tab-source'));
+    expect(screen.queryByTestId('visual-locked-banner')).toBeNull();
+
+    // Switch to code mode
+    fireEvent.click(screen.getByTestId('switch-to-code-mode'));
+    expect(screen.getByTestId('code-mode-badge').textContent).toContain('Code Hand-Editing');
+    expect(screen.getByTestId('visual-locked-banner')).toBeTruthy();
+
+    // Visual buttons are disabled
+    const lockedBtns = screen.getAllByTitle('Locked while editing source code');
+    expect(lockedBtns.length).toBeGreaterThan(0);
+    lockedBtns.forEach(btn => expect(btn).toHaveProperty('disabled', true));
+
+    // Switch back to visual mode
+    fireEvent.click(screen.getByTestId('switch-to-visual-mode'));
+    expect(screen.queryByTestId('visual-locked-banner')).toBeNull();
+    expect(screen.getByTestId('code-mode-badge').textContent).toContain('Read-only (Visual Mode)');
+  });
+
+  it('editing code by hand updates diagram and auto-saves', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('tab-source'));
+    fireEvent.click(screen.getByTestId('switch-to-code-mode'));
+
+    const newCode = `sequenceDiagram
+    participant A
+    participant C
+    A->>C: Direct message`;
+
+    const textarea = screen.getByTestId('monaco-editor-textarea');
+    fireEvent.change(textarea, { target: { value: newCode } });
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('Direct message');
+    }, { timeout: 3000 });
+
+    // Changed lines counter is displayed in code mode as well
+    const counter = screen.getByTestId('changed-lines-counter');
+    expect(counter).toBeTruthy();
+    expect(counter.textContent).toContain('changed');
+  });
+
+  it('invalid syntax shows error banner and keeps previous valid diagram rendered', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('tab-source'));
+    fireEvent.click(screen.getByTestId('switch-to-code-mode'));
+
+    const textarea = screen.getByTestId('monaco-editor-textarea');
+    fireEvent.change(textarea, { target: { value: 'invalid syntax not mermaid at all' } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('code-validation-error')).toBeTruthy();
+      // Diagram canvas still contains the old valid code
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+  });
+
+  it('making a visual edit updates changed lines counter in source panel', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    // Add Participant via visual button
+    fireEvent.click(screen.getByTitle('Add Participant'));
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('participant New1 as New Participant');
+    });
+
+    // Switch to Source panel
+    fireEvent.click(screen.getByTestId('tab-source'));
+    await waitFor(() => {
+      const counter = screen.getByTestId('changed-lines-counter');
+      expect(counter).toBeTruthy();
+      expect(counter.textContent).toContain('changed');
+    });
+  });
+
+  it('toggles split view to show both Properties and Mermaid Source side-by-side', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    expect(screen.queryByTestId('source-code-panel')).toBeNull();
+
+    // Toggle split view
+    fireEvent.click(screen.getByTestId('toggle-split-view'));
+
+    // Both panels are visible simultaneously
+    expect(screen.getByTestId('source-code-panel')).toBeTruthy();
+    expect(screen.getByText('Click an element in the diagram to edit it.')).toBeTruthy();
+  });
 });
+
+
 

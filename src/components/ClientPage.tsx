@@ -4,12 +4,15 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
+import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, ActorTransformOptions } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
+import { computeLineDiff } from '@/lib/sourceDiff';
+import mermaid from 'mermaid';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
@@ -77,6 +80,51 @@ export default function ClientPage() {
   // flow through the same rawCode state, so auto-save applies to them too.
   const [historyPast, setHistoryPast] = useState<string[]>([]);
   const [historyFuture, setHistoryFuture] = useState<string[]>([]);
+
+  // Source Code panel and visual edit mutual exclusion state:
+  const [sidebarTab, setSidebarTab] = useState<'properties' | 'source'>('properties');
+  const [isSplitView, setIsSplitView] = useState(false);
+  const [editModeKind, setEditModeKind] = useState<'visual' | 'code'>('visual');
+  const [changedLines, setChangedLines] = useState<number[]>([]);
+  const [sourceValidationError, setSourceValidationError] = useState<string | null>(null);
+  const changedLinesTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const updateChangedLines = useCallback((lines: number[]) => {
+    if (changedLinesTimerRef.current) {
+      clearTimeout(changedLinesTimerRef.current);
+      changedLinesTimerRef.current = null;
+    }
+    setChangedLines(lines);
+    if (lines.length > 0) {
+      const timer = setTimeout(() => {
+        setChangedLines([]);
+        changedLinesTimerRef.current = null;
+      }, 5000);
+      if (typeof timer === 'object' && timer && 'unref' in timer) {
+        timer.unref();
+      }
+      changedLinesTimerRef.current = timer;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (changedLinesTimerRef.current) {
+        clearTimeout(changedLinesTimerRef.current);
+      }
+    };
+  }, []);
+
+  const switchToCodeMode = () => {
+    setEditModeKind('code');
+    setSidebarTab('source');
+    setSelection(null);
+  };
+
+  const switchToVisualMode = () => {
+    setEditModeKind('visual');
+    setSourceValidationError(null);
+  };
   
   const currentFile = searchParams.get('file');
   const searchQuery = searchParams.get('q') || '';
@@ -283,6 +331,13 @@ export default function ClientPage() {
     // Switching files or directories resets the undo history (Section 4.11).
     setHistoryPast([]);
     setHistoryFuture([]);
+    setEditModeKind('visual');
+    if (changedLinesTimerRef.current) {
+      clearTimeout(changedLinesTimerRef.current);
+      changedLinesTimerRef.current = null;
+    }
+    setChangedLines([]);
+    setSourceValidationError(null);
   }, [currentFile, loadFile]);
 
   useEffect(() => {
@@ -401,6 +456,7 @@ export default function ClientPage() {
   // Edit mode is ON by default when a diagram is opened; `edit=0` opts out
   // (the toolbar toggle flips between the two). `edit=1` still works.
   const editMode = editSupported && searchParams.get('edit') !== '0';
+  const isVisualLocked = editMode && editModeKind === 'code';
 
   const selectionMap = useMemo(
     () => buildSelectionMap(rawCode, processedCode, viewsData, actorOptions),
@@ -581,11 +637,38 @@ export default function ClientPage() {
 
   // Commit a new raw text state: push the current state onto the undo stack
   // (before the auto-save debounce fires) and clear the redo stack.
-  const commitEdit = (newCode: string) => {
+  const commitEdit = useCallback((newCode: string, isFromVisualEdit: boolean = true) => {
+    const diff = computeLineDiff(rawCode, newCode);
+    updateChangedLines(diff.changedLines);
     setHistoryPast(past => [...past, rawCode].slice(-HISTORY_LIMIT));
     setHistoryFuture([]);
     setRawCode(newCode);
-  };
+  }, [rawCode, updateChangedLines]);
+
+  const handleHandEditCode = useCallback(async (newCode: string) => {
+    if (newCode === rawCode) return;
+    const diff = computeLineDiff(rawCode, newCode);
+    updateChangedLines(diff.changedLines);
+    try {
+      const model = parseModel(newCode);
+      if (model.type === 'unknown' && newCode.trim().length > 0) {
+        throw new Error('Unknown diagram type. Expected sequenceDiagram or flowchart/graph');
+      }
+      const config = parseViewsData(newCode);
+      const transformed = transformActors(newCode, config, actorOptions);
+      const processed = processMermaid(transformed, {
+        isRegionVisible: (region) => !hiddenPaths.has(region.path),
+      });
+      if (typeof mermaid !== 'undefined' && mermaid.parse) {
+        await mermaid.parse(processed.code);
+      }
+      setSourceValidationError(null);
+      commitEdit(newCode, false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSourceValidationError(msg);
+    }
+  }, [rawCode, actorOptions, hiddenPaths, commitEdit, updateChangedLines]);
 
   const applyEditResult = (result: EditResult) => {
     if (result.warning) {
@@ -642,16 +725,20 @@ export default function ClientPage() {
     const previous = historyPast[historyPast.length - 1];
     setHistoryPast(historyPast.slice(0, -1));
     setHistoryFuture([...historyFuture, rawCode].slice(-HISTORY_LIMIT));
+    const diff = computeLineDiff(rawCode, previous);
+    updateChangedLines(diff.changedLines);
     setRawCode(previous);
-  }, [historyPast, historyFuture, rawCode]);
+  }, [historyPast, historyFuture, rawCode, updateChangedLines]);
 
   const redo = useCallback(() => {
     if (historyFuture.length === 0) return;
     const next = historyFuture[historyFuture.length - 1];
     setHistoryFuture(historyFuture.slice(0, -1));
     setHistoryPast([...historyPast, rawCode].slice(-HISTORY_LIMIT));
+    const diff = computeLineDiff(rawCode, next);
+    updateChangedLines(diff.changedLines);
     setRawCode(next);
-  }, [historyPast, historyFuture, rawCode]);
+  }, [historyPast, historyFuture, rawCode, updateChangedLines]);
 
   const [copied, setCopied] = useState(false);
 
@@ -1285,24 +1372,27 @@ export default function ClientPage() {
               <>
                 <button
                   onClick={handleAddParticipant}
-                  title="Add Participant"
+                  disabled={isVisualLocked}
+                  title={isVisualLocked ? 'Locked while editing source code' : 'Add Participant'}
                   className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
                     isDark ? 'border-slate-700 text-slate-200 hover:bg-slate-800' : 'border-gray-200 hover:bg-gray-100'
-                  }`}
+                  } ${isVisualLocked ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
                   <UserPlus size={14} />
                   <span>Participant</span>
                 </button>
                 <button
                   onClick={handleAddMessage}
-                  disabled={componentElements.length === 0}
-                  title={componentElements.length === 0
-                    ? 'Add a participant first'
-                    : 'Add Message'}
+                  disabled={isVisualLocked || componentElements.length === 0}
+                  title={isVisualLocked
+                    ? 'Locked while editing source code'
+                    : componentElements.length === 0
+                      ? 'Add a participant first'
+                      : 'Add Message'}
                   className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
                     isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
                   } ${
-                    componentElements.length === 0
+                    isVisualLocked || componentElements.length === 0
                       ? 'opacity-40 cursor-not-allowed'
                       : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
                   }`}
@@ -1312,13 +1402,13 @@ export default function ClientPage() {
                 </button>
                 <button
                   onClick={handleAddNote}
-                  disabled={!rawCode}
-                  title="Add Sticky Note"
+                  disabled={isVisualLocked || !rawCode}
+                  title={isVisualLocked ? 'Locked while editing source code' : 'Add Sticky Note'}
                   data-testid="add-sticky-note"
                   className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
                     isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
                   } ${
-                    !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-amber-950/40 hover:border-amber-700/60' : 'hover:bg-amber-50 hover:border-amber-300')
+                    isVisualLocked || !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-amber-950/40 hover:border-amber-700/60' : 'hover:bg-amber-50 hover:border-amber-300')
                   }`}
                 >
                   <StickyNoteIcon size={14} className="text-amber-500" />
@@ -1414,6 +1504,7 @@ export default function ClientPage() {
               searchQuery={searchQuery}
               theme={theme}
               editMode={editMode}
+              isVisualLocked={isVisualLocked}
               arrowStyles={resolvedArrowStyles}
               nodeColors={viewsData}
               selection={processedSelection}
@@ -1427,42 +1518,162 @@ export default function ClientPage() {
               onUpdateNote={handleUpdateNote}
               onDeleteNote={handleDeleteNote}
             />
-            <BottomAnimatedArrowBar
-              currentAnimation={selectedArrowStyle?.animation}
-              currentColor={selectedArrowStyle?.color}
-              hasSelectedArrow={Boolean(selectedArrow)}
-              onSelectAnimation={handleSetAnimation}
-              onSelectColor={handleSetColor}
-              onConvertDiagram={handleConvertDiagram}
-            />
+            {!isVisualLocked && (
+              <BottomAnimatedArrowBar
+                currentAnimation={selectedArrowStyle?.animation}
+                currentColor={selectedArrowStyle?.color}
+                hasSelectedArrow={Boolean(selectedArrow)}
+                onSelectAnimation={handleSetAnimation}
+                onSelectColor={handleSetColor}
+                onConvertDiagram={handleConvertDiagram}
+              />
+            )}
           </div>
           {editMode && (
-            <div className={`w-72 flex-shrink-0 border-l overflow-y-auto transition-colors ${
-              isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
-            }`}>
-              <EditorPanel
-                element={selectedRawElement}
-                selectedElements={selectedRawElements}
-                elementsTagInfo={selectedElementsTagInfo}
-                diagramType={rawModel.type}
-                config={viewsData}
-                arrowStyle={selectedArrowStyle}
-                arrowTags={selectedArrowTags}
-                warning={editWarning}
-                pendingDelete={pendingDelete}
-                onEditLabel={handleEditLabel}
-                onSetColor={handleSetColor}
-                onSetType={handleSetType}
-                onSetWidth={handleSetWidth}
-                onSetDash={handleSetDash}
-                onSetAnimation={handleSetAnimation}
-                onAddTag={handleAddTag}
-                onRemoveTag={handleRemoveTag}
-                onSetKeyMode={handleSetArrowKeyMode}
-                onRequestDelete={handleRequestDelete}
-                onConfirmDelete={handleConfirmDelete}
-                onCancelDelete={handleCancelDelete}
-              />
+            <div
+              className={`flex-shrink-0 border-l flex flex-col transition-all ${
+                isSplitView ? 'w-[640px]' : 'w-80'
+              } ${
+                isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
+              }`}
+            >
+              {/* Tab Bar Header */}
+              <div
+                className={`flex items-center justify-between border-b px-2 py-1.5 text-xs font-medium select-none ${
+                  isDark ? 'border-slate-800 bg-slate-900' : 'border-gray-200 bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center space-x-1">
+                  <button
+                    onClick={() => {
+                      setSidebarTab('properties');
+                      if (editModeKind === 'code') {
+                        switchToVisualMode();
+                      }
+                    }}
+                    data-testid="tab-properties"
+                    className={`flex items-center space-x-1 px-2.5 py-1 rounded transition-colors ${
+                      sidebarTab === 'properties' && !isSplitView
+                        ? (isDark ? 'bg-slate-800 text-blue-400 font-semibold shadow-sm' : 'bg-white text-blue-600 font-semibold shadow-sm')
+                        : (isDark ? 'text-slate-400 hover:text-slate-200' : 'text-gray-500 hover:text-gray-900')
+                    }`}
+                  >
+                    <Sliders size={13} />
+                    <span>Properties</span>
+                  </button>
+                  <button
+                    onClick={() => setSidebarTab('source')}
+                    data-testid="tab-source"
+                    className={`flex items-center space-x-1 px-2.5 py-1 rounded transition-colors ${
+                      sidebarTab === 'source' && !isSplitView
+                        ? (isDark ? 'bg-slate-800 text-blue-400 font-semibold shadow-sm' : 'bg-white text-blue-600 font-semibold shadow-sm')
+                        : (isDark ? 'text-slate-400 hover:text-slate-200' : 'text-gray-500 hover:text-gray-900')
+                    }`}
+                  >
+                    <Code size={13} />
+                    <span>Mermaid Source</span>
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setIsSplitView(!isSplitView)}
+                  title={isSplitView ? 'Single tab view' : 'Split view (side-by-side)'}
+                  data-testid="toggle-split-view"
+                  className={`p-1 rounded transition-colors ${
+                    isSplitView
+                      ? (isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-100 text-blue-700')
+                      : (isDark ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' : 'text-gray-500 hover:bg-gray-100')
+                  }`}
+                >
+                  <Columns size={14} />
+                </button>
+              </div>
+
+              {/* Content Area */}
+              <div className="flex-1 min-h-0 flex overflow-hidden">
+                {isSplitView ? (
+                  <>
+                    <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-slate-800 overflow-y-auto">
+                      <EditorPanel
+                        element={selectedRawElement}
+                        selectedElements={selectedRawElements}
+                        elementsTagInfo={selectedElementsTagInfo}
+                        diagramType={rawModel.type}
+                        config={viewsData}
+                        arrowStyle={selectedArrowStyle}
+                        arrowTags={selectedArrowTags}
+                        warning={editWarning}
+                        pendingDelete={pendingDelete}
+                        onEditLabel={handleEditLabel}
+                        onSetColor={handleSetColor}
+                        onSetType={handleSetType}
+                        onSetWidth={handleSetWidth}
+                        onSetDash={handleSetDash}
+                        onSetAnimation={handleSetAnimation}
+                        onAddTag={handleAddTag}
+                        onRemoveTag={handleRemoveTag}
+                        onSetKeyMode={handleSetArrowKeyMode}
+                        onRequestDelete={handleRequestDelete}
+                        onConfirmDelete={handleConfirmDelete}
+                        onCancelDelete={handleCancelDelete}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0 h-full overflow-hidden">
+                      <SourceCodePanel
+                        code={rawCode}
+                        isVisualEditMode={editModeKind === 'visual'}
+                        changedLines={changedLines}
+                        theme={theme}
+                        validationError={sourceValidationError}
+                        onCodeChange={handleHandEditCode}
+                        onSwitchToCodeMode={switchToCodeMode}
+                        onSwitchToVisualMode={switchToVisualMode}
+                        onCopy={handleCopyMermaid}
+                      />
+                    </div>
+                  </>
+                ) : sidebarTab === 'properties' ? (
+                  <div className="w-full h-full overflow-y-auto">
+                    <EditorPanel
+                      element={selectedRawElement}
+                      selectedElements={selectedRawElements}
+                      elementsTagInfo={selectedElementsTagInfo}
+                      diagramType={rawModel.type}
+                      config={viewsData}
+                      arrowStyle={selectedArrowStyle}
+                      arrowTags={selectedArrowTags}
+                      warning={editWarning}
+                      pendingDelete={pendingDelete}
+                      onEditLabel={handleEditLabel}
+                      onSetColor={handleSetColor}
+                      onSetType={handleSetType}
+                      onSetWidth={handleSetWidth}
+                      onSetDash={handleSetDash}
+                      onSetAnimation={handleSetAnimation}
+                      onAddTag={handleAddTag}
+                      onRemoveTag={handleRemoveTag}
+                      onSetKeyMode={handleSetArrowKeyMode}
+                      onRequestDelete={handleRequestDelete}
+                      onConfirmDelete={handleConfirmDelete}
+                      onCancelDelete={handleCancelDelete}
+                    />
+                  </div>
+                ) : (
+                  <div className="w-full h-full overflow-hidden">
+                    <SourceCodePanel
+                      code={rawCode}
+                      isVisualEditMode={editModeKind === 'visual'}
+                      changedLines={changedLines}
+                      theme={theme}
+                      validationError={sourceValidationError}
+                      onCodeChange={handleHandEditCode}
+                      onSwitchToCodeMode={switchToCodeMode}
+                      onSwitchToVisualMode={switchToVisualMode}
+                      onCopy={handleCopyMermaid}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

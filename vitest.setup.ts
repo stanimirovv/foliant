@@ -11,3 +11,46 @@ if (typeof SVGElement !== 'undefined') {
     return 100;
   };
 }
+
+import React from 'react';
+import { vi } from 'vitest';
+
+vi.mock('@monaco-editor/react', () => {
+  return {
+    default: ({ value, onChange, options, onMount }: any) => {
+      React.useEffect(() => {
+        if (onMount) {
+          const fakeEditor = {
+            revealLineInCenter: vi.fn(),
+            deltaDecorations: vi.fn().mockReturnValue([]),
+            onDidFocusEditorText: (cb: any) => ({ dispose: vi.fn() }),
+            getValue: () => value,
+            setValue: vi.fn(),
+          };
+          const fakeMonaco = {
+            Range: class {
+              constructor(public startLineNumber: number, public startColumn: number, public endLineNumber: number, public endColumn: number) {}
+            },
+            editor: {
+              OverviewRulerLane: { Left: 1 },
+            },
+          };
+          onMount(fakeEditor, fakeMonaco);
+        }
+      }, []);
+
+      return React.createElement(
+        'div',
+        { 'data-testid': 'monaco-editor-mock' },
+        React.createElement('textarea', {
+          'data-testid': 'monaco-editor-textarea',
+          value: value ?? '',
+          readOnly: options?.readOnly,
+          onChange: (e: any) => onChange?.(e.target.value),
+        })
+      );
+    },
+  };
+});
+
+

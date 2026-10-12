@@ -1442,4 +1442,30 @@ describe('DiagramViewer sticky notes overlay', () => {
     fireEvent.click(noteCard);
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it('renders locked banner and disables selection and drag when isVisualLocked is true', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        editMode={true}
+        isVisualLocked={true}
+        onSelect={onSelect}
+      />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="visual-locked-banner"]')).toBeTruthy();
+      expect(container.querySelector('[data-testid="visual-locked-banner"]')?.textContent).toContain(
+        'Visual edits locked (editing source code)'
+      );
+      expect(container.querySelector('#diagram-container')?.className).toContain('cursor-not-allowed');
+    });
+
+    const msg = container.querySelector('line[data-id="i1"]')!;
+    fireEvent.click(msg);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });
+
