@@ -1998,6 +1998,73 @@ sequenceDiagram
       expect(code).toContain('end');
     });
   });
+
+  it('when a view is selected, copying mermaid copies the view and source code displays the view in read-only mode with explanation', async () => {
+    const codeWithView = `%% CONFIG: {"version":1,"views":[{"name":"Checkout View","hiddenPaths":["flow=internal"]}]}
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+%% @region-start: flow=internal
+    A->>B: Secret Internal
+%% @region-end
+    A->>B: Public Checkout`;
+
+    await renderInEditMode(codeWithView, 'A->>B: Public Checkout');
+    (navigator.clipboard.writeText as import('vitest').Mock).mockClear();
+
+    // Load view "Checkout View"
+    const loadBtn = screen.getByTestId('load-view-btn-Checkout View');
+    fireEvent.click(loadBtn);
+
+    // Active view banner is displayed explaining the mode to the user
+    const banner = await screen.findByTestId('active-view-banner');
+    expect(banner.textContent).toContain('Checkout View');
+    expect(banner.textContent).toContain('source code is read-only and copying the Mermaid will copy this view');
+
+    // Active badge in saved views list
+    expect(screen.getByTestId('active-view-badge').textContent).toBe('Active');
+
+    // Copying mermaid from toolbar copies the view code (without hidden region)
+    const copyBtn = screen.getByTestId('copy-mermaid');
+    expect(copyBtn.getAttribute('title')).toContain('Checkout View');
+    fireEvent.click(copyBtn);
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+    const copiedCode = (navigator.clipboard.writeText as import('vitest').Mock).mock.calls[0][0];
+    expect(copiedCode).toContain('A->>B: Public Checkout');
+    expect(copiedCode).not.toContain('Secret Internal');
+    expect(copiedCode).not.toContain('%% @region-start');
+
+    // Switch to Mermaid Source tab to verify SourceCodePanel behavior
+    fireEvent.click(screen.getByTestId('tab-source'));
+
+    // Source panel displays notice banner explaining the mode
+    const sourceNotice = await screen.findByTestId('view-source-notice');
+    expect(sourceNotice.textContent).toContain('Displaying view "Checkout View". The source code is read-only. Copying will copy this view.');
+
+    // Source panel badge indicates read-only view mode
+    expect(screen.getByTestId('code-mode-badge').textContent).toContain('Read-only (View: Checkout View)');
+
+    // Textarea displays the view code and is read-only
+    const textarea = screen.getByTestId('monaco-editor-textarea') as HTMLTextAreaElement;
+    expect(textarea.value).toContain('A->>B: Public Checkout');
+    expect(textarea.value).not.toContain('Secret Internal');
+    expect(textarea.readOnly).toBe(true);
+
+    // Copying from source panel also copies the view code
+    (navigator.clipboard.writeText as import('vitest').Mock).mockClear();
+    fireEvent.click(screen.getByTestId('source-panel-copy'));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+    expect((navigator.clipboard.writeText as import('vitest').Mock).mock.calls[0][0]).not.toContain('Secret Internal');
+
+    // Resetting to full diagram exits view mode
+    fireEvent.click(screen.getByTestId('exit-view-banner-btn'));
+    expect(screen.queryByTestId('active-view-banner')).toBeNull();
+    expect(screen.queryByTestId('view-source-notice')).toBeNull();
+
+    // Source code returns to raw code (contains Secret Internal)
+    expect((screen.getByTestId('monaco-editor-textarea') as HTMLTextAreaElement).value).toContain('Secret Internal');
+  });
 });
 
 

@@ -168,4 +168,45 @@ describe('SourceCodePanel', () => {
     fireEvent.click(getByTestId('source-panel-copy'));
     expect(onCopy).toHaveBeenCalled();
   });
+
+  it('renders read-only view mode badge, notice banner, and disables switching to code mode when viewName is provided', () => {
+    const onSwitchToCodeMode = vi.fn();
+    const onExitView = vi.fn();
+
+    const { getByTestId, queryByTestId } = render(
+      <SourceCodePanel
+        code="sequenceDiagram\n    A->>B: Only View"
+        isVisualEditMode={true}
+        theme="default"
+        onCodeChange={vi.fn()}
+        onSwitchToCodeMode={onSwitchToCodeMode}
+        onSwitchToVisualMode={vi.fn()}
+        viewName="Checkout Flow"
+        onExitView={onExitView}
+      />
+    );
+
+    // Badge indicates view mode
+    expect(getByTestId('code-mode-badge').textContent).toContain('Read-only (View: Checkout Flow)');
+
+    // Textarea is read-only
+    const textarea = getByTestId('monaco-editor-textarea') as HTMLTextAreaElement;
+    expect(textarea.readOnly).toBe(true);
+
+    // Notice banner explains read-only view mode to user
+    const notice = getByTestId('view-source-notice');
+    expect(notice.textContent).toContain('Displaying view "Checkout Flow". The source code is read-only. Copying will copy this view.');
+
+    // Edit code button is replaced with view mode indicator
+    expect(queryByTestId('switch-to-code-mode')).toBeNull();
+    expect(getByTestId('view-mode-indicator')).toBeTruthy();
+
+    // Clicking editor container does not switch to code mode
+    fireEvent.click(getByTestId('monaco-editor-mock'));
+    expect(onSwitchToCodeMode).not.toHaveBeenCalled();
+
+    // Exit view button calls onExitView
+    fireEvent.click(getByTestId('exit-view-source-btn'));
+    expect(onExitView).toHaveBeenCalled();
+  });
 });

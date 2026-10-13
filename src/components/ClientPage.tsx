@@ -192,7 +192,15 @@ export default function ClientPage() {
   const mergeCleanKeyParam = searchParams.get('merge_clean_key') || '';
   const mergeCleanKeys = useMemo(() => new Set(mergeCleanKeyParam.split(',').filter(Boolean)), [mergeCleanKeyParam]);
 
+  const viewParam = searchParams.get('view') || '';
+  const [selectedViewName, setSelectedViewName] = useState<string | null>(viewParam || null);
+
+  useEffect(() => {
+    setSelectedViewName(viewParam || null);
+  }, [viewParam]);
+
   const toggleHiddenPath = (path: string) => {
+    setSelectedViewName(null);
     const newSet = new Set(hiddenPaths);
     if (isPathHidden(path, newSet)) {
       newSet.delete(path);
@@ -205,6 +213,7 @@ export default function ClientPage() {
       newSet.add(path);
     }
     const params = new URLSearchParams(searchParams.toString());
+    params.delete('view');
     if (newSet.size > 0) {
       params.set('hidden', Array.from(newSet).join(','));
     } else {
@@ -214,7 +223,9 @@ export default function ClientPage() {
   };
 
   const setActorState = (id: string, state: 'on' | 'off' | 'merged' | 'merged_clean') => {
+    setSelectedViewName(null);
     const params = new URLSearchParams(searchParams.toString());
+    params.delete('view');
     params.delete('merge_color');
     params.delete('merge_clean_color');
 
@@ -330,6 +341,7 @@ export default function ClientPage() {
       setSelection(null);
       setPendingDelete(null);
     }
+    setSelectedViewName(null);
     // Switching files or directories resets the undo history (Section 4.11).
     setHistoryPast([]);
     setHistoryFuture([]);
@@ -431,13 +443,46 @@ export default function ClientPage() {
     hideKeys: Array.from(hideKeys)
   }), [mergeKeys, mergeCleanKeys, hideColors, hideKeys]);
 
+  const activeView = useMemo(() => {
+    if (!selectedViewName || !viewsData?.views) return null;
+    return viewsData.views.find(v => v.name === selectedViewName) || null;
+  }, [viewsData, selectedViewName]);
+  const isViewActive = Boolean(activeView);
+
+  const effectiveHiddenPaths = useMemo(() => {
+    if (activeView) {
+      return new Set(activeView.hiddenPaths || []);
+    }
+    return hiddenPaths;
+  }, [activeView, hiddenPaths]);
+
+  const effectiveActorOptions = useMemo<ActorTransformOptions>(() => {
+    if (activeView) {
+      return {
+        mergeByKeys: activeView.mergeKeys || activeView.mergeByKeys || [],
+        mergeCleanByKeys: activeView.mergeCleanKeys || activeView.mergeCleanByKeys || [],
+        hideColors: activeView.hideColors || [],
+        hideKeys: activeView.hideKeys || [],
+      };
+    }
+    return actorOptions;
+  }, [activeView, actorOptions]);
+
   const { code: processedCode, warnings: procWarnings } = useMemo(() => {
-    const actorTransformed = transformActors(debouncedCode, viewsData, actorOptions);
+    const actorTransformed = transformActors(debouncedCode, viewsData, effectiveActorOptions);
 
     return processMermaid(actorTransformed, {
-      isRegionVisible: (region) => !isPathHidden(region.path, hiddenPaths)
+      isRegionVisible: (region) => !isPathHidden(region.path, effectiveHiddenPaths)
     });
-  }, [debouncedCode, hiddenPaths, viewsData, actorOptions]);
+  }, [debouncedCode, viewsData, effectiveActorOptions, effectiveHiddenPaths]);
+
+  const viewCode = useMemo(() => {
+    const actorTransformed = transformActors(rawCode, viewsData, effectiveActorOptions);
+
+    return processMermaid(actorTransformed, {
+      isRegionVisible: (region) => !isPathHidden(region.path, effectiveHiddenPaths)
+    }).code;
+  }, [rawCode, viewsData, effectiveActorOptions, effectiveHiddenPaths]);
 
   useEffect(() => {
     setWarnings(procWarnings);
@@ -452,8 +497,8 @@ export default function ClientPage() {
   const isVisualLocked = editMode && editModeKind === 'code';
 
   const selectionMap = useMemo(
-    () => buildSelectionMap(rawCode, processedCode, viewsData, actorOptions),
-    [rawCode, processedCode, viewsData, actorOptions]
+    () => buildSelectionMap(rawCode, processedCode, viewsData, effectiveActorOptions),
+    [rawCode, processedCode, viewsData, effectiveActorOptions]
   );
   // Inverse of the selection map (raw key -> processed key) for the highlight.
   const rawToProcessed = useMemo(() => {
@@ -520,8 +565,8 @@ export default function ClientPage() {
     setSelectedKeys(raw ? [raw.key] : []);
   };
   const resolvedArrowStyles = useMemo(
-    () => rewriteArrowStyles(viewsData, actorOptions),
-    [viewsData, actorOptions]
+    () => rewriteArrowStyles(viewsData, effectiveActorOptions),
+    [viewsData, effectiveActorOptions]
   );
 
   const toggleEditMode = () => {
@@ -736,13 +781,14 @@ export default function ClientPage() {
   const [copied, setCopied] = useState(false);
 
   const handleCopyMermaid = async () => {
-    if (!rawCode) return;
+    const codeToCopy = isViewActive ? viewCode : rawCode;
+    if (!codeToCopy) return;
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(rawCode);
+        await navigator.clipboard.writeText(codeToCopy);
       } else if (typeof document !== 'undefined') {
         const textarea = document.createElement('textarea');
-        textarea.value = rawCode;
+        textarea.value = codeToCopy;
         textarea.style.position = 'fixed';
         textarea.style.opacity = '0';
         document.body.appendChild(textarea);
@@ -1080,6 +1126,10 @@ export default function ClientPage() {
     if (!currentFile || !viewsData?.views) return;
     if (!window.confirm(`Delete view "${name}"?`)) return;
 
+    if (selectedViewName === name) {
+      deselectView();
+    }
+
     const currentViews = viewsData.views.filter(v => v.name !== name);
     const newData: DiagramConfig | null = (currentViews.length > 0 || (viewsData && viewsData.actors && Object.keys(viewsData.actors).length > 0)) ? {
       ...(viewsData || {}),
@@ -1098,7 +1148,12 @@ export default function ClientPage() {
   };
 
   const loadView = (view: SavedView) => {
+    setSelectedViewName(view.name);
+    if (editModeKind === 'code') {
+      setEditModeKind('visual');
+    }
     const params = new URLSearchParams(searchParams.toString());
+    params.set('view', view.name);
     if (view.hiddenPaths && view.hiddenPaths.length > 0) {
       params.set('hidden', view.hiddenPaths.join(','));
     } else {
@@ -1124,6 +1179,18 @@ export default function ClientPage() {
     if (hideKeys.length > 0) params.set('hide_key', hideKeys.join(','));
     else params.delete('hide_key');
 
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const deselectView = () => {
+    setSelectedViewName(null);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('view');
+    params.delete('hidden');
+    params.delete('merge_key');
+    params.delete('merge_clean_key');
+    params.delete('hide_key');
+    params.delete('hide_color');
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
@@ -1336,29 +1403,73 @@ export default function ClientPage() {
               <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'} italic`}>No saved views</p>
             ) : (
               <ul className="space-y-2">
-                {viewsData.views.map(view => (
-                  <li key={view.name} className={`flex items-center justify-between p-2 rounded border text-sm group ${isDark ? 'bg-slate-800/60 border-slate-700 text-slate-200' : 'bg-gray-50 border-gray-200 text-gray-800'}`}>
-                    <span className="truncate font-medium flex-1 mr-2" title={view.name}>
-                      {view.name}
-                    </span>
-                    <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={() => loadView(view)} 
-                        className={`p-1 rounded transition-colors ${isDark ? 'text-emerald-400 hover:bg-slate-700' : 'text-green-600 hover:text-green-700 hover:bg-green-100'}`}
-                        title="Load View"
-                      >
-                        <Play size={14} />
-                      </button>
-                      <button 
-                        onClick={() => deleteView(view.name)} 
-                        className={`p-1 rounded transition-colors ${isDark ? 'text-rose-400 hover:bg-slate-700' : 'text-red-500 hover:text-red-600 hover:bg-red-100'}`}
-                        title="Delete View"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </li>
-                ))}
+                {viewsData.views.map(view => {
+                  const isSelected = selectedViewName === view.name;
+                  return (
+                    <li
+                      key={view.name}
+                      data-testid={`saved-view-${view.name}`}
+                      className={`flex items-center justify-between p-2 rounded border text-sm group cursor-pointer transition-colors ${
+                        isSelected
+                          ? (isDark ? 'bg-blue-900/40 border-blue-500 text-blue-200 font-medium' : 'bg-blue-50 border-blue-500 text-blue-800 font-medium')
+                          : (isDark ? 'bg-slate-800/60 border-slate-700 text-slate-200 hover:bg-slate-800' : 'bg-gray-50 border-gray-200 text-gray-800 hover:bg-gray-100')
+                      }`}
+                      onClick={() => {
+                        if (isSelected) {
+                          deselectView();
+                        } else {
+                          loadView(view);
+                        }
+                      }}
+                    >
+                      <span className="truncate font-medium flex-1 mr-2 flex items-center gap-1.5" title={view.name}>
+                        <span className="truncate">{view.name}</span>
+                        {isSelected && (
+                          <span
+                            data-testid="active-view-badge"
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${
+                              isDark ? 'bg-blue-800 text-blue-200' : 'bg-blue-200 text-blue-800'
+                            }`}
+                          >
+                            Active
+                          </span>
+                        )}
+                      </span>
+                      <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isSelected) {
+                              deselectView();
+                            } else {
+                              loadView(view);
+                            }
+                          }} 
+                          className={`p-1 rounded transition-colors ${
+                            isSelected
+                              ? (isDark ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-blue-100')
+                              : (isDark ? 'text-emerald-400 hover:bg-slate-700' : 'text-green-600 hover:text-green-700 hover:bg-green-100')
+                          }`}
+                          title={isSelected ? "Exit View" : "Load View"}
+                          data-testid={`load-view-btn-${view.name}`}
+                        >
+                          <Play size={14} />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteView(view.name);
+                          }} 
+                          className={`p-1 rounded transition-colors ${isDark ? 'text-rose-400 hover:bg-slate-700' : 'text-red-500 hover:text-red-600 hover:bg-red-100'}`}
+                          title="Delete View"
+                          data-testid={`delete-view-btn-${view.name}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -1525,7 +1636,7 @@ export default function ClientPage() {
                 <button
                   onClick={handleCopyMermaid}
                   disabled={!rawCode}
-                  title="Copy Mermaid Code"
+                  title={isViewActive ? `Copy Mermaid (${activeView?.name})` : "Copy Mermaid Code"}
                   data-testid="copy-mermaid"
                   className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
                     isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
@@ -1534,7 +1645,7 @@ export default function ClientPage() {
                   }`}
                 >
                   {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
-                  <span>{copied ? 'Copied' : 'Copy'}</span>
+                  <span>{copied ? 'Copied' : isViewActive ? 'Copy View' : 'Copy'}</span>
                 </button>
               </>
             )}
@@ -1580,6 +1691,35 @@ export default function ClientPage() {
             )}
           </div>
         </div>
+
+        {isViewActive && (
+          <div
+            data-testid="active-view-banner"
+            className={`px-4 py-2 border-b flex items-center justify-between text-xs transition-colors ${
+              isDark ? 'bg-blue-950/40 border-blue-900/60 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-900'
+            }`}
+          >
+            <div className="flex items-center space-x-2">
+              <span className="font-semibold px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] tracking-wide uppercase">
+                View Mode
+              </span>
+              <span>
+                Viewing saved view <strong>&quot;{activeView?.name}&quot;</strong>. The source code is read-only and copying the Mermaid will copy this view.
+              </span>
+            </div>
+            <button
+              onClick={deselectView}
+              data-testid="exit-view-banner-btn"
+              className={`text-xs px-2.5 py-1 rounded font-medium border transition-colors ${
+                isDark
+                  ? 'border-blue-700 hover:bg-blue-900/60 text-blue-200'
+                  : 'border-blue-300 hover:bg-blue-100 text-blue-800'
+              }`}
+            >
+              Reset to full diagram
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 p-4 overflow-hidden relative min-w-0">
@@ -1707,15 +1847,17 @@ export default function ClientPage() {
                     </div>
                     <div className="flex-1 min-w-0 h-full overflow-hidden">
                       <SourceCodePanel
-                        code={rawCode}
-                        isVisualEditMode={editModeKind === 'visual'}
-                        changedLines={changedLines}
+                        code={isViewActive ? viewCode : rawCode}
+                        isVisualEditMode={isViewActive ? true : editModeKind === 'visual'}
+                        changedLines={isViewActive ? [] : changedLines}
                         theme={theme}
-                        validationError={sourceValidationError}
+                        validationError={isViewActive ? null : sourceValidationError}
                         onCodeChange={handleHandEditCode}
                         onSwitchToCodeMode={switchToCodeMode}
                         onSwitchToVisualMode={switchToVisualMode}
                         onCopy={handleCopyMermaid}
+                        viewName={isViewActive ? activeView?.name : null}
+                        onExitView={deselectView}
                       />
                     </div>
                   </>
@@ -1751,15 +1893,17 @@ export default function ClientPage() {
                 ) : (
                   <div className="w-full h-full overflow-hidden">
                     <SourceCodePanel
-                      code={rawCode}
-                      isVisualEditMode={editModeKind === 'visual'}
-                      changedLines={changedLines}
+                      code={isViewActive ? viewCode : rawCode}
+                      isVisualEditMode={isViewActive ? true : editModeKind === 'visual'}
+                      changedLines={isViewActive ? [] : changedLines}
                       theme={theme}
-                      validationError={sourceValidationError}
+                      validationError={isViewActive ? null : sourceValidationError}
                       onCodeChange={handleHandEditCode}
                       onSwitchToCodeMode={switchToCodeMode}
                       onSwitchToVisualMode={switchToVisualMode}
                       onCopy={handleCopyMermaid}
+                      viewName={isViewActive ? activeView?.name : null}
+                      onExitView={deselectView}
                     />
                   </div>
                 )}

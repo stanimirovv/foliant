@@ -14,6 +14,8 @@ export interface SourceCodePanelProps {
   onSwitchToCodeMode: () => void;
   onSwitchToVisualMode: () => void;
   onCopy?: () => void;
+  viewName?: string | null;
+  onExitView?: () => void;
 }
 
 type MonacoEditorInstance = Parameters<OnMount>[0];
@@ -29,6 +31,8 @@ export default function SourceCodePanel({
   onSwitchToCodeMode,
   onSwitchToVisualMode,
   onCopy,
+  viewName = null,
+  onExitView,
 }: SourceCodePanelProps) {
   const [copied, setCopied] = useState(false);
   const editorRef = useRef<MonacoEditorInstance | null>(null);
@@ -36,6 +40,7 @@ export default function SourceCodePanel({
   const decorationsRef = useRef<string[]>([]);
 
   const isDark = theme === 'dark';
+  const isReadOnly = Boolean(viewName) || isVisualEditMode;
 
   const handleCopy = async () => {
     if (onCopy) {
@@ -54,7 +59,7 @@ export default function SourceCodePanel({
     monacoRef.current = monaco;
 
     editor.onDidFocusEditorText(() => {
-      if (isVisualEditMode) {
+      if (!viewName && isVisualEditMode) {
         onSwitchToCodeMode();
       }
     });
@@ -124,7 +129,15 @@ export default function SourceCodePanel({
         }`}
       >
         <div className="flex items-center space-x-2">
-          {isVisualEditMode ? (
+          {viewName ? (
+            <span
+              data-testid="code-mode-badge"
+              className="px-2 py-0.5 rounded text-[11px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/30 flex items-center space-x-1"
+            >
+              <Eye size={12} />
+              <span>Read-only (View: {viewName})</span>
+            </span>
+          ) : isVisualEditMode ? (
             <span
               data-testid="code-mode-badge"
               className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
@@ -153,7 +166,7 @@ export default function SourceCodePanel({
         <div className="flex items-center space-x-1.5">
           <button
             onClick={handleCopy}
-            title="Copy Mermaid source"
+            title={viewName ? `Copy Mermaid for view "${viewName}"` : "Copy Mermaid source"}
             data-testid="source-panel-copy"
             className={`p-1.5 rounded border transition-colors ${
               isDark
@@ -164,7 +177,15 @@ export default function SourceCodePanel({
             {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
           </button>
 
-          {isVisualEditMode ? (
+          {viewName ? (
+            <span
+              data-testid="view-mode-indicator"
+              className="text-[11px] text-gray-500 dark:text-slate-400 italic px-1"
+              title="Exit view to edit diagram code"
+            >
+              View mode
+            </span>
+          ) : isVisualEditMode ? (
             <button
               onClick={onSwitchToCodeMode}
               data-testid="switch-to-code-mode"
@@ -186,6 +207,32 @@ export default function SourceCodePanel({
         </div>
       </div>
 
+      {/* View Mode Notice Banner */}
+      {viewName && (
+        <div
+          data-testid="view-source-notice"
+          className={`px-3 py-2 border-b text-xs flex items-center justify-between ${
+            isDark ? 'bg-blue-950/40 border-blue-800/60 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-800'
+          }`}
+        >
+          <div className="flex items-center space-x-2">
+            <Eye size={14} className="flex-shrink-0 text-blue-500" />
+            <span>
+              Displaying view <strong>&quot;{viewName}&quot;</strong>. The source code is read-only. Copying will copy this view.
+            </span>
+          </div>
+          {onExitView && (
+            <button
+              onClick={onExitView}
+              data-testid="exit-view-source-btn"
+              className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium border border-blue-400/40 hover:bg-blue-500/10 transition-colors whitespace-nowrap"
+            >
+              Exit View
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Validation Error Banner */}
       {validationError && (
         <div
@@ -204,7 +251,7 @@ export default function SourceCodePanel({
       <div
         className="flex-1 min-h-0 relative"
         onClick={() => {
-          if (isVisualEditMode) {
+          if (!viewName && isVisualEditMode) {
             onSwitchToCodeMode();
           }
         }}
@@ -217,7 +264,7 @@ export default function SourceCodePanel({
           onChange={handleCodeChange}
           onMount={handleEditorDidMount}
           options={{
-            readOnly: isVisualEditMode,
+            readOnly: isReadOnly,
             minimap: { enabled: false },
             lineNumbers: 'on',
             scrollBeyondLastLine: false,
@@ -225,9 +272,9 @@ export default function SourceCodePanel({
             wordWrap: 'on',
             fontSize: 13,
             tabSize: 2,
-            renderLineHighlight: isVisualEditMode ? 'none' : 'line',
+            renderLineHighlight: isReadOnly ? 'none' : 'line',
             glyphMargin: true,
-            domReadOnly: isVisualEditMode,
+            domReadOnly: isReadOnly,
           }}
         />
       </div>
