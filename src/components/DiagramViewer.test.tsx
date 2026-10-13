@@ -165,7 +165,18 @@ describe('DiagramViewer', () => {
     });
   });
 
-  it('shift-click calls onSelect with shiftKey option', async () => {
+  it('makes diagram text unselectable with select-none class', async () => {
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container')).toBeTruthy();
+    });
+    expect(container.querySelector('#diagram-container')?.className).toContain('select-none');
+    expect(container.querySelector('[data-testid="diagram-canvas-root"]')?.className).toContain('select-none');
+  });
+
+  it('shift-click calls onSelect with shiftKey option and prevents text selection on mousedown', async () => {
     const onSelect = vi.fn();
     const { container } = render(
       <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={onSelect} />
@@ -173,7 +184,11 @@ describe('DiagramViewer', () => {
     await waitFor(() => {
       expect(container.querySelector('line[data-id="i1"]')).toBeTruthy();
     });
-    fireEvent.click(container.querySelector('line[data-id="i1"]')!, { shiftKey: true });
+    const target = container.querySelector('line[data-id="i1"]')!;
+    const notPrevented = fireEvent.mouseDown(target, { shiftKey: true, button: 0 });
+    expect(notPrevented).toBe(false); // preventDefault was called
+
+    fireEvent.click(target, { shiftKey: true });
     expect(onSelect).toHaveBeenCalledWith('m:0', { shiftKey: true });
   });
 

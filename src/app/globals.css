@@ -25,6 +25,16 @@ body {
   filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.95)) drop-shadow(0 0 12px rgba(59, 130, 246, 0.45));
 }
 
+/* Make diagram canvas and all diagram SVG text unselectable */
+#diagram-container,
+#diagram-container svg,
+#diagram-container svg text,
+#diagram-container svg tspan,
+#diagram-container svg foreignObject {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* --- Mermaid Animated Arrows (6 styles) --- */
 @keyframes mermaid-arrow-flow {
   from { stroke-dashoffset: 28; }

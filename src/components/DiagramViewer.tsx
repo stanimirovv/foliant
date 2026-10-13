@@ -634,7 +634,11 @@ export default function DiagramViewer({
     if (!onSelect) return;
 
     if (e.shiftKey) {
+      e.preventDefault();
       e.stopPropagation();
+      if (typeof window !== 'undefined' && window.getSelection) {
+        window.getSelection()?.removeAllRanges();
+      }
       return;
     }
 
@@ -1145,7 +1149,7 @@ export default function DiagramViewer({
       )}
       <div
         id="diagram-container"
-        className={`w-full h-full ${editMode ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
+        className={`w-full h-full select-none ${editMode ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
         onClick={handleDiagramClick}
         onMouseDownCapture={handleMouseDownCapture}
         onMouseMove={handleContainerMouseMove}
@@ -1156,7 +1160,7 @@ export default function DiagramViewer({
         >
           <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full flex items-center justify-center p-8">
             {svgStr ? (
-              <div className="relative inline-block" data-testid="diagram-canvas-root">
+              <div className="relative inline-block select-none" data-testid="diagram-canvas-root">
                 <div dangerouslySetInnerHTML={{ __html: svgStr }} />
                 {showNotes && notes && notes.length > 0 && (
                   <div className="absolute inset-0 pointer-events-none" data-testid="sticky-notes-layer">
