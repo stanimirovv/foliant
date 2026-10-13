@@ -32,25 +32,16 @@ const baseConfig: DiagramConfig = {
 };
 
 describe('rewriteArrowStyles', () => {
-  it('rewrites endpoints through mergeByColor', () => {
-    const res = rewriteArrowStyles(baseConfig, { mergeByColor: ['red'] });
+  it('rewrites endpoints through mergeByKeys', () => {
+    const res = rewriteArrowStyles(baseConfig, { mergeByKeys: ['backend'] });
     expect(res?.arrows).toEqual([
-      { from: 'MergedColor_red', to: 'MergedColor_red', label: 'internal call', color: 'red' },
-      { from: 'MergedColor_red', to: 'C', label: 'external call', width: 2 },
+      { from: 'MergedKey_backend', to: 'MergedKey_backend', label: 'internal call', color: 'red' },
+      { from: 'MergedKey_backend', to: 'C', label: 'external call', width: 2 },
       { from: 'C', to: 'D', label: 'to internal', dash: 'dotted', occurrence: 1 },
     ]);
   });
 
-  it('rewrites endpoints through mergeByKeys', () => {
-    const res = rewriteArrowStyles(baseConfig, { mergeByKeys: ['backend'] });
-    expect(res?.arrows?.[0]).toMatchObject({ from: 'MergedKey_backend', to: 'MergedKey_backend' });
-    expect(res?.arrows?.[1]).toMatchObject({ from: 'MergedKey_backend', to: 'C' });
-    expect(res?.arrows?.[2]).toMatchObject({ from: 'C', to: 'D' });
-  });
-
-  it('rewrites endpoints through mergeCleanByColor and mergeCleanByKeys', () => {
-    const byColor = rewriteArrowStyles(baseConfig, { mergeCleanByColor: ['red'] });
-    expect(byColor?.arrows?.[0]).toMatchObject({ from: 'MergedColor_red', to: 'MergedColor_red' });
+  it('rewrites endpoints through mergeCleanByKeys', () => {
     const byKeys = rewriteArrowStyles(baseConfig, { mergeCleanByKeys: ['backend'] });
     expect(byKeys?.arrows?.[0]).toMatchObject({ from: 'MergedKey_backend', to: 'MergedKey_backend' });
   });
@@ -80,33 +71,33 @@ describe('rewriteArrowStyles', () => {
   });
 
   it('combines merge and hide', () => {
-    const res = rewriteArrowStyles(baseConfig, { mergeByColor: ['red'], hideKeys: ['internal'] });
+    const res = rewriteArrowStyles(baseConfig, { mergeByKeys: ['backend'], hideKeys: ['internal'] });
     expect(res?.arrows).toEqual([
-      { from: 'MergedColor_red', to: 'MergedColor_red', label: 'internal call', color: 'red' },
-      { from: 'MergedColor_red', to: 'C', label: 'external call', width: 2 },
+      { from: 'MergedKey_backend', to: 'MergedKey_backend', label: 'internal call', color: 'red' },
+      { from: 'MergedKey_backend', to: 'C', label: 'external call', width: 2 },
       // D is hidden: kept as-is (inert)
       { from: 'C', to: 'D', label: 'to internal', dash: 'dotted', occurrence: 1 },
     ]);
   });
 
   it('preserves label and occurrence fields untouched', () => {
-    const res = rewriteArrowStyles(baseConfig, { mergeByColor: ['red'] });
+    const res = rewriteArrowStyles(baseConfig, { mergeByKeys: ['backend'] });
     expect(res?.arrows?.[0].label).toBe('internal call');
     expect(res?.arrows?.[2].occurrence).toBe(1);
     expect(res?.arrows?.[2].dash).toBe('dotted');
   });
 
   it('returns the input unchanged when there is nothing to rewrite', () => {
-    expect(rewriteArrowStyles(null, { mergeByColor: ['red'] })).toBeNull();
-    const noArrows: DiagramConfig = { version: 1, actors: { A: { color: 'red' } } };
-    expect(rewriteArrowStyles(noArrows, { mergeByColor: ['red'] })).toBe(noArrows);
+    expect(rewriteArrowStyles(null, { mergeByKeys: ['backend'] })).toBeNull();
+    const noArrows: DiagramConfig = { version: 1, actors: { A: { keys: ['backend'] } } };
+    expect(rewriteArrowStyles(noArrows, { mergeByKeys: ['backend'] })).toBe(noArrows);
     // no options: no renames
     expect(rewriteArrowStyles(baseConfig, {})).toBe(baseConfig);
   });
 
   it('does not mutate the input config', () => {
     const snapshot = JSON.stringify(baseConfig);
-    rewriteArrowStyles(baseConfig, { mergeByColor: ['red'], hideKeys: ['internal'] });
+    rewriteArrowStyles(baseConfig, { mergeByKeys: ['backend'], hideKeys: ['internal'] });
     expect(JSON.stringify(baseConfig)).toBe(snapshot);
   });
 });
@@ -114,20 +105,20 @@ describe('rewriteArrowStyles', () => {
 describe('buildActorRewriteMap', () => {
   it('computes rename, hide, clean and groups', () => {
     const map = buildActorRewriteMap(baseConfig, {
-      mergeByColor: ['red'],
+      mergeByKeys: ['backend'],
       mergeCleanByKeys: ['frontend'],
       hideKeys: ['internal'],
     });
     expect(Object.fromEntries(map.rename)).toEqual({
-      A: 'MergedColor_red',
-      B: 'MergedColor_red',
+      A: 'MergedKey_backend',
+      B: 'MergedKey_backend',
       C: 'MergedKey_frontend',
     });
     expect(Array.from(map.hide)).toEqual(['D']);
     expect(Array.from(map.clean)).toEqual(['MergedKey_frontend']);
     expect(map.groups).toEqual([
-      { name: 'MergedColor_red', alias: 'Merged red', actors: ['A', 'B'] },
-      { name: 'MergedKey_frontend', alias: 'Merged frontend', actors: ['C'] },
+      { name: 'MergedKey_backend', alias: 'Merged backend', key: 'backend', actors: ['A', 'B'] },
+      { name: 'MergedKey_frontend', alias: 'Merged frontend', key: 'frontend', actors: ['C'] },
     ]);
   });
 
@@ -137,19 +128,21 @@ describe('buildActorRewriteMap', () => {
     expect(empty.hide.size).toBe(0);
     expect(empty.clean.size).toBe(0);
     expect(empty.groups).toEqual([]);
-    const noActors = buildActorRewriteMap({ version: 1 }, { mergeByColor: ['red'] });
+    const noActors = buildActorRewriteMap({ version: 1 }, { mergeByKeys: ['backend'] });
     expect(noActors.rename.size).toBe(0);
   });
 
-  it('derives MergedColor_/MergedKey_ names with the same sanitization as before', () => {
+  it('derives MergedKey_ names with Mermaid sanitization while preserving raw tag in alias', () => {
     const map = buildActorRewriteMap(
-      { version: 1, actors: { A: { color: '#e11d48' }, B: { keys: ['my key'] } } },
-      { mergeByColor: ['#e11d48'], mergeByKeys: ['my key'] }
+      { version: 1, actors: { A: { keys: ['my tag:v1'] }, B: { keys: ['another-tag'] } } },
+      { mergeByKeys: ['my tag:v1', 'another-tag'] }
     );
-    expect(map.rename.get('A')).toBe('MergedColor_e11d48');
-    expect(map.rename.get('B')).toBe('MergedKey_mykey');
-    expect(map.groups[0].alias).toBe('Merged #e11d48');
-    expect(map.groups[1].alias).toBe('Merged my key');
+    expect(map.rename.get('A')).toBe('MergedKey_mytagv1');
+    expect(map.rename.get('B')).toBe('MergedKey_anothertag');
+    expect(map.groups[0].alias).toBe('Merged my tag:v1');
+    expect(map.groups[0].key).toBe('my tag:v1');
+    expect(map.groups[1].alias).toBe('Merged another-tag');
+    expect(map.groups[1].key).toBe('another-tag');
   });
 });
 
@@ -576,20 +569,19 @@ describe('create -> change -> verify (render pipeline, EDITING_PLAN.md Step 5)',
     expect(styleOf(nodeB).fill).toBe('');  // real mermaid renders style="" on node shapes
   });
 
-  it('flowchart: merged nodes get their color from the MergedColor_ id', async () => {
+  it('flowchart: merged nodes are rendered with their MergedKey_ id and neutral default', async () => {
     const raw = `flowchart TD
     A[Alice] --> B[Bob]`;
     const config: DiagramConfig = {
       version: 1,
-      actors: { A: { color: '#e11d48' }, B: { color: '#e11d48' } },
+      actors: { A: { keys: ['backend'] }, B: { keys: ['backend'] } },
     };
     const code = updateViewsData(raw, config);
-    const { svg, processedCode, config: resolved } = await renderPipeline(code, { mergeByColor: ['#e11d48'] });
-    const out = applyStyles(svg, processedCode, resolved, { mergeByColor: ['#e11d48'] });
+    const { svg, processedCode, config: resolved } = await renderPipeline(code, { mergeByKeys: ['backend'] });
+    const out = applyStyles(svg, processedCode, resolved, { mergeByKeys: ['backend'] });
     const root = parseSvgRoot(out);
-    const merged = root.querySelector('g.node[id*="flowchart-MergedColor_e11d48-"] .label-container')!;
+    const merged = root.querySelector('g.node[id*="flowchart-MergedKey_backend-"] .label-container')!;
     expect(merged).toBeTruthy();
-    expect(styleOf(merged).fill).toBe(rgb('#e11d48'));
   });
 });
 

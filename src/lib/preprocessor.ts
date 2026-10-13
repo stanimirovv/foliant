@@ -33,8 +33,6 @@ export interface ProcessResult {
 }
 
 export interface ActorTransformOptions {
-  mergeByColor?: string[];
-  mergeCleanByColor?: string[];
   mergeByKeys?: string[];
   mergeCleanByKeys?: string[];
   hideKeys?: string[];
@@ -49,8 +47,9 @@ interface ParticipantInfo {
 }
 
 export interface ActorMergeGroup {
-  name: string;    // MergedColor_<c> | MergedKey_<k>
-  alias: string;   // Merged <c> | Merged <k> (raw value)
+  name: string;    // MergedKey_<k>
+  alias: string;   // Merged <k> (raw value)
+  key: string;     // raw tag key
   actors: string[];
 }
 
@@ -58,12 +57,11 @@ export interface ActorRewriteMap {
   rename: Map<string, string>;   // actor id -> merged participant name
   hide: Set<string>;             // actor ids whose lines are dropped
   clean: Set<string>;            // merged names whose self-calls are dropped
-  groups: ActorMergeGroup[];     // merge groups, colors first then keys
+  groups: ActorMergeGroup[];     // merge groups by key
 }
 
 // Shared hide/merge computation (EDITING_PLAN.md 4.9). transformActors and
-// rewriteArrowStyles both consume it; MergedColor_/MergedKey_ name derivation
-// is unchanged.
+// rewriteArrowStyles both consume it. Color merging is removed; colors only hide.
 export function buildActorRewriteMap(config: DiagramConfig | null, options: ActorTransformOptions): ActorRewriteMap {
   const rename = new Map<string, string>();
   const hide = new Set<string>();
@@ -71,7 +69,6 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
   const groups: ActorMergeGroup[] = [];
   if (!config || !config.actors) return { rename, hide, clean, groups };
 
-  const colorToActors = new Map<string, string[]>();
   const keyToActors = new Map<string, string[]>();
 
   for (const [actor, meta] of Object.entries(config.actors)) {
@@ -88,38 +85,20 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
       continue;
     }
 
-    let merged = false;
-    if (meta.color) {
-      if (options.mergeByColor?.includes(meta.color) || options.mergeCleanByColor?.includes(meta.color)) {
-        if (!colorToActors.has(meta.color)) {
-          colorToActors.set(meta.color, []);
-        }
-        colorToActors.get(meta.color)!.push(actor);
-        merged = true;
-      }
-    }
-
-    if (!merged && meta.keys) {
+    if (meta.keys) {
       for (const k of meta.keys) {
         if (options.mergeByKeys?.includes(k) || options.mergeCleanByKeys?.includes(k)) {
           if (!keyToActors.has(k)) keyToActors.set(k, []);
           keyToActors.get(k)!.push(actor);
-          merged = true;
           break;
         }
       }
     }
   }
 
-  colorToActors.forEach((actors, color) => {
-    const name = `MergedColor_${color.replace(/[^A-Za-z0-9]/g, '')}`;
-    groups.push({ name, alias: `Merged ${color}`, actors });
-    for (const actor of actors) rename.set(actor, name);
-    if (options.mergeCleanByColor?.includes(color)) clean.add(name);
-  });
   keyToActors.forEach((actors, key) => {
     const name = `MergedKey_${key.replace(/[^A-Za-z0-9]/g, '')}`;
-    groups.push({ name, alias: `Merged ${key}`, actors });
+    groups.push({ name, alias: `Merged ${key}`, key, actors });
     for (const actor of actors) rename.set(actor, name);
     if (options.mergeCleanByKeys?.includes(key)) clean.add(name);
   });
@@ -237,6 +216,7 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   // Extract participants and group by color
   const participants: ParticipantInfo[] = [];
   const restOfCode: string[] = [];
+  const groupMap = new Map(groups.map(g => [g.name, g]));
   
   for (const line of result) {
     if (line.trim().startsWith('sequenceDiagram')) {
@@ -251,10 +231,9 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
       const id = match[3];
       let alias = match[4];
 
-      if (id.startsWith('MergedColor_')) {
-        alias = `Merged ${id.replace('MergedColor_', '')}`;
-      } else if (id.startsWith('MergedKey_')) {
-        alias = `Merged ${id.replace('MergedKey_', '')}`;
+      const mergeGroup = groupMap.get(id);
+      if (mergeGroup) {
+        alias = mergeGroup.alias;
       }
 
       participants.push({
@@ -286,16 +265,11 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     let boxColor = '';
     let boxTitle = '';
 
-    if (p.id.startsWith('MergedColor_')) {
-      const c = p.id.replace('MergedColor_', '');
-      boxId = `color_${c}`;
-      boxColor = c;
-      boxTitle = c.toUpperCase();
-    } else if (p.id.startsWith('MergedKey_')) {
-      const k = p.id.replace('MergedKey_', '');
-      boxId = `key_${k}`;
+    if (groupMap.has(p.id)) {
+      const g = groupMap.get(p.id)!;
+      boxId = `key_${g.name}`;
       boxColor = '#ccc';
-      boxTitle = k.toUpperCase();
+      boxTitle = g.key.toUpperCase();
     } else if (config.actors?.[p.id]?.color) {
       const c = config.actors![p.id].color as string;
       boxId = `color_${c}`;

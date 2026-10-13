@@ -180,14 +180,8 @@ export default function ClientPage() {
   const hiddenPathsParam = searchParams.get('hidden') || '';
   const hiddenPaths = useMemo(() => new Set(hiddenPathsParam.split(',').filter(Boolean)), [hiddenPathsParam]);
 
-  const mergeColorParam = searchParams.get('merge_color') || '';
-  const mergeColors = useMemo(() => new Set(mergeColorParam.split(',').filter(Boolean)), [mergeColorParam]);
-
   const hideColorParam = searchParams.get('hide_color') || '';
   const hideColors = useMemo(() => new Set(hideColorParam.split(',').filter(Boolean)), [hideColorParam]);
-
-  const mergeCleanColorParam = searchParams.get('merge_clean_color') || '';
-  const mergeCleanColors = useMemo(() => new Set(mergeCleanColorParam.split(',').filter(Boolean)), [mergeCleanColorParam]);
 
   const mergeKeyParam = searchParams.get('merge_key') || '';
   const mergeKeys = useMemo(() => new Set(mergeKeyParam.split(',').filter(Boolean)), [mergeKeyParam]);
@@ -197,22 +191,6 @@ export default function ClientPage() {
 
   const mergeCleanKeyParam = searchParams.get('merge_clean_key') || '';
   const mergeCleanKeys = useMemo(() => new Set(mergeCleanKeyParam.split(',').filter(Boolean)), [mergeCleanKeyParam]);
-
-  const toggleSetParam = (paramName: string, value: string, currentSet: Set<string>) => {
-    const newSet = new Set(currentSet);
-    if (newSet.has(value)) {
-      newSet.delete(value);
-    } else {
-      newSet.add(value);
-    }
-    const params = new URLSearchParams(searchParams.toString());
-    if (newSet.size > 0) {
-      params.set(paramName, Array.from(newSet).join(','));
-    } else {
-      params.delete(paramName);
-    }
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  };
 
   const toggleHiddenPath = (path: string) => {
     const newSet = new Set(hiddenPaths);
@@ -237,13 +215,29 @@ export default function ClientPage() {
 
   const setActorState = (type: 'color' | 'key', id: string, state: 'on' | 'off' | 'merged' | 'merged_clean') => {
     const params = new URLSearchParams(searchParams.toString());
-    const mergeParamName = type === 'color' ? 'merge_color' : 'merge_key';
-    const mergeCleanParamName = type === 'color' ? 'merge_clean_color' : 'merge_clean_key';
-    const hideParamName = type === 'color' ? 'hide_color' : 'hide_key';
+    params.delete('merge_color');
+    params.delete('merge_clean_color');
+
+    if (type === 'color') {
+      const currentHide = new Set(hideColors);
+      if (state === 'off') {
+        currentHide.add(id);
+      } else {
+        currentHide.delete(id);
+      }
+      if (currentHide.size > 0) params.set('hide_color', Array.from(currentHide).join(','));
+      else params.delete('hide_color');
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      return;
+    }
+
+    const mergeParamName = 'merge_key';
+    const mergeCleanParamName = 'merge_clean_key';
+    const hideParamName = 'hide_key';
     
-    const currentMerge = new Set(type === 'color' ? mergeColors : mergeKeys);
-    const currentMergeClean = new Set(type === 'color' ? mergeCleanColors : mergeCleanKeys);
-    const currentHide = new Set(type === 'color' ? hideColors : hideKeys);
+    const currentMerge = new Set(mergeKeys);
+    const currentMergeClean = new Set(mergeCleanKeys);
+    const currentHide = new Set(hideKeys);
 
     if (state === 'on') {
       currentMerge.delete(id);
@@ -451,13 +445,11 @@ export default function ClientPage() {
   }, [viewsData]);
 
   const actorOptions = useMemo<ActorTransformOptions>(() => ({
-    mergeByColor: Array.from(mergeColors),
-    mergeCleanByColor: Array.from(mergeCleanColors),
     mergeByKeys: Array.from(mergeKeys),
     mergeCleanByKeys: Array.from(mergeCleanKeys),
     hideColors: Array.from(hideColors),
     hideKeys: Array.from(hideKeys)
-  }), [mergeColors, mergeCleanColors, mergeKeys, mergeCleanKeys, hideColors, hideKeys]);
+  }), [mergeKeys, mergeCleanKeys, hideColors, hideKeys]);
 
   const { code: processedCode, warnings: procWarnings } = useMemo(() => {
     const actorTransformed = transformActors(debouncedCode, viewsData, actorOptions);
@@ -658,7 +650,7 @@ export default function ClientPage() {
 
   // Commit a new raw text state: push the current state onto the undo stack
   // (before the auto-save debounce fires) and clear the redo stack.
-  const commitEdit = useCallback((newCode: string, isFromVisualEdit: boolean = true) => {
+  const commitEdit = useCallback((newCode: string) => {
     const diff = computeLineDiff(rawCode, newCode);
     updateChangedLines(diff.changedLines);
     setHistoryPast(past => [...past, rawCode].slice(-HISTORY_LIMIT));
@@ -684,7 +676,7 @@ export default function ClientPage() {
         await mermaid.parse(processed.code);
       }
       setSourceValidationError(null);
-      commitEdit(newCode, false);
+      commitEdit(newCode);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setSourceValidationError(msg);
@@ -1073,8 +1065,6 @@ export default function ClientPage() {
     const newView: SavedView = {
       name,
       hiddenPaths: Array.from(hiddenPaths),
-      ...(mergeColors.size > 0 && { mergeColors: Array.from(mergeColors) }),
-      ...(mergeCleanColors.size > 0 && { mergeCleanColors: Array.from(mergeCleanColors) }),
       ...(hideColors.size > 0 && { hideColors: Array.from(hideColors) }),
       ...(mergeKeys.size > 0 && { mergeKeys: Array.from(mergeKeys) }),
       ...(mergeCleanKeys.size > 0 && { mergeCleanKeys: Array.from(mergeCleanKeys) }),
@@ -1135,13 +1125,8 @@ export default function ClientPage() {
       params.delete('hidden');
     }
 
-    const mergeColors = view.mergeColors || view.mergeByColor || [];
-    if (mergeColors.length > 0) params.set('merge_color', mergeColors.join(','));
-    else params.delete('merge_color');
-
-    const mergeCleanColors = view.mergeCleanColors || view.mergeCleanByColor || [];
-    if (mergeCleanColors.length > 0) params.set('merge_clean_color', mergeCleanColors.join(','));
-    else params.delete('merge_clean_color');
+    params.delete('merge_color');
+    params.delete('merge_clean_color');
 
     const hideColors = view.hideColors || [];
     if (hideColors.length > 0) params.set('hide_color', hideColors.join(','));
@@ -1318,35 +1303,22 @@ export default function ClientPage() {
                   <span className={`text-xs font-semibold ${isDark ? 'text-slate-500' : 'text-gray-400'} block mb-1`}>By Color</span>
                   <ul className="space-y-2">
                     {availableColors.map(c => {
-                      const currentState = hideColors.has(c) ? 'off' : mergeCleanColors.has(c) ? 'merged_clean' : mergeColors.has(c) ? 'merged' : 'on';
+                      const isHidden = hideColors.has(c);
                       return (
                         <li key={c} className={`text-sm flex flex-col pl-2 border-l-2 ml-1 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
                           <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>{c}</span>
                           <div className={`flex border rounded overflow-hidden text-[10px] mt-1 w-full ${isDark ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
                             <button 
                               onClick={() => setActorState('color', c, 'on')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${!isHidden ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                             >
                               On
                             </button>
                             <button 
                               onClick={() => setActorState('color', c, 'off')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'off' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
+                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${isHidden ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
                             >
                               Off
-                            </button>
-                            <button 
-                              onClick={() => setActorState('color', c, 'merged')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
-                            >
-                              Merged
-                            </button>
-                            <button 
-                              onClick={() => setActorState('color', c, 'merged_clean')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged_clean' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
-                              title="Merge actors and hide their internal self-calls"
-                            >
-                              Clean
                             </button>
                           </div>
                         </li>

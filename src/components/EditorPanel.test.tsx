@@ -465,6 +465,53 @@ describe('EditorPanel', () => {
     fireEvent.click(screen.getByTestId('group-box-button'));
     expect(onGroupParticipants).toHaveBeenCalledWith(['p:0', 'p:1'], 'Core Services', 'LightBlue');
   });
+
+  it('renders type and color in one row, and width and dash in one row for arrows', () => {
+    const props = makeProps({
+      element: message0,
+      arrowStyle: { color: '#e11d48', width: 2, dash: 'solid' },
+    });
+    render(<EditorPanel {...props} />);
+
+    const typeSelect = screen.getByLabelText('Type');
+    const colorInput = screen.getByLabelText('Color');
+    const widthInput = screen.getByLabelText('Width');
+    const dashSelect = screen.getByLabelText('Dash');
+
+    // Type and Color are in the same grid row
+    const typeParent = typeSelect.closest('label')?.parentElement;
+    const colorParent = colorInput.closest('label')?.parentElement;
+    expect(typeParent).toBe(colorParent);
+    expect(typeParent?.className).toContain('grid-cols-2');
+
+    // Width and Dash are in the same grid row
+    const widthParent = widthInput.closest('label')?.parentElement;
+    const dashParent = dashSelect.closest('label')?.parentElement;
+    expect(widthParent).toBe(dashParent);
+    expect(widthParent?.className).toContain('grid-cols-2');
+  });
+
+  it('ensures animated arrows in the properties menu always match the color from the picker', () => {
+    const props = makeProps({
+      element: message0,
+      arrowStyle: { color: '#9333ea' },
+      onSetAnimation: vi.fn(),
+    });
+    render(<EditorPanel {...props} />);
+
+    const arrowPicker = screen.getByTestId('arrow-color-picker') as HTMLInputElement;
+    expect(arrowPicker.value).toBe('#9333ea');
+
+    // All 6 animated arrow previews in the properties menu match the picker color
+    const flowBtn = screen.getByTestId('select-animation-flow');
+    const pulseBtn = screen.getByTestId('select-animation-pulse');
+    const brokenSenderBtn = screen.getByTestId('select-animation-broken-sender');
+
+    expect(flowBtn.querySelector('svg')?.style.color === '#9333ea' || flowBtn.querySelector('svg')?.style.color === 'rgb(147, 51, 234)').toBe(true);
+    expect(pulseBtn.querySelector('svg')?.style.color === '#9333ea' || pulseBtn.querySelector('svg')?.style.color === 'rgb(147, 51, 234)').toBe(true);
+    expect(brokenSenderBtn.querySelector('svg')?.style.color === '#9333ea' || brokenSenderBtn.querySelector('svg')?.style.color === 'rgb(147, 51, 234)').toBe(true);
+    expect(flowBtn.querySelector('marker path')?.getAttribute('fill')).toBe('#9333ea');
+  });
 });
 
 

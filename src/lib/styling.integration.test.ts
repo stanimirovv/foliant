@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { renderPipeline, applyStyles, svgText, parseConfig } from './editorTestHarness';
-import { setActorColor, setArrowStyle } from './editor';
+import { setActorColor, setArrowStyle, addTag } from './editor';
 import { ActorTransformOptions } from './preprocessor';
 import { parseSvgRoot, rgb, styleOf } from './svgTestFixtures';
 
@@ -28,7 +28,9 @@ function buildFixture(): string {
     A->>D: log event`;
   const cA = setActorColor(raw, null, 'p:0', 'red');
   const cB = setActorColor(cA.code, cA.config, 'p:1', 'red');
-  const cC = setActorColor(cB.code, cB.config, 'p:2', 'blue');
+  const tA = addTag(cB.code, cB.config, 'p:0', 'backend');
+  const tB = addTag(tA.code, tA.config, 'p:1', 'backend');
+  const cC = setActorColor(tB.code, tB.config, 'p:2', 'blue');
   const cD = setActorColor(cC.code, cC.config, 'p:3', 'gray');
   const s1 = setArrowStyle(cD.code, cD.config, 'm:0', { color: '#e11d48', width: 3 }); // internal
   const s2 = setArrowStyle(s1.code, s1.config, 'm:2', { color: '#2563eb' });              // external
@@ -47,8 +49,8 @@ describe('R-07 integration: arrows follow the rules of the merging (Step 12)', (
   it('builds the fixture with the expected CONFIG', () => {
     const config = parseConfig(buildFixture());
     expect(config?.actors).toEqual({
-      A: { color: 'red' },
-      B: { color: 'red' },
+      A: { color: 'red', keys: ['backend'] },
+      B: { color: 'red', keys: ['backend'] },
       C: { color: 'blue' },
       D: { color: 'gray' },
     });
@@ -77,11 +79,11 @@ describe('R-07 integration: arrows follow the rules of the merging (Step 12)', (
 
   it('merged: the internal arrow renders as a merged self-call WITH style; the external arrow is restyled to the merged endpoints', async () => {
     const code = buildFixture();
-    const { root, text } = await renderState(code, { mergeByColor: ['red'] });
+    const { root, text } = await renderState(code, { mergeByKeys: ['backend'] });
 
     // A and B collapsed into one actor: two self-calls ('query Db', 'result')
     const selfCalls = Array.from(
-      root.querySelectorAll('[data-et="message"][data-from="MergedColor_red"][data-to="MergedColor_red"]')
+      root.querySelectorAll('[data-et="message"][data-from="MergedKey_backend"][data-to="MergedKey_backend"]')
     );
     expect(selfCalls).toHaveLength(2);
     // exactly the internal arrow carries its style onto the merged self-call
@@ -91,16 +93,16 @@ describe('R-07 integration: arrows follow the rules of the merging (Step 12)', (
     expect(text).toContain('query Db');
 
     // the external arrow was restyled to the merged endpoints
-    const external = root.querySelector('[data-et="message"][data-from="MergedColor_red"][data-to="C"]')!;
+    const external = root.querySelector('[data-et="message"][data-from="MergedKey_backend"][data-to="C"]')!;
     expect(styleOf(external).stroke).toBe(rgb('#2563eb'));
     // the arrow to D is unaffected by the merge
-    const toD = root.querySelector('[data-et="message"][data-from="MergedColor_red"][data-to="D"]')!;
+    const toD = root.querySelector('[data-et="message"][data-from="MergedKey_backend"][data-to="D"]')!;
     expect(styleOf(toD).strokeDasharray).toBe('2 4');
   });
 
   it('clean: the internal self-call is dropped and its style is inert with it', async () => {
     const code = buildFixture();
-    const { root, text } = await renderState(code, { mergeCleanByColor: ['red'] });
+    const { root, text } = await renderState(code, { mergeCleanByKeys: ['backend'] });
 
     // both internal messages are gone
     expect(text).not.toContain('query Db');
@@ -110,9 +112,9 @@ describe('R-07 integration: arrows follow the rules of the merging (Step 12)', (
     expect(root.querySelector('[style*="rgb(225, 29, 72)"]')).toBeNull();
 
     // the external and hidden-target arrows keep their styles
-    const external = root.querySelector('[data-et="message"][data-from="MergedColor_red"][data-to="C"]')!;
+    const external = root.querySelector('[data-et="message"][data-from="MergedKey_backend"][data-to="C"]')!;
     expect(styleOf(external).stroke).toBe(rgb('#2563eb'));
-    const toD = root.querySelector('[data-et="message"][data-from="MergedColor_red"][data-to="D"]')!;
+    const toD = root.querySelector('[data-et="message"][data-from="MergedKey_backend"][data-to="D"]')!;
     expect(styleOf(toD).strokeDasharray).toBe('2 4');
   });
 
@@ -138,7 +140,7 @@ describe('R-07 integration: arrows follow the rules of the merging (Step 12)', (
     const code = buildFixture();
     // merge, then go back to default: styles are keyed by raw endpoints, so
     // they match the original arrows again
-    const merged = await renderState(code, { mergeByColor: ['red'], hideColors: ['gray'] });
+    const merged = await renderState(code, { mergeByKeys: ['backend'], hideColors: ['gray'] });
     expect(merged.text).not.toContain('log event');
     expect(merged.text).not.toContain('query Db result');
 

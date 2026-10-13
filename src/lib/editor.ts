@@ -4,7 +4,7 @@
 // (NFR-02), and malformed input is a no-op with a warning, never a
 // corruption (NFR-01).
 
-import { parseModel, parseShapeToken, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement } from './model';
+import { parseModel, parseShapeToken, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement } from './model';
 import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, DiagramConfig, updateViewsData } from './views';
 import { ANIMATED_ARROW_COLORS } from './styling';
 

@@ -93,4 +93,25 @@ describe('AnimatedArrowSelector', () => {
     fireEvent.click(screen.getByTestId('convert-animated-arrows-btn'));
     expect(onConvertDiagram).toHaveBeenCalledTimes(1);
   });
+
+  it('renders all animated arrows with the currently selected color in compact mode', () => {
+    render(
+      <AnimatedArrowSelector
+        currentAnimation="none"
+        currentColor="#2563eb"
+        compact={true}
+        onSelectAnimation={vi.fn()}
+        onSelectColor={vi.fn()}
+      />
+    );
+
+    for (const preset of ANIMATED_ARROW_PRESETS) {
+      const btn = screen.getByTestId(`select-animation-${preset.id}`);
+      const svg = btn.querySelector('svg');
+      expect(svg).toBeTruthy();
+      expect(svg?.style.color === '#2563eb' || svg?.style.color === 'rgb(37, 99, 235)').toBe(true);
+      const markerPath = btn.querySelector('marker path');
+      expect(markerPath?.getAttribute('fill')).toBe('#2563eb');
+    }
+  });
 });

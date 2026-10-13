@@ -96,7 +96,7 @@ describe('processMermaid', () => {
 });
 
 describe('transformActors', () => {
-  it('merges actors by color', () => {
+  it('colors box actors without merging them', () => {
     const code = `sequenceDiagram
   participant A
   participant B
@@ -109,13 +109,14 @@ describe('transformActors', () => {
         B: { color: 'red' }
       }
     };
-    const result = transformActors(code, config, { mergeByColor: ['red'] });
+    const result = transformActors(code, config, {});
     expect(result).toBe(`sequenceDiagram
     box red RED Zone
-    participant MergedColor_red as Merged red
+    participant A
+    participant B
     end
-  MergedColor_red->>MergedColor_red: Message
-  MergedColor_red->>C: Reply`);
+  A->>B: Message
+  B->>C: Reply`);
   });
 
   it('hides actors by color', () => {
@@ -203,7 +204,7 @@ describe('transformActors', () => {
   MergedKey_backend->>C: Response`);
   });
 
-  it('fixes self-notes when merged and hides self-calls by color (Clean)', () => {
+  it('fixes self-notes when merged and hides self-calls by key (Clean)', () => {
     const code = `sequenceDiagram
   participant A
   participant B
@@ -214,17 +215,34 @@ describe('transformActors', () => {
     const config = {
       version: 1,
       actors: {
-        A: { color: 'red' },
-        B: { color: 'red' }
+        A: { keys: ['backend'] },
+        B: { keys: ['backend'] }
       }
     };
-    const result = transformActors(code, config, { mergeCleanByColor: ['red'] });
+    const result = transformActors(code, config, { mergeCleanByKeys: ['backend'] });
     expect(result).toBe(`sequenceDiagram
-    box red RED Zone
-    participant MergedColor_red as Merged red
+    box #ccc BACKEND Zone
+    participant MergedKey_backend as Merged backend
     end
-  Note over MergedColor_red: Internal computation
-  MergedColor_red->>C: Output`);
+  Note over MergedKey_backend: Internal computation
+  MergedKey_backend->>C: Output`);
+  });
+
+  it('prints the entire tag after "Merged " for tags with special characters and spaces', () => {
+    const code = `sequenceDiagram
+  participant A
+  participant B
+  A->>B: Call`;
+    const config = {
+      version: 1,
+      actors: {
+        A: { keys: ['backend-service:v2'] },
+        B: { keys: ['backend-service:v2'] }
+      }
+    };
+    const result = transformActors(code, config, { mergeByKeys: ['backend-service:v2'] });
+    expect(result).toContain('participant MergedKey_backendservicev2 as Merged backend-service:v2');
+    expect(result).toContain('box #ccc BACKEND-SERVICE:V2 Zone');
   });
 
   it('merges actors by key and hides self calls in a flowchart (Clean)', () => {

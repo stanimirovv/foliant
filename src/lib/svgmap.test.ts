@@ -171,8 +171,8 @@ describe('buildSelectionMap', () => {
   const config: DiagramConfig = {
     version: 1,
     actors: {
-      A: { color: 'red' },
-      B: { color: 'red' },
+      A: { color: 'red', keys: ['backend'] },
+      B: { color: 'red', keys: ['backend'] },
       C: { color: 'blue' },
       D: { keys: ['internal'] },
     },
@@ -181,15 +181,15 @@ describe('buildSelectionMap', () => {
   const process = (code: string, cfg: DiagramConfig | null, options: Parameters<typeof transformActors>[2]) =>
     processMermaid(transformActors(code, cfg, options), { isRegionVisible: () => true }).code;
 
-  it('maps processed keys to raw elements through a color merge', () => {
-    const options = { mergeByColor: ['red'] };
+  it('maps processed keys to raw elements through a key merge', () => {
+    const options = { mergeByKeys: ['backend'] };
     const processed = process(RAW_SEQ, config, options);
     const map = buildSelectionMap(RAW_SEQ, processed, config, options);
     const processedModel = parseModel(processed);
 
     // merged participant maps to the first raw actor of the group
-    const mergedParticipant = processedModel.elements.find(e => e.kind === 'participant' && (e as ParticipantElement).id === 'MergedColor_red')!;
-    expect(mergedParticipant).toMatchObject({ kind: 'participant', id: 'MergedColor_red' });
+    const mergedParticipant = processedModel.elements.find(e => e.kind === 'participant' && (e as ParticipantElement).id === 'MergedKey_backend')!;
+    expect(mergedParticipant).toMatchObject({ kind: 'participant', id: 'MergedKey_backend' });
     expect(map.get(mergedParticipant.key)?.key).toBe('p:0');
 
     // merged internal message maps to the raw A->>B message
@@ -208,14 +208,14 @@ describe('buildSelectionMap', () => {
     const selfCall = processedModel.elements.find(e => e.kind === 'message' && (e as MessageElement).label === 'self call')!;
     expect(map.get(selfCall.key)?.key).toBe('m:3');
 
-    // Note over A,A normalized to Note over MergedColor_red
+    // Note over A,A normalized to Note over MergedKey_backend
     const note = processedModel.elements.find(e => e.kind === 'note')!;
-    expect(note).toMatchObject({ kind: 'note', over: ['MergedColor_red'] });
+    expect(note).toMatchObject({ kind: 'note', over: ['MergedKey_backend'] });
     expect(map.get(note.key)?.key).toBe('note:0');
   });
 
   it('excludes clean-merge self-calls and hidden actors (not selectable)', () => {
-    const options = { mergeCleanByColor: ['red'], hideKeys: ['internal'] };
+    const options = { mergeCleanByKeys: ['backend'], hideKeys: ['internal'] };
     const processed = process(RAW_SEQ, config, options);
     const map = buildSelectionMap(RAW_SEQ, processed, config, options);
     const processedModel = parseModel(processed);
@@ -238,13 +238,13 @@ describe('buildSelectionMap', () => {
     A[Alice] --> B[Bob]
     B -->|Reply| A
     A --> A`;
-    const options = { mergeByColor: ['red'] };
+    const options = { mergeByKeys: ['backend'] };
     const processed = process(raw, config, options);
     const map = buildSelectionMap(raw, processed, config, options);
     const processedModel = parseModel(processed);
 
     const node = processedModel.elements.find(e => e.kind === 'node')!;
-    expect(node).toMatchObject({ kind: 'node', id: 'MergedColor_red' });
+    expect(node).toMatchObject({ kind: 'node', id: 'MergedKey_backend' });
     expect(map.get(node.key)?.key).toBe('n:0');
 
     const edges = processedModel.elements.filter(e => e.kind === 'edge');

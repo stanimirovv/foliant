@@ -531,86 +531,132 @@ function ParticipantFields({
         />
       </label>
 
-      {element.kind === 'participant' && onSetParticipantKind && (
+      {element.kind === 'participant' && onSetParticipantKind ? (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className={fieldLabel}>Type</span>
+            <select
+              className={fieldInput}
+              data-testid="participant-kind-select"
+              value={element.participantType ?? 'participant'}
+              onChange={(e) => onSetParticipantKind(e.target.value as 'participant' | 'actor')}
+            >
+              <option value="participant">Participant (Box)</option>
+              <option value="actor">Actor (Stick figure)</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className={fieldLabel}>Color</span>
+            <div className="flex items-center space-x-1.5">
+              <input
+                type="color"
+                aria-label="Color"
+                data-testid="actor-color-picker"
+                className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
+                list="editor-actor-color-list"
+                value={colorToHex(meta?.color)}
+                onChange={(e) => onSetColor(e.target.value)}
+              />
+              <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={meta?.color || 'Default'}>
+                {meta?.color || 'Default'}
+              </span>
+              {meta?.color && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Clear color"
+                  data-testid="clear-actor-color"
+                  title="Reset to default color"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onSetColor('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSetColor('');
+                    }
+                  }}
+                  className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none shrink-0"
+                >
+                  Clear
+                </span>
+              )}
+            </div>
+            <datalist id="editor-actor-color-list">
+              {actorColors.map(c => <option key={c} value={c} />)}
+            </datalist>
+          </label>
+        </div>
+      ) : (
         <label className="block">
-          <span className={fieldLabel}>Type</span>
-          <select
-            className={fieldInput}
-            data-testid="participant-kind-select"
-            value={element.participantType ?? 'participant'}
-            onChange={(e) => onSetParticipantKind(e.target.value as 'participant' | 'actor')}
-          >
-            <option value="participant">Participant (Box)</option>
-            <option value="actor">Actor (Stick figure)</option>
-          </select>
+          <span className={fieldLabel}>Color</span>
+          <div className="flex items-center space-x-2">
+            <input
+              type="color"
+              aria-label="Color"
+              data-testid="actor-color-picker"
+              className="h-8 w-12 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5"
+              list="editor-actor-color-list"
+              value={colorToHex(meta?.color)}
+              onChange={(e) => onSetColor(e.target.value)}
+            />
+            <span className="text-xs text-gray-500 dark:text-slate-400 font-mono flex-1">
+              {meta?.color || 'Default'}
+            </span>
+            {meta?.color && (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Clear color"
+                data-testid="clear-actor-color"
+                title="Reset to default color"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onSetColor('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSetColor('');
+                  }
+                }}
+                className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1.5 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none"
+              >
+                Clear
+              </span>
+            )}
+          </div>
+          <datalist id="editor-actor-color-list">
+            {actorColors.map(c => <option key={c} value={c} />)}
+          </datalist>
         </label>
       )}
 
-      <label className="block">
-        <span className={fieldLabel}>Color</span>
-        <div className="flex items-center space-x-2">
-          <input
-            type="color"
-            aria-label="Color"
-            data-testid="actor-color-picker"
-            className="h-8 w-12 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5"
-            list="editor-actor-color-list"
-            value={colorToHex(meta?.color)}
-            onChange={(e) => onSetColor(e.target.value)}
-          />
-          <span className="text-xs text-gray-500 dark:text-slate-400 font-mono flex-1">
-            {meta?.color || 'Default'}
-          </span>
-          {meta?.color && (
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label="Clear color"
-              data-testid="clear-actor-color"
-              title="Reset to default color"
-              onClick={(e) => {
-                e.preventDefault();
-                onSetColor('');
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onSetColor('');
-                }
-              }}
-              className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1.5 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none"
-            >
-              Clear
-            </span>
-          )}
+      <div>
+        <span className="text-[11px] text-gray-500 dark:text-slate-400 block mb-1">Preset Tones</span>
+        <div className="flex flex-wrap gap-1.5" data-testid="actor-color-presets">
+          {PRESET_ACTOR_COLORS.slice(0, 10).map((c) => {
+            const isSelected = meta?.color?.toLowerCase() === c.toLowerCase();
+            return (
+              <button
+                key={c}
+                type="button"
+                data-testid={`actor-color-preset-${c}`}
+                onClick={() => onSetColor(c)}
+                style={{ backgroundColor: c }}
+                title={c}
+                className={`w-5 h-5 rounded border transition-all ${
+                  isSelected
+                    ? 'ring-2 ring-blue-500 border-white scale-110 shadow-sm'
+                    : 'border-slate-700/80 hover:scale-105 hover:border-slate-500'
+                }`}
+              />
+            );
+          })}
         </div>
-        <datalist id="editor-actor-color-list">
-          {actorColors.map(c => <option key={c} value={c} />)}
-        </datalist>
-        <div className="mt-2">
-          <span className="text-[11px] text-gray-500 dark:text-slate-400 block mb-1">Preset Tones</span>
-          <div className="flex flex-wrap gap-1.5" data-testid="actor-color-presets">
-            {PRESET_ACTOR_COLORS.slice(0, 10).map((c) => {
-              const isSelected = meta?.color?.toLowerCase() === c.toLowerCase();
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  data-testid={`actor-color-preset-${c}`}
-                  onClick={() => onSetColor(c)}
-                  style={{ backgroundColor: c }}
-                  title={c}
-                  className={`w-5 h-5 rounded border transition-all ${
-                    isSelected
-                      ? 'ring-2 ring-blue-500 border-white scale-110 shadow-sm'
-                      : 'border-slate-700/80 hover:scale-105 hover:border-slate-500'
-                  }`}
-                />
-              );
-            })}
-          </div>
-        </div>
-      </label>
+      </div>
 
       <div>
         <span className={fieldLabel}>Tags</span>
@@ -759,83 +805,87 @@ function ArrowFields({
         />
       </label>
 
-      <label className="block">
-        <span className={fieldLabel}>Type</span>
-        <select
-          className={fieldInput}
-          value={element.operator}
-          onChange={(e) => onSetType(e.target.value)}
-        >
-          {operators.map(op => <option key={op} value={op}>{op}</option>)}
-        </select>
-      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className={fieldLabel}>Type</span>
+          <select
+            className={fieldInput}
+            value={element.operator}
+            onChange={(e) => onSetType(e.target.value)}
+          >
+            {operators.map(op => <option key={op} value={op}>{op}</option>)}
+          </select>
+        </label>
 
-      <label className="block">
-        <span className={fieldLabel}>Color</span>
-        <div className="flex items-center space-x-2">
-          <input
-            type="color"
-            aria-label="Color"
-            data-testid="arrow-color-picker"
-            className="h-8 w-12 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5"
-            list="editor-arrow-color-list"
-            value={colorToHex(arrowStyle?.color)}
-            onChange={(e) => onSetColor(e.target.value)}
-          />
-          <span className="text-xs text-gray-500 dark:text-slate-400 font-mono flex-1">
-            {arrowStyle?.color || 'Default'}
-          </span>
-          {arrowStyle?.color && (
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label="Clear color"
-              data-testid="clear-arrow-color"
-              title="Reset to default color"
-              onClick={(e) => {
-                e.preventDefault();
-                onSetColor('');
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+        <label className="block">
+          <span className={fieldLabel}>Color</span>
+          <div className="flex items-center space-x-1.5">
+            <input
+              type="color"
+              aria-label="Color"
+              data-testid="arrow-color-picker"
+              className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
+              list="editor-arrow-color-list"
+              value={colorToHex(arrowStyle?.color, '#00ff9d')}
+              onChange={(e) => onSetColor(e.target.value)}
+            />
+            <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={arrowStyle?.color || 'Default'}>
+              {arrowStyle?.color || 'Default'}
+            </span>
+            {arrowStyle?.color && (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Clear color"
+                data-testid="clear-arrow-color"
+                title="Reset to default color"
+                onClick={(e) => {
                   e.preventDefault();
                   onSetColor('');
-                }
-              }}
-              className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1.5 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none"
-            >
-              Clear
-            </span>
-          )}
-        </div>
-        <datalist id="editor-arrow-color-list">
-          {arrowColors.map(c => <option key={c} value={c} />)}
-        </datalist>
-      </label>
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSetColor('');
+                  }
+                }}
+                className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none shrink-0"
+              >
+                Clear
+              </span>
+            )}
+          </div>
+          <datalist id="editor-arrow-color-list">
+            {arrowColors.map(c => <option key={c} value={c} />)}
+          </datalist>
+        </label>
+      </div>
 
-      <label className="block">
-        <span className={fieldLabel}>Width</span>
-        <input
-          type="number"
-          min={1}
-          max={10}
-          className={fieldInput}
-          placeholder="1-10"
-          value={arrowStyle?.width ?? ''}
-          onChange={(e) => onSetWidth(e.target.value === '' ? '' : Number(e.target.value))}
-        />
-      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className={fieldLabel}>Width</span>
+          <input
+            type="number"
+            min={1}
+            max={10}
+            className={fieldInput}
+            placeholder="1-10"
+            value={arrowStyle?.width ?? ''}
+            onChange={(e) => onSetWidth(e.target.value === '' ? '' : Number(e.target.value))}
+          />
+        </label>
 
-      <label className="block">
-        <span className={fieldLabel}>Dash</span>
-        <select
-          className={fieldInput}
-          value={arrowStyle?.dash ?? 'solid'}
-          onChange={(e) => onSetDash(e.target.value as Dash)}
-        >
-          {DASH_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
-        </select>
-      </label>
+        <label className="block">
+          <span className={fieldLabel}>Dash</span>
+          <select
+            className={fieldInput}
+            value={arrowStyle?.dash ?? 'solid'}
+            onChange={(e) => onSetDash(e.target.value as Dash)}
+          >
+            {DASH_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </label>
+      </div>
 
       {diagramType === 'sequence' && element.kind === 'message' && onToggleActivation && (
         <div className="space-y-1.5 pt-2 border-t border-gray-100 dark:border-slate-800">
@@ -867,7 +917,7 @@ function ArrowFields({
         <div className="pt-2 border-t border-gray-100 dark:border-slate-800">
           <AnimatedArrowSelector
             currentAnimation={arrowStyle?.animation ?? 'none'}
-            currentColor={arrowStyle?.color}
+            currentColor={arrowStyle?.color ? colorToHex(arrowStyle?.color) : '#00ff9d'}
             onSelectAnimation={onSetAnimation}
             onSelectColor={onSetColor}
             hasSelectedArrow={true}
