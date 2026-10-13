@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-12  
 **Status:** Architecture & Specification Locked (Ready for implementation in follow-up session)  
-**Target File:** [`SEQUENCE_DIAGRAM_EDITING_EXPLORATION.md`](file:///Users/zlatinstanimirov/code/mermaid_sequence_diagram/SEQUENCE_DIAGRAM_EDITING_EXPLORATION.md)
+**Target File:** [`SEQUENCE_DIAGRAM_EDITING_EXPLORATION.md`](./SEQUENCE_DIAGRAM_EDITING_EXPLORATION.md)
 
 ---
 
