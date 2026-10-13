@@ -1550,3 +1550,46 @@ export function toggleDiagramOrientation(code: string): string {
   }
   return code;
 }
+
+export function hasNumberedSteps(code: string): boolean {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return false;
+  const lines = code.split('\n');
+  return lines.some(l => /^\s*autonumber(?:\s+(?!off\b).*)?$/i.test(l));
+}
+
+export function toggleNumberedSteps(code: string): string {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return code;
+
+  const lines = code.split('\n');
+  const autonumberIndices: number[] = [];
+  lines.forEach((line, idx) => {
+    if (/^\s*autonumber\b/i.test(line)) {
+      autonumberIndices.push(idx);
+    }
+  });
+
+  const isEnabled = autonumberIndices.some(idx => !/^\s*autonumber\s+off\b/i.test(lines[idx]));
+
+  if (isEnabled) {
+    return lines.filter((_, idx) => !autonumberIndices.includes(idx)).join('\n');
+  } else {
+    const cleaned = lines.filter((_, idx) => !autonumberIndices.includes(idx));
+    const seqIdx = cleaned.findIndex(l => /^\s*sequenceDiagram\b/i.test(l));
+    if (seqIdx === -1) return code;
+
+    let indent = '    ';
+    for (let i = seqIdx + 1; i < cleaned.length; i++) {
+      const match = cleaned[i].match(/^(\s+)\S/);
+      if (match) {
+        indent = match[1];
+        break;
+      }
+    }
+
+    cleaned.splice(seqIdx + 1, 0, `${indent}autonumber`);
+    return cleaned.join('\n');
+  }
+}
+

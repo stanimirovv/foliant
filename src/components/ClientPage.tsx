@@ -8,7 +8,7 @@ import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { parseModel, ModelElement } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
@@ -19,6 +19,7 @@ import {
   getArrowTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
   setParticipantKind, toggleActivation, groupParticipants, toggleDiagramOrientation,
+  toggleNumberedSteps, hasNumberedSteps,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
 import { buildSelectionMap } from '@/lib/svgmap';
@@ -972,6 +973,15 @@ export default function ClientPage() {
     }
   };
 
+  const isNumbered = useMemo(() => hasNumberedSteps(rawCode), [rawCode]);
+
+  const handleToggleNumberedSteps = () => {
+    const newCode = toggleNumberedSteps(rawCode);
+    if (newCode !== rawCode) {
+      commitEdit(newCode);
+    }
+  };
+
   const handleRequestDelete = () => {
     if (!selectedRawElement) return;
     const result = deleteElement(rawCode, viewsData, selectedRawElement.key);
@@ -1558,20 +1568,40 @@ export default function ClientPage() {
                   <Redo2 size={14} />
                   <span>Redo</span>
                 </button>
-                <button
-                  onClick={handleToggleOrientation}
-                  disabled={isVisualLocked || !rawCode}
-                  title="Toggle Diagram Orientation (TD / LR)"
-                  data-testid="toggle-orientation"
-                  className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
-                    isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
-                  } ${
-                    isVisualLocked || !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
-                  }`}
-                >
-                  <ArrowDownUp size={14} />
-                  <span>Orientation</span>
-                </button>
+                {rawModel.type === 'flowchart' && (
+                  <button
+                    onClick={handleToggleOrientation}
+                    disabled={isVisualLocked || !rawCode}
+                    title="Toggle Diagram Orientation (TD / LR)"
+                    data-testid="toggle-orientation"
+                    className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                      isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+                    } ${
+                      isVisualLocked || !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
+                    }`}
+                  >
+                    <ArrowDownUp size={14} />
+                    <span>Orientation</span>
+                  </button>
+                )}
+                {rawModel.type === 'sequence' && (
+                  <button
+                    onClick={handleToggleNumberedSteps}
+                    disabled={isVisualLocked || !rawCode}
+                    title="Toggle Numbered Steps (autonumber)"
+                    data-testid="toggle-numbered-steps"
+                    className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                      isNumbered
+                        ? (isDark ? 'bg-blue-900/40 border-blue-600/50 text-blue-300 font-medium' : 'bg-blue-50 border-blue-300 text-blue-700 font-medium')
+                        : (isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200')
+                    } ${
+                      isVisualLocked || !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
+                    }`}
+                  >
+                    <ListOrdered size={14} />
+                    <span>Numbered Steps</span>
+                  </button>
+                )}
                 <button
                   onClick={handleCopyMermaid}
                   disabled={!rawCode}

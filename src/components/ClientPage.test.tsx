@@ -1927,6 +1927,24 @@ sequenceDiagram
     });
   });
 
+  it('toggles numbered steps in sequence diagram via toolbar button', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    expect(viewer.getAttribute('data-code')).not.toContain('autonumber');
+
+    const toggleBtn = screen.getByTestId('toggle-numbered-steps');
+    expect(screen.queryByTestId('toggle-orientation')).toBeNull();
+    fireEvent.click(toggleBtn);
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('autonumber');
+    });
+
+    fireEvent.click(toggleBtn);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).not.toContain('autonumber');
+    });
+  });
+
   it('toggles participant type between participant and actor', async () => {
     const viewer = await renderInEditMode(DEMO, 'participant A as Alice');
     expect(viewer.getAttribute('data-code')).toContain('participant A as Alice');

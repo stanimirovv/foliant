@@ -5,6 +5,7 @@ import {
   getArrowTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
   setParticipantKind, toggleActivation, groupParticipants, toggleDiagramOrientation, insertMessage,
+  toggleNumberedSteps, hasNumberedSteps,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
@@ -1902,6 +1903,48 @@ describe('toggleDiagramOrientation', () => {
     const seq = 'sequenceDiagram\n    A->>B: Hi';
     const res = toggleDiagramOrientation(seq);
     expect(res).toBe(seq);
+  });
+});
+
+describe('toggleNumberedSteps', () => {
+  it('enables numbered steps by adding autonumber after sequenceDiagram', () => {
+    const seq = 'sequenceDiagram\n    participant A\n    A->>B: Hi';
+    const res = toggleNumberedSteps(seq);
+    expect(res).toBe('sequenceDiagram\n    autonumber\n    participant A\n    A->>B: Hi');
+    expect(hasNumberedSteps(res)).toBe(true);
+  });
+
+  it('disables numbered steps by removing autonumber line', () => {
+    const seq = 'sequenceDiagram\n    autonumber\n    participant A\n    A->>B: Hi';
+    const res = toggleNumberedSteps(seq);
+    expect(res).toBe('sequenceDiagram\n    participant A\n    A->>B: Hi');
+    expect(hasNumberedSteps(res)).toBe(false);
+  });
+
+  it('detects indentation of subsequent lines when inserting autonumber', () => {
+    const seq = 'sequenceDiagram\n  participant A\n  A->>B: Hi';
+    const res = toggleNumberedSteps(seq);
+    expect(res).toBe('sequenceDiagram\n  autonumber\n  participant A\n  A->>B: Hi');
+  });
+
+  it('preserves CONFIG header and comments when toggling', () => {
+    const seq = '%% CONFIG: {"version":1}\nsequenceDiagram\n    %% note\n    A->>B: Hi';
+    const on = toggleNumberedSteps(seq);
+    expect(on).toBe('%% CONFIG: {"version":1}\nsequenceDiagram\n    autonumber\n    %% note\n    A->>B: Hi');
+    const off = toggleNumberedSteps(on);
+    expect(off).toBe(seq);
+  });
+
+  it('is a no-op for flowchart diagrams', () => {
+    const flow = 'flowchart TD\n    A --> B';
+    const res = toggleNumberedSteps(flow);
+    expect(res).toBe(flow);
+    expect(hasNumberedSteps(flow)).toBe(false);
+  });
+
+  it('is a no-op for empty input', () => {
+    expect(toggleNumberedSteps('')).toBe('');
+    expect(hasNumberedSteps('')).toBe(false);
   });
 });
 
