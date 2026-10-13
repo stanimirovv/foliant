@@ -1889,7 +1889,7 @@ sequenceDiagram
     expect(screen.getByText('Click an element in the diagram to edit it.')).toBeTruthy();
   });
 
-  it('Export to SVG button exports SVG with download link', async () => {
+  it('Export to SVG button exports SVG with download link and embedded visuals', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
 
     const exportBtn = screen.getByTestId('export-svg-btn');
@@ -1902,6 +1902,13 @@ sequenceDiagram
 
     expect(createObjectURLSpy).toHaveBeenCalled();
     expect(revokeObjectURLSpy).toHaveBeenCalled();
+
+    const blob = createObjectURLSpy.mock.calls[0][0] as Blob;
+    expect(blob.type).toBe('image/svg+xml;charset=utf-8');
+    const content = await blob.text();
+    expect(content).toContain('@keyframes mermaid-arrow-packet');
+    expect(content).toContain('.arrow-anim-packet-runner');
+    expect(content).toContain('diagram-export-bg');
   });
 
   it('toggles diagram orientation via toolbar button', async () => {

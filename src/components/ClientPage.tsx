@@ -24,6 +24,7 @@ import {
 import { resolveParticipantReorder } from '@/lib/reorder';
 import { buildSelectionMap } from '@/lib/svgmap';
 import { rewriteArrowStyles } from '@/lib/styling';
+import { exportSvgToFile } from '@/lib/svgExport';
 import { PendingDelete } from './EditorPanel';
 
 // Undo/redo history depth: capped so both stacks stay small (10-15 steps).
@@ -809,33 +810,13 @@ export default function ClientPage() {
     const svg = container.querySelector('svg');
     if (!svg) return;
 
-    const clone = svg.cloneNode(true) as SVGElement;
-
-    if (!clone.getAttribute('xmlns')) {
-      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    }
-    if (!clone.getAttribute('xmlns:xlink')) {
-      clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-    }
-
-    const serializer = new XMLSerializer();
-    let source = serializer.serializeToString(clone);
-
-    if (!source.match(/^<\?xml/)) {
-      source = '<?xml version="1.0" standalone="no"?>\r\n' + source;
-    }
-
-    const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const baseName = currentFile ? currentFile.replace(/\.[^/.]+$/, '') : 'diagram';
-    link.href = url;
-    link.download = `${baseName}.svg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [currentFile]);
+    exportSvgToFile(svg, {
+      notes: stickyNotes,
+      showNotes,
+      isDark,
+      fileName: currentFile,
+    });
+  }, [currentFile, stickyNotes, showNotes, isDark]);
 
   // Ctrl+Z / Ctrl+Y (Section 4.11). Inside text fields the native input undo
   // wins; the diagram-level shortcut applies everywhere else.
