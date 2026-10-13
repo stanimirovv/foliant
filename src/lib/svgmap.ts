@@ -290,6 +290,16 @@ export function elementKeyAtTarget(target: Element | null, svg: Element, model: 
     const msg = target.closest('[data-et="message"]');
     if (msg) return keyFromList(messages, zip.messages, msg);
 
+    const runner = target.closest(
+      '.arrow-anim-packet-runner, .arrow-x-mark, .arrow-barrier-wall, .arrow-shockwave-burst'
+    );
+    if (runner) {
+      const prevLine = runner.previousElementSibling;
+      if (prevLine && prevLine.matches('[data-et="message"]')) return keyFromList(messages, zip.messages, prevLine);
+      const parentLine = runner.parentElement?.querySelector('[data-et="message"]');
+      if (parentLine) return keyFromList(messages, zip.messages, parentLine);
+    }
+
     const text = target.closest('text.messageText');
     if (text) {
       const line = text.nextElementSibling;
@@ -475,6 +485,39 @@ export function getMessageEndpointScreenInfo(svg: Element, model: DiagramModel):
     result.push({ key: m.key, fromX: from.centerX, fromY: y, toX: to.centerX, toY: y });
   });
   return result;
+}
+
+// Finds the sequence message whose horizontal span and vertical Y coordinate
+// are nearest to the given screen point (x, y) within maxVerticalDist px.
+// Makes clicking arrow lines and surrounding space reliable even when area
+// rects or thin 2px strokes are present.
+export function nearestMessageKeyAt(
+  endpoints: MessageEndpointScreenInfo[],
+  x: number,
+  y: number,
+  maxVerticalDist = 14
+): string | null {
+  let closestKey: string | null = null;
+  let minDist = Infinity;
+
+  for (const ep of endpoints) {
+    const minX = Math.min(ep.fromX, ep.toX) - 10;
+    const maxX = Math.max(ep.fromX, ep.toX) + 10;
+    const msgY = (ep.fromY + ep.toY) / 2;
+
+    // For self-messages, fromX === toX; allow a hit zone extending 50px to the right
+    const effectiveMaxX = ep.fromX === ep.toX ? ep.fromX + 50 : maxX;
+
+    if (x >= minX && x <= effectiveMaxX) {
+      const dist = Math.abs(y - msgY);
+      if (dist <= maxVerticalDist && dist < minDist) {
+        minDist = dist;
+        closestKey = ep.key;
+      }
+    }
+  }
+
+  return closestKey;
 }
 
 // The participant nearest to the given screen X (by center distance). Used as

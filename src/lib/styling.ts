@@ -437,6 +437,8 @@ function injectArrowEnhancement(
     // Glowing Orb: target remains the full solid line rail; runner carries the glowing orb from start to end
     const runner = target.cloneNode(false) as Element;
     runner.removeAttribute('id');
+    runner.removeAttribute('data-et');
+    runner.removeAttribute('data-id');
     runner.removeAttribute('marker-end');
     runner.removeAttribute('marker-start');
     runner.setAttribute('pathLength', '100');
@@ -834,3 +836,108 @@ export function applyNodeColors(svg: string, config: DiagramConfig | null): stri
     return svg;
   }
 }
+
+/**
+ * Reorders sequence diagram SVG elements so that:
+ * 1. Defs and styles are preserved at the top of the SVG.
+ * 2. Every decoration (background rects, box clusters, control structures, notes, activations)
+ *    is placed at the bottom layer.
+ * 3. Actors (lifelines, top/bottom actor boxes, actor-man stick figures) are above decorations.
+ * 4. Arrows and messages (message lines, labels, animations) are ALWAYS on top.
+ *
+ * In addition, ensures decorative background area rectangles cannot intercept pointer events.
+ */
+export function reorderSequenceLayers(svg: string): string {
+  try {
+    const doc = new DOMParser().parseFromString(svg, 'text/html');
+    const root = doc.querySelector('svg');
+    if (!root) return svg;
+
+    const roleDesc = root.getAttribute('aria-roledescription');
+    const isSequence =
+      roleDesc === 'sequence' ||
+      root.querySelector('line.actor-line, .actor, [data-et="participant"]') !== null;
+    if (!isSequence) return svg;
+
+    // 1. Ensure background area rects cannot intercept clicks/pointer events
+    root.querySelectorAll('rect.rect').forEach(rect => {
+      rect.setAttribute('pointer-events', 'none');
+      (rect as Styleable).style.setProperty('pointer-events', 'none');
+    });
+
+    // 2. Classify direct children of <svg> into layer buckets
+    const children = Array.from(root.children);
+    const headerNodes: Element[] = [];
+    const decorationNodes: Element[] = [];
+    const otherNodes: Element[] = [];
+    const actorNodes: Element[] = [];
+    const messageNodes: Element[] = [];
+
+    const isDecoration = (el: Element): boolean => {
+      if (el.matches('rect.rect')) return true;
+      if (el.matches('g') && el.querySelector('rect.rect') && !el.querySelector('.actor, [data-et="participant"], [data-et="message"]')) {
+        return true;
+      }
+      if (el.matches('g[data-et="control-structure"]') || el.matches('.loopLine, .labelBox') || el.querySelector('.loopLine, .labelBox')) {
+        return true;
+      }
+      if (el.matches('g[data-et="note"]') || el.matches('rect.note') || el.querySelector('rect.note, text.noteText')) {
+        return true;
+      }
+      if (el.matches('rect[class*="activation"]') || el.querySelector('rect[class*="activation"]')) {
+        return true;
+      }
+      return false;
+    };
+
+    const isActor = (el: Element): boolean => {
+      if (el.matches('g[data-et="participant"], .actor-man, line.actor-line, rect.actor, text.actor')) {
+        return true;
+      }
+      if (el.querySelector('.actor, .actor-man, .actor-line, [data-et="participant"]')) {
+        return true;
+      }
+      return false;
+    };
+
+    const isMessage = (el: Element): boolean => {
+      if (
+        el.matches(
+          '[data-et="message"], .messageLine0, .messageLine1, text.messageText, [class*="arrow-anim-"], .arrow-x-mark, .arrow-barrier-wall, .arrow-shockwave-burst'
+        )
+      ) {
+        return true;
+      }
+      if (el.querySelector('[data-et="message"], .messageLine0, .messageLine1, text.messageText')) {
+        return true;
+      }
+      return false;
+    };
+
+    for (const child of children) {
+      const tag = child.tagName.toLowerCase();
+      if (tag === 'defs' || tag === 'style' || tag === 'filter') {
+        headerNodes.push(child);
+      } else if (isDecoration(child)) {
+        decorationNodes.push(child);
+      } else if (isActor(child)) {
+        actorNodes.push(child);
+      } else if (isMessage(child)) {
+        messageNodes.push(child);
+      } else {
+        otherNodes.push(child);
+      }
+    }
+
+    // Re-append in exact layer order: Header -> Decorations -> Other -> Actors -> Messages
+    const ordered = [...headerNodes, ...decorationNodes, ...otherNodes, ...actorNodes, ...messageNodes];
+    for (const node of ordered) {
+      root.appendChild(node);
+    }
+
+    return root.outerHTML;
+  } catch {
+    return svg;
+  }
+}
+

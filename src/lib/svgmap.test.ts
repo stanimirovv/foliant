@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseModel, DiagramModel, ParticipantElement, MessageElement } from './model';
-import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, SvgZip } from './svgmap';
+import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, SvgZip } from './svgmap';
 import { transformActors, processMermaid } from './preprocessor';
 import { DiagramConfig } from './views';
 import { createSequenceDiagram, createFlowchartDiagram, renderPipeline } from './editorTestHarness';
@@ -482,3 +482,89 @@ describe('nearestParticipantAtX', () => {
     expect(nearestParticipantAtX([participants[0]], 999)?.id).toBe('A');
   });
 });
+
+describe('nearestMessageKeyAt', () => {
+  const endpoints = [
+    { key: 'm:1', fromX: 50, fromY: 100, toX: 250, toY: 100 },
+    { key: 'm:2', fromX: 250, fromY: 160, toX: 50, toY: 160 },
+    { key: 'm:3', fromX: 150, fromY: 220, toX: 150, toY: 220 }, // self-message
+  ];
+
+  it('matches a click near the line within vertical threshold', () => {
+    expect(nearestMessageKeyAt(endpoints, 100, 105)).toBe('m:1');
+    expect(nearestMessageKeyAt(endpoints, 100, 95)).toBe('m:1');
+    expect(nearestMessageKeyAt(endpoints, 100, 155)).toBe('m:2');
+  });
+
+  it('resolves between endpoints with margin', () => {
+    expect(nearestMessageKeyAt(endpoints, 45, 100)).toBe('m:1');
+    expect(nearestMessageKeyAt(endpoints, 255, 100)).toBe('m:1');
+    // Too far left or right
+    expect(nearestMessageKeyAt(endpoints, 20, 100)).toBeNull();
+    expect(nearestMessageKeyAt(endpoints, 280, 100)).toBeNull();
+  });
+
+  it('handles self-messages with an extended rightward corridor', () => {
+    expect(nearestMessageKeyAt(endpoints, 170, 220)).toBe('m:3');
+    expect(nearestMessageKeyAt(endpoints, 220, 220)).toBeNull();
+  });
+
+  it('returns null when outside the maxVerticalDist', () => {
+    expect(nearestMessageKeyAt(endpoints, 100, 120, 14)).toBeNull();
+  });
+});
+
+describe('arrow decorator selection & complex.mmd arrow selection', () => {
+  it('resolves click on arrow-anim-packet-runner to the message key', async () => {
+    const { applyArrowStyles } = await import('./styling');
+    const model = parseModel(SEQ_CODE);
+    const config = {
+      version: 1,
+      arrows: [{ from: 'A', to: 'B', label: 'm1', animation: 'pulse' as const }],
+    };
+    const out = applyArrowStyles(SEQ_SVG, model, config);
+    const div = document.createElement('div');
+    div.innerHTML = out;
+    const svgEl = div.querySelector('svg')!;
+    const runner = svgEl.querySelector('.arrow-anim-packet-runner')!;
+    expect(runner).toBeTruthy();
+
+    const key = elementKeyAtTarget(runner, svgEl, model);
+    expect(key).toBe('m:0');
+  });
+
+  it('resolves all messages in complex.mmd even when surrounded by area rects', async () => {
+    const { readFileSync } = await import('fs');
+    const { reorderSequenceLayers } = await import('./styling');
+    const code = readFileSync('diagrams/complex.mmd', 'utf8');
+    const res = await renderPipeline(code);
+    const styledSvg = reorderSequenceLayers(res.svg);
+    const div = document.createElement('div');
+    div.innerHTML = styledSvg;
+    const svgEl = div.querySelector('svg')!;
+
+    // 1. All rect.rect have pointer-events: none
+    const areas = svgEl.querySelectorAll('rect.rect');
+    expect(areas.length).toBeGreaterThan(0);
+    areas.forEach(a => {
+      expect(a.getAttribute('pointer-events')).toBe('none');
+    });
+
+    // 2. Direct message lines resolve
+    const lines = svgEl.querySelectorAll('[data-et="message"]');
+    expect(lines.length).toBeGreaterThan(0);
+    lines.forEach((l) => {
+      const key = elementKeyAtTarget(l, svgEl, res.model);
+      expect(key).toBeTruthy();
+    });
+
+    // 3. Message text labels resolve
+    const texts = svgEl.querySelectorAll('text.messageText');
+    expect(texts.length).toBeGreaterThan(0);
+    texts.forEach((t) => {
+      const key = elementKeyAtTarget(t, svgEl, res.model);
+      expect(key).toBeTruthy();
+    });
+  });
+});
+

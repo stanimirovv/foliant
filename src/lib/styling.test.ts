@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
+import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, reorderSequenceLayers, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
 import { buildActorRewriteMap, transformActors } from './preprocessor';
 import { parseModel, MessageElement, EdgeElement } from './model';
 import { updateViewsData, DiagramConfig } from './views';
@@ -815,3 +815,126 @@ describe('Step 11 — panel dispatch -> merge/hide integration (create -> change
     expect(svgText(plainOut)).toContain('Hello');
   });
 });
+
+describe('reorderSequenceLayers', () => {
+  it('reorders layers so decorations are below actors and messages are on top', async () => {
+    const code = `sequenceDiagram
+      box BlueGroup
+      participant A
+      participant B
+      end
+      rect rgb(200, 200, 200)
+      A->>B: msg1
+      loop Daily
+      B->>A: msg2
+      end
+      Note over A, B: Note text
+      end`;
+    const res = await renderPipeline(code);
+    const reorderedSvg = reorderSequenceLayers(res.svg);
+    const root = parseSvgRoot(reorderedSvg);
+
+    // 1. Decorative rects have pointer-events: none
+    const rects = root.querySelectorAll('rect.rect');
+    expect(rects.length).toBeGreaterThan(0);
+    rects.forEach(r => {
+      expect(r.getAttribute('pointer-events')).toBe('none');
+    });
+
+    // 2. Classify children indices
+    const children = Array.from(root.children);
+    const lastDecorationIdx = Math.max(
+      ...children.map((c, i) => {
+        const isDec =
+          c.matches('rect.rect') ||
+          (c.matches('g') && c.querySelector('rect.rect') && !c.querySelector('.actor, [data-et="participant"], [data-et="message"]')) ||
+          c.matches('g[data-et="control-structure"]') ||
+          c.matches('g[data-et="note"]') ||
+          Boolean(c.querySelector('.loopLine, .labelBox, rect.note'));
+        return isDec ? i : -1;
+      })
+    );
+
+    const firstActorIdx = Math.min(
+      ...children.map((c, i) => {
+        const isAct =
+          c.matches('g[data-et="participant"], line.actor-line, rect.actor') ||
+          Boolean(c.querySelector('.actor, .actor-line, [data-et="participant"]'));
+        return isAct ? i : Infinity;
+      })
+    );
+
+    const firstMessageIdx = Math.min(
+      ...children.map((c, i) => {
+        const isMsg =
+          c.matches('[data-et="message"], .messageLine0, .messageLine1, text.messageText') ||
+          Boolean(c.querySelector('[data-et="message"]'));
+        return isMsg ? i : Infinity;
+      })
+    );
+
+    expect(lastDecorationIdx).toBeLessThan(firstActorIdx);
+    expect(firstActorIdx).toBeLessThan(firstMessageIdx);
+  });
+
+  it('guarantees arrows and actors layer above all decorations in complex.mmd', async () => {
+    const { readFileSync } = await import('fs');
+    const code = readFileSync('diagrams/complex.mmd', 'utf8');
+    const res = await renderPipeline(code);
+    const reorderedSvg = reorderSequenceLayers(res.svg);
+    const root = parseSvgRoot(reorderedSvg);
+
+    const children = Array.from(root.children);
+
+    // Find indices of all decorations
+    const decorationIndices = children
+      .map((c, i) => {
+        const isDec =
+          c.matches('rect.rect') ||
+          (c.matches('g') && c.querySelector('rect.rect') && !c.querySelector('.actor, [data-et="participant"], [data-et="message"]')) ||
+          c.matches('g[data-et="control-structure"]') ||
+          c.matches('g[data-et="note"]') ||
+          Boolean(c.querySelector('.loopLine, .labelBox, rect.note'));
+        return isDec ? i : -1;
+      })
+      .filter(i => i >= 0);
+
+    const maxDecorationIdx = Math.max(...decorationIndices);
+
+    // Verify all actors are placed after decorations
+    const actorIndices = children
+      .map((c, i) => {
+        const isAct =
+          c.matches('g[data-et="participant"], .actor-man, line.actor-line, rect.actor') ||
+          Boolean(c.querySelector('.actor, .actor-man, .actor-line, [data-et="participant"]'));
+        return isAct ? i : -1;
+      })
+      .filter(i => i >= 0);
+
+    actorIndices.forEach(idx => {
+      expect(idx).toBeGreaterThan(maxDecorationIdx);
+    });
+
+    // Verify all message lines and texts are placed after decorations
+    const messageIndices = children
+      .map((c, i) => {
+        const isMsg =
+          c.matches('[data-et="message"], .messageLine0, .messageLine1, text.messageText') ||
+          Boolean(c.querySelector('[data-et="message"]'));
+        return isMsg ? i : -1;
+      })
+      .filter(i => i >= 0);
+
+    messageIndices.forEach(idx => {
+      expect(idx).toBeGreaterThan(maxDecorationIdx);
+    });
+  });
+
+  it('leaves non-sequence diagrams untouched', async () => {
+    const code = createFlowchartDiagram();
+    const res = await renderPipeline(code);
+    const out = reorderSequenceLayers(res.svg);
+    expect(out).toBe(res.svg);
+  });
+});
+

@@ -4,11 +4,11 @@ import { useEffect, useState, useRef, useMemo, MouseEvent as ReactMouseEvent } f
 import mermaid from 'mermaid';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { parseModel, ParticipantElement } from '@/lib/model';
-import { applyArrowStyles, applyNodeColors } from '@/lib/styling';
+import { applyArrowStyles, applyNodeColors, reorderSequenceLayers } from '@/lib/styling';
 import {
   elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf,
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
-  nearestParticipantAtX,
+  nearestParticipantAtX, nearestMessageKeyAt,
   ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo,
 } from '@/lib/svgmap';
 import { DiagramConfig, StickyNote as StickyNoteType } from '@/lib/views';
@@ -72,6 +72,16 @@ const PARTICIPANT_PAN_EXCLUSIONS = [
   'line.actor-line',
   'rect.actor',
   'g.actor-man',
+];
+const MESSAGE_PAN_EXCLUSIONS = [
+  '[data-et="message"]',
+  'text.messageText',
+  '.messageLine0',
+  '.messageLine1',
+  'path.messageLine0',
+  '.arrow-anim-packet-runner',
+  '.arrow-x-mark',
+  'g[data-et="note"]',
 ];
 const NODE_PAN_EXCLUSIONS = ['g.node'];
 const STICKY_PAN_EXCLUSIONS = ['sticky-note-card', 'sticky-note-handle'];
@@ -396,7 +406,7 @@ export default function DiagramViewer({
   const isFlowchartDiagram = diagramType === 'flowchart';
   const panExcluded = editMode && !isVisualLocked && (isSequenceDiagram || isFlowchartDiagram) && !!onSelect;
   const panExclusions = useMemo(() => {
-    const base = isFlowchartDiagram ? NODE_PAN_EXCLUSIONS : PARTICIPANT_PAN_EXCLUSIONS;
+    const base = isFlowchartDiagram ? NODE_PAN_EXCLUSIONS : [...PARTICIPANT_PAN_EXCLUSIONS, ...MESSAGE_PAN_EXCLUSIONS];
     return [...STICKY_PAN_EXCLUSIONS, ...(panExcluded ? base : [])];
   }, [isFlowchartDiagram, panExcluded]);
 
@@ -460,9 +470,10 @@ export default function DiagramViewer({
         // Add a random ID to prevent caching issues if code changes but ID doesn't
         const id = `mermaid-svg-${Math.random().toString(36).substr(2, 9)}`;
         const { svg } = await mermaid.render(id, code);
-        // Post-process: arrow styles + flowchart node colors (both no-op when absent)
+        // Post-process: normalize sequence diagram layers, apply arrow styles and node colors
         const model = parseModel(code);
-        let styled = applyArrowStyles(svg, model, arrowStyles);
+        let styled = reorderSequenceLayers(svg);
+        styled = applyArrowStyles(styled, model, arrowStyles);
         styled = applyNodeColors(styled, nodeColors);
         if (isMounted) {
           setSvgStr(styled);
@@ -643,7 +654,14 @@ export default function DiagramViewer({
     }
 
     const target = e.target as Element;
-    const key = elementKeyAtTarget(target, ctx.svgRoot, ctx.model);
+    let key = elementKeyAtTarget(target, ctx.svgRoot, ctx.model);
+    if (!key && ctx.model.type === 'sequence') {
+      key = nearestMessageKeyAt(
+        getMessageEndpointScreenInfo(ctx.svgRoot, ctx.model),
+        e.clientX,
+        e.clientY,
+      );
+    }
 
     let dragType: 'reorder' | 'message' | 'node' | 'endpoint' | null = null;
     let participantKey: string | null = null;
@@ -684,8 +702,14 @@ export default function DiagramViewer({
         // Flowchart node box → node drag (connect or move).
         dragType = 'node';
         participantKey = key;
+      } else if (el?.kind === 'message') {
+        // Message press: select message immediately and prevent canvas pan from hijacking the click.
+        e.stopPropagation();
+        e.preventDefault();
+        onSelect(key);
+        return;
       }
-      // Messages / edges / notes: no drag — the click handler manages selection.
+      // Edges / notes: no drag — the click handler manages selection.
     } else if (ctx.model.type === 'sequence') {
       // Empty space: check proximity to a lifeline for a message drag.
       cachedParticipants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
@@ -1111,7 +1135,14 @@ export default function DiagramViewer({
     if (!editMode || isVisualLocked || !onSelect) return;
     const ctx = getSvgAndModel();
     if (!ctx) return;
-    const key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model);
+    let key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model);
+    if (!key && ctx.model.type === 'sequence') {
+      key = nearestMessageKeyAt(
+        getMessageEndpointScreenInfo(ctx.svgRoot, ctx.model),
+        e.clientX,
+        e.clientY,
+      );
+    }
     if (e.shiftKey) {
       onSelect(key, { shiftKey: true });
     } else {
