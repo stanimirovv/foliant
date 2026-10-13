@@ -1160,7 +1160,7 @@ sequenceDiagram
     expect(redoButton().disabled).toBe(true);
   }, 15000);
 
-  it('tags and colors set in the panel appear in the sidebar Actors controls', async () => {
+  it('tags set in the panel appear in the sidebar Actors controls (By Key)', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
 
     // no CONFIG yet -> no Actors section
@@ -1175,10 +1175,9 @@ sequenceDiagram
     fireEvent.change(tagInput, { target: { value: 'backend' } });
     fireEvent.keyDown(tagInput, { key: 'Enter' });
 
-    // the Actors panel reads CONFIG: both controls appear (Step 11, R-04/R-06)
-    await screen.findByText('By Color');
+    // the Actors panel reads CONFIG: By Key appears and By Color is removed
+    expect(screen.queryByText('By Color')).toBeNull();
     await screen.findByText('By Key');
-    expect(screen.getAllByText('#e11d48').length).toBeGreaterThanOrEqual(1); // By Color item
     // the panel tag chip and the sidebar By Key item both render the key
     expect(screen.getAllByText('backend').length).toBeGreaterThanOrEqual(2);
   }, 10000);

@@ -213,23 +213,10 @@ export default function ClientPage() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
-  const setActorState = (type: 'color' | 'key', id: string, state: 'on' | 'off' | 'merged' | 'merged_clean') => {
+  const setActorState = (id: string, state: 'on' | 'off' | 'merged' | 'merged_clean') => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete('merge_color');
     params.delete('merge_clean_color');
-
-    if (type === 'color') {
-      const currentHide = new Set(hideColors);
-      if (state === 'off') {
-        currentHide.add(id);
-      } else {
-        currentHide.delete(id);
-      }
-      if (currentHide.size > 0) params.set('hide_color', Array.from(currentHide).join(','));
-      else params.delete('hide_color');
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-      return;
-    }
 
     const mergeParamName = 'merge_key';
     const mergeCleanParamName = 'merge_clean_key';
@@ -421,13 +408,6 @@ export default function ClientPage() {
   const viewsData = useMemo<DiagramConfig | null>(() => {
     return parseViewsData(rawCode);
   }, [rawCode]);
-
-  const availableColors = useMemo(() => {
-    if (!viewsData?.actors) return [];
-    const colors = new Set<string>();
-    Object.values(viewsData.actors).forEach(a => { if (a.color) colors.add(a.color); });
-    return Array.from(colors);
-  }, [viewsData]);
 
   const availableKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -1294,82 +1274,50 @@ export default function ClientPage() {
             )}
           </div>
 
-          {(availableColors.length > 0 || availableKeys.length > 0) && (
+          {availableKeys.length > 0 && (
             <div className="mb-6">
               <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2`}>Actors</h2>
               
-              {availableColors.length > 0 && (
-                <div className="mb-3">
-                  <span className={`text-xs font-semibold ${isDark ? 'text-slate-500' : 'text-gray-400'} block mb-1`}>By Color</span>
-                  <ul className="space-y-2">
-                    {availableColors.map(c => {
-                      const isHidden = hideColors.has(c);
-                      return (
-                        <li key={c} className={`text-sm flex flex-col pl-2 border-l-2 ml-1 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
-                          <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>{c}</span>
-                          <div className={`flex border rounded overflow-hidden text-[10px] mt-1 w-full ${isDark ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
-                            <button 
-                              onClick={() => setActorState('color', c, 'on')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${!isHidden ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
-                            >
-                              On
-                            </button>
-                            <button 
-                              onClick={() => setActorState('color', c, 'off')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${isHidden ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
-                            >
-                              Off
-                            </button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-
-              {availableKeys.length > 0 && (
-                <div className="mb-3">
-                  <span className={`text-xs font-semibold ${isDark ? 'text-slate-500' : 'text-gray-400'} block mb-1`}>By Key</span>
-                  <ul className="space-y-2">
-                    {availableKeys.map(k => {
-                      const currentState = hideKeys.has(k) ? 'off' : mergeCleanKeys.has(k) ? 'merged_clean' : mergeKeys.has(k) ? 'merged' : 'on';
-                      return (
-                        <li key={k} className={`text-sm flex flex-col pl-2 border-l-2 ml-1 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
-                          <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>{k}</span>
-                          <div className={`flex border rounded overflow-hidden text-[10px] mt-1 w-full ${isDark ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
-                            <button 
-                              onClick={() => setActorState('key', k, 'on')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
-                            >
-                              On
-                            </button>
-                            <button 
-                              onClick={() => setActorState('key', k, 'off')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'off' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
-                            >
-                              Off
-                            </button>
-                            <button 
-                              onClick={() => setActorState('key', k, 'merged')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
-                            >
-                              Merged
-                            </button>
-                            <button 
-                              onClick={() => setActorState('key', k, 'merged_clean')} 
-                              className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged_clean' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
-                              title="Merge actors and hide their internal self-calls"
-                            >
-                              Clean
-                            </button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
+              <div className="mb-3">
+                <span className={`text-xs font-semibold ${isDark ? 'text-slate-500' : 'text-gray-400'} block mb-1`}>By Key</span>
+                <ul className="space-y-2">
+                  {availableKeys.map(k => {
+                    const currentState = hideKeys.has(k) ? 'off' : mergeCleanKeys.has(k) ? 'merged_clean' : mergeKeys.has(k) ? 'merged' : 'on';
+                    return (
+                      <li key={k} className={`text-sm flex flex-col pl-2 border-l-2 ml-1 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
+                        <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>{k}</span>
+                        <div className={`flex border rounded overflow-hidden text-[10px] mt-1 w-full ${isDark ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}>
+                          <button 
+                            onClick={() => setActorState(k, 'on')} 
+                            className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${currentState === 'on' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
+                          >
+                            On
+                          </button>
+                          <button 
+                            onClick={() => setActorState(k, 'off')} 
+                            className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'off' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
+                          >
+                            Off
+                          </button>
+                          <button 
+                            onClick={() => setActorState(k, 'merged')} 
+                            className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
+                          >
+                            Merged
+                          </button>
+                          <button 
+                            onClick={() => setActorState(k, 'merged_clean')} 
+                            className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l ${isDark ? 'border-slate-700' : 'border-gray-200'} ${currentState === 'merged_clean' ? 'bg-blue-600 text-white shadow-xs' : (isDark ? 'text-slate-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-200')}`}
+                            title="Merge actors and hide their internal self-calls"
+                          >
+                            Clean
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             </div>
           )}
 
