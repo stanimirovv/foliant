@@ -107,7 +107,7 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
 }
 
 export function transformActors(code: string, config: DiagramConfig | null, options: ActorTransformOptions): string {
-  const hasArrowTags = !!config?.arrows?.some(a => a.keys && a.keys.length > 0);
+  const hasArrowTags = !!config?.arrows?.some(a => (a.keys && a.keys.length > 0) || a.keyMode === 'merged');
   if (!config || (!config.actors && !hasArrowTags)) return code;
 
   const { hide, clean, groups } = buildActorRewriteMap(config, options);
@@ -116,7 +116,7 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   // Message/edge lines whose effective tags include a hidden key are dropped
   // too: arrows follow the by-key filter, but only ever as on/off (shown or
   // hidden) — merging stays an actor-only concept. A line's effective tags are
-  // its own keys plus, unless the arrow's keyMode is 'clean', the keys of the
+  // its own keys plus, when the arrow's keyMode is 'merged', the keys of the
   // service it originates from. (Lines whose origin service carries the hidden
   // key are already dropped by the hidden-actor check above, so only the own
   // keys can add drops here; inherited keys are evaluated anyway to keep the
@@ -136,8 +136,8 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
         (a.label ?? undefined) === (el.label ?? undefined) &&
         (a.occurrence ?? 0) === occurrence);
       const own = entry?.keys ?? [];
-      const inherited = entry?.keyMode === 'clean' ? [] : (config.actors?.[el.from]?.keys ?? []);
-      const keysToCheck = own.length > 0 ? own : inherited;
+      const inherited = entry?.keyMode === 'merged' ? (config.actors?.[el.from]?.keys ?? []) : [];
+      const keysToCheck = Array.from(new Set([...own, ...inherited]));
       if (keysToCheck.length > 0 && keysToCheck.every(k => hideKeys.includes(k))) {
         for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenMessageLines.add(i);
       }

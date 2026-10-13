@@ -70,10 +70,10 @@ function cloneConfig(config: DiagramConfig | null): DiagramConfig | null {
   };
 }
 
-// An arrow entry with no style, no tags and no explicit 'clean' mode carries no
-// state ('merged' is the default and is stored as absent).
+// An arrow entry with no style, no tags and no explicit 'merged' mode carries no
+// state ('clean' is the default and is stored as absent).
 function arrowEntryIsEmpty(a: ArrowStyle): boolean {
-  return !a.color && !a.width && !a.dash && (!a.animation || a.animation === 'none') && (!a.keys || a.keys.length === 0) && a.keyMode !== 'clean';
+  return !a.color && !a.width && !a.dash && (!a.animation || a.animation === 'none') && (!a.keys || a.keys.length === 0) && a.keyMode !== 'merged';
 }
 
 // Drop actor entries that carry no state, and empty containers.
@@ -1168,9 +1168,9 @@ export function removeTag(code: string, config: DiagramConfig | null, key: strin
   return { code: updateViewsData(code, newConfig), config: newConfig };
 }
 
-// Tag info of an arrow element: its own tags, its tag behavior ('merged' by
-// default: the arrow also carries the tags of the service it originates from;
-// 'clean': only its own tags), and the inherited tags (own excluded).
+// Tag info of an arrow element: its own tags, its tag behavior ('clean' by
+// default: only its own tags; 'merged': the arrow also carries the tags of the
+// service it originates from), and the inherited tags (own excluded).
 export interface ArrowTagInfo {
   keys: string[];
   keyMode: ArrowKeyMode;
@@ -1184,13 +1184,13 @@ export function getArrowTags(code: string, config: DiagramConfig | null, key: st
   const occurrence = elementOccurrence(model, el);
   const entry = config?.arrows?.find(a => arrowsMatchEntry(a, el.from, el.to, el.label, occurrence));
   const keys = entry?.keys ?? [];
-  const keyMode: ArrowKeyMode = entry?.keyMode === 'clean' ? 'clean' : 'merged';
+  const keyMode: ArrowKeyMode = entry?.keyMode === 'merged' ? 'merged' : 'clean';
   const originKeys = keyMode === 'merged' ? (config?.actors?.[el.from]?.keys ?? []) : [];
   return { keys, keyMode, inherited: originKeys.filter(k => !keys.includes(k)) };
 }
 
-// Set an arrow's tag behavior. 'merged' is the default and is stored as absent;
-// 'clean' is stored explicitly (it is the only non-default state).
+// Set an arrow's tag behavior. 'clean' is the default and is stored as absent;
+// 'merged' is stored explicitly (it is the only non-default state).
 export function setArrowKeyMode(code: string, config: DiagramConfig | null, key: string, mode: ArrowKeyMode): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
@@ -1205,20 +1205,20 @@ export function setArrowKeyMode(code: string, config: DiagramConfig | null, key:
   let changed = false;
   if (idx >= 0) {
     const prev = arrows[idx];
-    if (mode === 'clean' && prev.keyMode !== 'clean') {
-      arrows[idx] = { ...prev, keyMode: 'clean' };
+    if (mode === 'merged' && prev.keyMode !== 'merged') {
+      arrows[idx] = { ...prev, keyMode: 'merged' };
       changed = true;
-    } else if (mode === 'merged' && prev.keyMode !== undefined) {
+    } else if (mode === 'clean' && prev.keyMode !== undefined) {
       const entry = { ...prev };
       delete entry.keyMode;
       arrows[idx] = entry;
       changed = true;
     }
-  } else if (mode === 'clean') {
+  } else if (mode === 'merged') {
     const entry: ArrowStyle = { from: el.from, to: el.to };
     if (el.label !== undefined) entry.label = el.label;
     if (occurrence > 0) entry.occurrence = occurrence;
-    entry.keyMode = 'clean';
+    entry.keyMode = 'merged';
     arrows.push(entry);
     changed = true;
   }
@@ -1273,7 +1273,7 @@ export function setArrowStyle(code: string, config: DiagramConfig | null, key: s
   } else if (idx >= 0) {
     // Clearing the style must not drop the arrow's tags or tag behavior.
     const prev = arrows[idx];
-    if ((prev.keys && prev.keys.length > 0) || prev.keyMode === 'clean') {
+    if ((prev.keys && prev.keys.length > 0) || prev.keyMode === 'merged') {
       const entry: ArrowStyle = { from: prev.from, to: prev.to };
       if (prev.label !== undefined) entry.label = prev.label;
       if (prev.occurrence !== undefined) entry.occurrence = prev.occurrence;

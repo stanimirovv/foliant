@@ -1197,18 +1197,18 @@ sequenceDiagram
     }, { timeout: 3000 });
   }, 10000);
 
-  it('the inherit toggle stores keyMode clean on the selected message and back', async () => {
+  it('the inherit toggle stores keyMode merged on the selected message and back', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
 
     fireEvent.click(screen.getByTestId('select-m:0'));
     await screen.findByDisplayValue('Hello');
-    fireEvent.click(screen.getByTestId('arrow-inherit-off'));
+    fireEvent.click(screen.getByTestId('arrow-inherit-on'));
     await waitFor(() => {
-      expect(fileContent.current).toContain('"keyMode":"clean"');
+      expect(fileContent.current).toContain('"keyMode":"merged"');
     }, { timeout: 3000 });
 
-    // back to On (merged, the default): the field is gone again
-    fireEvent.click(screen.getByTestId('arrow-inherit-on'));
+    // back to Off (clean, the default): the field is gone again
+    fireEvent.click(screen.getByTestId('arrow-inherit-off'));
     await waitFor(() => {
       expect(fileContent.current).not.toContain('keyMode');
     }, { timeout: 3000 });

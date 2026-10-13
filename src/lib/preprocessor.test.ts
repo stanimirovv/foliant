@@ -288,7 +288,7 @@ describe('transformActors', () => {
 
 describe('transformActors message/edge tags', () => {
   // Messages follow the by-key filter, but only as on/off: an own tag (or an
-  // inherited one, unless keyMode is 'clean') hides the message line when the
+  // inherited one, when keyMode is 'merged') hides the message line when the
   // key is hidden; merging never applies to messages.
   const code = `sequenceDiagram
   participant A
@@ -322,6 +322,21 @@ describe('transformActors message/edge tags', () => {
   participant B
   participant C
   B->>C: Forward`);
+  });
+
+  it('arrows do not inherit origin actor keys by default', () => {
+    const code2 = `sequenceDiagram
+  participant A
+  participant B
+  A->>B: Call`;
+    const cfg = {
+      version: 1,
+      actors: { A: { keys: ['backend'] } },
+      arrows: [{ from: 'A', to: 'B', label: 'Call' }],
+    };
+    // Merging A by 'backend' keeps the arrow without dropping it for inherited tag
+    const result = transformActors(code2, cfg, { mergeByKeys: ['backend'] });
+    expect(result).toContain('MergedKey_backend->>B: Call');
   });
 
   it('hides a message by its own tag even when no actors are in CONFIG', () => {

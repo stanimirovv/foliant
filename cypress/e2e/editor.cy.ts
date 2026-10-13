@@ -131,19 +131,19 @@ describe('Visual editing (e2e)', () => {
 
         // message tags & inheritance (Increment 3b)
         cy.get('#diagram-container text.messageText').first().click();
-        cy.contains('span[title="Inherited from A"]', 'backend').should('exist');
+        cy.contains('span[title="Inherited from A"]', 'backend').should('not.exist');
         cy.get('input[placeholder="Add tag..."]').type('critical{enter}');
         cy.get('button[aria-label="Remove tag critical"]').should('exist');
         saved();
 
-        // toggle inherit service tags to Off -> inherited chip disappears
-        cy.get('[data-testid="arrow-inherit-off"]').click();
-        cy.contains('span[title="Inherited from A"]', 'backend').should('not.exist');
-        saved();
-
-        // toggle inherit service tags back to On
+        // toggle inherit service tags to On -> inherited chip appears
         cy.get('[data-testid="arrow-inherit-on"]').click();
         cy.contains('span[title="Inherited from A"]', 'backend').should('exist');
+        saved();
+
+        // toggle inherit service tags back to Off
+        cy.get('[data-testid="arrow-inherit-off"]').click();
+        cy.contains('span[title="Inherited from A"]', 'backend').should('not.exist');
         saved();
 
         // hiding the message's tag 'critical' hides the message

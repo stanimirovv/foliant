@@ -49,7 +49,7 @@ describe('arrow tags (rendered)', () => {
     expect(labels).toEqual(['App', 'API', 'Cache']);
   });
 
-  it('messages inherit the origin service tags (merged by default); clean opts out', async () => {
+  it('messages do not inherit origin service tags by default (clean default); merged opts in', async () => {
     const code = `%% CONFIG: {"version":1,"actors":{"A":{"keys":["backend"]}}}
 sequenceDiagram
     participant A as Alice
@@ -57,16 +57,16 @@ sequenceDiagram
     A->>B: Hello
     B->>A: Hi`;
     const cfg = parseConfig(code);
-    // merged (default): the message from A carries 'backend'
+    // clean (default): the message from A carries only its own tags
     expect(getArrowTags(code, cfg, 'm:0'))
-      .toEqual({ keys: [], keyMode: 'merged', inherited: ['backend'] });
-    // the inheritance itself does not change the rendered diagram
+      .toEqual({ keys: [], keyMode: 'clean', inherited: [] });
+    // the diagram renders with 2 messages
     const { model } = await renderPipeline(code);
     expect(model.elements.filter(e => e.kind === 'message')).toHaveLength(2);
-    // clean: only the message's own tags
-    const clean = setArrowKeyMode(code, cfg, 'm:0', 'clean');
-    expect(getArrowTags(clean.code, clean.config, 'm:0'))
-      .toEqual({ keys: [], keyMode: 'clean', inherited: [] });
+    // merged: inherits the origin service tags
+    const merged = setArrowKeyMode(code, cfg, 'm:0', 'merged');
+    expect(getArrowTags(merged.code, merged.config, 'm:0'))
+      .toEqual({ keys: [], keyMode: 'merged', inherited: ['backend'] });
   });
 
   it('an arrow with multiple tags is shown if any tag is shown, and hidden only when all tags are disabled', async () => {

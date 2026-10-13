@@ -773,7 +773,7 @@ function ArrowFields({
   const [existingTagSelect, setExistingTagSelect] = useState('');
   const ownTags = arrowTags?.keys ?? [];
   const inheritedTags = arrowTags?.inherited ?? [];
-  const keyMode: ArrowKeyMode = arrowTags?.keyMode ?? 'merged';
+  const keyMode: ArrowKeyMode = arrowTags?.keyMode ?? 'clean';
 
   const submitTag = () => {
     const tag = tagInput.trim();
@@ -927,6 +927,30 @@ function ArrowFields({
       )}
 
       <div>
+        <span className={fieldLabel}>Inherit service tags</span>
+        <div className="flex border border-gray-200 dark:border-slate-700 rounded overflow-hidden text-[10px] w-full bg-gray-50 dark:bg-slate-800">
+          <button
+            type="button"
+            data-testid="arrow-inherit-on"
+            title="Merged: the message also carries the tags of the service it originates from"
+            onClick={() => onSetKeyMode('merged')}
+            className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${keyMode === 'merged' ? 'bg-blue-500 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700'}`}
+          >
+            On
+          </button>
+          <button
+            type="button"
+            data-testid="arrow-inherit-off"
+            title="Clean: only the message's own tags"
+            onClick={() => onSetKeyMode('clean')}
+            className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 dark:border-slate-700 ${keyMode === 'clean' ? 'bg-blue-500 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700'}`}
+          >
+            Off
+          </button>
+        </div>
+      </div>
+
+      <div>
         <span className={fieldLabel}>Tags</span>
         {ownTags.length > 0 || inheritedTags.length > 0 ? (
           <div className="flex flex-wrap gap-1 mb-1">
@@ -1010,30 +1034,6 @@ function ArrowFields({
         <datalist id="editor-arrow-tag-list">
           {actorKeys.map(k => <option key={k} value={k} />)}
         </datalist>
-      </div>
-
-      <div>
-        <span className={fieldLabel}>Inherit service tags</span>
-        <div className="flex border border-gray-200 dark:border-slate-700 rounded overflow-hidden text-[10px] w-full bg-gray-50 dark:bg-slate-800">
-          <button
-            type="button"
-            data-testid="arrow-inherit-on"
-            title="Merged: the message also carries the tags of the service it originates from"
-            onClick={() => onSetKeyMode('merged')}
-            className={`flex-1 py-1 px-1 text-center font-medium transition-colors ${keyMode === 'merged' ? 'bg-blue-500 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700'}`}
-          >
-            On
-          </button>
-          <button
-            type="button"
-            data-testid="arrow-inherit-off"
-            title="Clean: only the message's own tags"
-            onClick={() => onSetKeyMode('clean')}
-            className={`flex-1 py-1 px-1 text-center font-medium transition-colors border-l border-gray-200 dark:border-slate-700 ${keyMode === 'clean' ? 'bg-blue-500 text-white shadow-xs' : 'text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700'}`}
-          >
-            Off
-          </button>
-        </div>
       </div>
 
       <DeleteButton onRequestDelete={onRequestDelete} />

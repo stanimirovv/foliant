@@ -40,12 +40,12 @@ export interface ArrowStyle {
   dash?: 'solid' | 'dashed' | 'dotted';
   animation?: ArrowAnimationType;
   keys?: string[];              // the arrow's own tags (merge/hide keys)
-  keyMode?: ArrowKeyMode;       // how tags are computed: 'merged' (own + origin's, default) | 'clean' (own only)
+  keyMode?: ArrowKeyMode;       // how tags are computed: 'clean' (own only, default) | 'merged' (own + origin's)
 }
 
-// Tag behavior of an arrow: 'merged' inherits the tags of the service the arrow
-// originates from (the default when keyMode is absent); 'clean' keeps only the
-// arrow's own tags.
+// Tag behavior of an arrow: 'clean' keeps only the arrow's own tags (the default
+// when keyMode is absent); 'merged' inherits the tags of the service the arrow
+// originates from.
 export type ArrowKeyMode = 'merged' | 'clean';
 
 export type StickyNoteColor = 'yellow' | 'green' | 'blue' | 'pink' | 'orange' | 'purple';

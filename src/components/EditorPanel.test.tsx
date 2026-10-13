@@ -231,6 +231,18 @@ describe('EditorPanel', () => {
     expect(off.className).toContain('bg-blue-500');
   });
 
+  it('message fields default to clean mode with Off active when arrowTags has no mode', () => {
+    const props = makeProps({
+      element: message0,
+      arrowTags: null,
+    });
+    render(<EditorPanel {...props} />);
+    const off = screen.getByTestId('arrow-inherit-off');
+    expect(off.className).toContain('bg-blue-500');
+    const on = screen.getByTestId('arrow-inherit-on');
+    expect(on.className).not.toContain('bg-blue-500');
+  });
+
   it('edge type dropdown lists the 4.8 flowchart operator vocabulary', () => {
     const props = makeProps({ element: edge0, diagramType: 'flowchart' });
     render(<EditorPanel {...props} />);

@@ -1244,48 +1244,52 @@ sequenceDiagram
     // clearing the style keeps the tags
     const cleared = setArrowStyle(styled.code, styled.config, 'm:0', {});
     expect(cleared.config?.arrows?.[0]).toEqual({ from: 'A', to: 'B', label: 'Hello', keys: ['critical'] });
-    // and keeps an explicit 'clean' mode
-    const modeSet = setArrowKeyMode(cleared.code, cleared.config, 'm:0', 'clean');
+    // and keeps an explicit 'merged' mode
+    const modeSet = setArrowKeyMode(cleared.code, cleared.config, 'm:0', 'merged');
     expect(modeSet.config?.arrows?.[0]).toEqual(
-      { from: 'A', to: 'B', label: 'Hello', keys: ['critical'], keyMode: 'clean' });
+      { from: 'A', to: 'B', label: 'Hello', keys: ['critical'], keyMode: 'merged' });
     const clearedStyle = setArrowStyle(modeSet.code, modeSet.config, 'm:0', {});
     expect(clearedStyle.config?.arrows?.[0]).toEqual(
-      { from: 'A', to: 'B', label: 'Hello', keys: ['critical'], keyMode: 'clean' });
-    // removing the last tag drops the empty keys array; the explicit 'clean'
-    // mode survives (it still means "do not inherit")
+      { from: 'A', to: 'B', label: 'Hello', keys: ['critical'], keyMode: 'merged' });
+    // removing the last tag drops the empty keys array; the explicit 'merged'
+    // mode survives (it still means "inherit origin service tags")
     const removed = removeTag(clearedStyle.code, clearedStyle.config, 'm:0', 'critical');
-    expect(removed.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', keyMode: 'clean' }]);
+    expect(removed.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', keyMode: 'merged' }]);
   });
 
-  it('setArrowKeyMode stores only the non-default (clean) state', () => {
-    const clean = setArrowKeyMode(SEQ2, SEQ2_CFG, 'm:0', 'clean');
-    expect(clean.warning).toBeUndefined();
-    expect(clean.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', keyMode: 'clean' }]);
-    // back to merged (the default): the entry carries no state and is pruned
-    const back = setArrowKeyMode(clean.code, clean.config, 'm:0', 'merged');
+  it('setArrowKeyMode stores only the non-default (merged) state', () => {
+    const merged = setArrowKeyMode(SEQ2, SEQ2_CFG, 'm:0', 'merged');
+    expect(merged.warning).toBeUndefined();
+    expect(merged.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', keyMode: 'merged' }]);
+    // back to clean (the default): the entry carries no state and is pruned
+    const back = setArrowKeyMode(merged.code, merged.config, 'm:0', 'clean');
     expect(back.config?.arrows).toBeUndefined();
     expect(back.config?.actors).toEqual({ A: { keys: ['backend'] } });
     // soft-fails
-    expect(setArrowKeyMode(SEQ2, SEQ2_CFG, 'm:0', 'bogus' as 'clean').warning).toBeTruthy();
-    expect(setArrowKeyMode(SEQ2, SEQ2_CFG, 'p:0', 'clean').warning).toBeTruthy();
+    expect(setArrowKeyMode(SEQ2, SEQ2_CFG, 'm:0', 'bogus' as 'merged').warning).toBeTruthy();
+    expect(setArrowKeyMode(SEQ2, SEQ2_CFG, 'p:0', 'merged').warning).toBeTruthy();
   });
 
   it('getArrowTags reports own tags, the mode and the inherited service tags', () => {
-    // default: merged, no entry — inherits A's tags
+    // default: clean, no entry — does not inherit A's tags
     expect(getArrowTags(SEQ2, SEQ2_CFG, 'm:0'))
-      .toEqual({ keys: [], keyMode: 'merged', inherited: ['backend'] });
-    // an own tag overlapping the inherited one is not duplicated
+      .toEqual({ keys: [], keyMode: 'clean', inherited: [] });
+    // an own tag
     const tagged = addTag(SEQ2, SEQ2_CFG, 'm:0', 'backend');
     expect(getArrowTags(tagged.code, tagged.config, 'm:0'))
-      .toEqual({ keys: ['backend'], keyMode: 'merged', inherited: [] });
-    // clean: no inheritance
-    const clean = setArrowKeyMode(tagged.code, tagged.config, 'm:0', 'clean');
-    expect(getArrowTags(clean.code, clean.config, 'm:0'))
       .toEqual({ keys: ['backend'], keyMode: 'clean', inherited: [] });
-    // flowchart edge inherits from its source node; non-arrows return null
+    // merged: inherits origin's tags; an own tag overlapping the inherited one is not duplicated
+    const merged = setArrowKeyMode(tagged.code, tagged.config, 'm:0', 'merged');
+    expect(getArrowTags(merged.code, merged.config, 'm:0'))
+      .toEqual({ keys: ['backend'], keyMode: 'merged', inherited: [] });
+    // with different own tag, inherited backend is reported
+    const diffTagged = setArrowKeyMode(SEQ2, SEQ2_CFG, 'm:0', 'merged');
+    expect(getArrowTags(diffTagged.code, diffTagged.config, 'm:0'))
+      .toEqual({ keys: [], keyMode: 'merged', inherited: ['backend'] });
+    // flowchart edge does not inherit by default; non-arrows return null
     const flowTagged = addTag(FLOW, FLOW_CFG, 'e:0', 'critical');
     expect(getArrowTags(flowTagged.code, flowTagged.config, 'e:0'))
-      .toEqual({ keys: ['critical'], keyMode: 'merged', inherited: [] });
+      .toEqual({ keys: ['critical'], keyMode: 'clean', inherited: [] });
     expect(getArrowTags(SEQ2, SEQ2_CFG, 'p:0')).toBeNull();
     expect(getArrowTags(SEQ2, SEQ2_CFG, 'nope')).toBeNull();
   });
