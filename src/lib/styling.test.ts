@@ -288,6 +288,78 @@ describe('applyArrowStyles (sequence fixture)', () => {
     expect(runner).toBeTruthy();
     expect(runner.getAttribute('pathLength')).toBe('100');
     expect(styleOf(runner).stroke).toBe(rgb('#10b981'));
+    expect(runner.getAttribute('data-seq-index')).toBe('0');
+    expect(runner.getAttribute('data-seq-total')).toBe('1');
+  });
+
+  it('chains multiple sequence arrow pulse animations sequentially in diagram order', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      arrows: [
+        { from: 'A', to: 'B', label: 'm1', color: '#10b981', animation: 'pulse' },
+        { from: 'B', to: 'A', label: 'm2', color: '#00f0ff', animation: 'pulse' },
+      ],
+    });
+    const root = parseSvgRoot(out);
+    const runners = root.querySelectorAll('.arrow-anim-packet-runner');
+    expect(runners).toHaveLength(2);
+
+    const runner1 = runners[0];
+    const runner2 = runners[1];
+
+    expect(runner1.getAttribute('data-seq-index')).toBe('0');
+    expect(runner1.getAttribute('data-seq-total')).toBe('2');
+    expect(runner2.getAttribute('data-seq-index')).toBe('1');
+    expect(runner2.getAttribute('data-seq-total')).toBe('2');
+
+    // Runner 1 animated with keyframe for slot 0 (0% - 50%), Runner 2 with slot 1 (50% - 100%)
+    expect(styleOf(runner1).animation).toContain('mermaid-arrow-packet-seq-2-0');
+    expect(styleOf(runner1).animation).toContain('2.4s');
+    expect(styleOf(runner2).animation).toContain('mermaid-arrow-packet-seq-2-1');
+    expect(styleOf(runner2).animation).toContain('2.4s');
+
+    // Keyframes embedded in SVG defs
+    const styleEl = root.querySelector('defs style');
+    expect(styleEl).toBeTruthy();
+    expect(styleEl?.textContent).toContain('@keyframes mermaid-arrow-packet-seq-2-0');
+    expect(styleEl?.textContent).toContain('@keyframes mermaid-arrow-packet-seq-2-1');
+
+    // Cross-browser SMIL chaining: runner 2 triggers after runner 1, runner 1 loops when runner 2 ends
+    const animOffset1 = runner1.querySelector('animate[attributeName="stroke-dashoffset"]');
+    const animOffset2 = runner2.querySelector('animate[attributeName="stroke-dashoffset"]');
+    expect(animOffset1?.getAttribute('begin')).toBe('0s; seq-runner-anim-1.end');
+    expect(animOffset2?.getAttribute('begin')).toBe('seq-runner-anim-0.end');
+  });
+
+  it('chains 3 pulse arrows across sequence diagram in chronological order', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      arrows: [
+        { from: 'A', to: 'B', label: 'm1', color: '#10b981', animation: 'pulse' },
+        { from: 'B', to: 'A', label: 'm2', color: '#00f0ff', animation: 'pulse' },
+        { from: 'A', to: 'C', label: 'm4', color: '#38ef7d', animation: 'pulse' },
+      ],
+    });
+    const root = parseSvgRoot(out);
+    const runners = root.querySelectorAll('.arrow-anim-packet-runner');
+    expect(runners).toHaveLength(3);
+
+    expect(runners[0].getAttribute('data-seq-index')).toBe('0');
+    expect(runners[0].getAttribute('data-seq-total')).toBe('3');
+    expect(runners[1].getAttribute('data-seq-index')).toBe('1');
+    expect(runners[1].getAttribute('data-seq-total')).toBe('3');
+    expect(runners[2].getAttribute('data-seq-index')).toBe('2');
+    expect(runners[2].getAttribute('data-seq-total')).toBe('3');
+
+    // Total duration for 3 items is 3.6s
+    expect(styleOf(runners[0]).animation).toContain('3.6s');
+    expect(styleOf(runners[1]).animation).toContain('3.6s');
+    expect(styleOf(runners[2]).animation).toContain('3.6s');
+
+    // SMIL chain: 0 -> 1 -> 2 -> loops back to 0
+    expect(runners[0].querySelector('animate[attributeName="stroke-dashoffset"]')?.getAttribute('begin')).toBe('0s; seq-runner-anim-2.end');
+    expect(runners[1].querySelector('animate[attributeName="stroke-dashoffset"]')?.getAttribute('begin')).toBe('seq-runner-anim-0.end');
+    expect(runners[2].querySelector('animate[attributeName="stroke-dashoffset"]')?.getAttribute('begin')).toBe('seq-runner-anim-1.end');
   });
 
   it('injects X mark at sender, network middle, and receiver for failure modes', () => {

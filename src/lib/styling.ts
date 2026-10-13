@@ -174,6 +174,19 @@ export function applyArrowStyles(svg: string, model: DiagramModel, config: Diagr
     const counter = { n: 0 };
     let changed = false;
 
+    // For sequence diagrams, identify pulse/dot animated arrows in chronological/top-to-bottom order
+    const pulseIndices: number[] = [];
+    if (!isFlowchart) {
+      arrows.forEach((el, i) => {
+        const style = findArrowStyle(config.arrows!, model, el);
+        if (style && style.animation === 'pulse' && zipped[i]) {
+          pulseIndices.push(i);
+        }
+      });
+    }
+    const pulseTotal = pulseIndices.length;
+    const keyframesRules: string[] = [];
+
     arrows.forEach((el, i) => {
       const style = findArrowStyle(config.arrows!, model, el);
       if (!style) return;
@@ -208,10 +221,26 @@ export function applyArrowStyles(svg: string, model: DiagramModel, config: Diagr
       if (style.animation && style.animation !== 'none') {
         target.classList.add(`arrow-anim-${style.animation}`);
         const effectiveColor = style.color || '#ef4444';
-        injectArrowEnhancement(target, style.animation, effectiveColor, style.width);
+        const pulseSeqIndex = style.animation === 'pulse' && !isFlowchart ? pulseIndices.indexOf(i) : -1;
+        const seqInfo = pulseSeqIndex >= 0 ? { index: pulseSeqIndex, total: pulseTotal } : undefined;
+        injectArrowEnhancement(target, style.animation, effectiveColor, style.width, seqInfo, keyframesRules);
       }
       changed = true;
     });
+
+    if (keyframesRules.length > 0) {
+      let defs = root.querySelector('defs');
+      if (!defs) {
+        defs = root.ownerDocument ? root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'defs') : null;
+        if (defs) root.insertBefore(defs, root.firstChild);
+      }
+      if (defs && root.ownerDocument) {
+        const styleEl = root.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'style');
+        styleEl.setAttribute('type', 'text/css');
+        styleEl.textContent = keyframesRules.join('\n');
+        defs.appendChild(styleEl);
+      }
+    }
 
     return changed ? root.outerHTML : svg;
   } catch {
@@ -393,7 +422,14 @@ function extractArrowEndpoints(target: Element): ArrowEndpoints | null {
   return null;
 }
 
-function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color: string, width?: number) {
+function injectArrowEnhancement(
+  target: Element,
+  anim: ArrowAnimationType,
+  color: string,
+  width?: number,
+  sequenceInfo?: { index: number; total: number },
+  keyframesRules?: string[]
+) {
   const doc = target.ownerDocument;
   if (!doc) return;
 
@@ -408,7 +444,86 @@ function injectArrowEnhancement(target: Element, anim: ArrowAnimationType, color
     const runnerStyle = runner as Styleable;
     runnerStyle.style.stroke = color;
     runnerStyle.style.strokeWidth = `${Math.max((width ?? 2) + 2, 4)}px`;
-    runnerStyle.style.opacity = '1';
+
+    const seqTotal = sequenceInfo ? sequenceInfo.total : 1;
+    const seqIndex = sequenceInfo ? sequenceInfo.index : 0;
+    runner.setAttribute('data-seq-index', String(seqIndex));
+    runner.setAttribute('data-seq-total', String(seqTotal));
+
+    if (seqTotal > 1) {
+      const stepDuration = 1.2;
+      const totalDuration = parseFloat((seqTotal * stepDuration).toFixed(2));
+      const animName = `mermaid-arrow-packet-seq-${seqTotal}-${seqIndex}`;
+      runnerStyle.style.setProperty('--packet-animation', `${animName} ${totalDuration}s ease-in-out infinite`);
+      runnerStyle.style.setProperty('animation', `${animName} ${totalDuration}s ease-in-out infinite`, 'important');
+
+      if (keyframesRules) {
+        const startPct = (seqIndex / seqTotal) * 100;
+        const endPct = ((seqIndex + 1) / seqTotal) * 100;
+        const slotWidth = endPct - startPct;
+        const fade1 = (startPct + 0.1 * slotWidth).toFixed(2);
+        const fade2 = (startPct + 0.85 * slotWidth).toFixed(2);
+        const sPct = startPct.toFixed(2);
+        const ePct = endPct.toFixed(2);
+
+        const rule = `@keyframes ${animName} {
+  ${startPct > 0 ? `0%, ${(startPct - 0.01).toFixed(2)}% { stroke-dashoffset: 6; opacity: 0; }` : ''}
+  ${sPct}% { stroke-dashoffset: 6; opacity: 0; }
+  ${fade1}% { opacity: 1; }
+  ${fade2}% { opacity: 1; }
+  ${ePct}% { stroke-dashoffset: -100; opacity: 0; }
+  ${endPct < 100 ? `${(endPct + 0.01).toFixed(2)}%, 100% { stroke-dashoffset: 6; opacity: 0; }` : ''}
+}`;
+        if (!keyframesRules.some(r => r.includes(animName))) {
+          keyframesRules.push(rule);
+        }
+      }
+
+      // SMIL animation elements for SVG-native viewers
+      const animOffset = doc.createElementNS('http://www.w3.org/2000/svg', 'animate');
+      animOffset.setAttribute('attributeName', 'stroke-dashoffset');
+      animOffset.setAttribute('values', '6;-100');
+      animOffset.setAttribute('dur', `${stepDuration}s`);
+      animOffset.setAttribute('fill', 'freeze');
+      animOffset.setAttribute('id', `seq-runner-anim-${seqIndex}`);
+      if (seqIndex === 0) {
+        animOffset.setAttribute('begin', `0s; seq-runner-anim-${seqTotal - 1}.end`);
+      } else {
+        animOffset.setAttribute('begin', `seq-runner-anim-${seqIndex - 1}.end`);
+      }
+      runner.appendChild(animOffset);
+
+      const animOpacity = doc.createElementNS('http://www.w3.org/2000/svg', 'animate');
+      animOpacity.setAttribute('attributeName', 'opacity');
+      animOpacity.setAttribute('values', '0;1;1;0');
+      animOpacity.setAttribute('keyTimes', '0;0.1;0.85;1');
+      animOpacity.setAttribute('dur', `${stepDuration}s`);
+      animOpacity.setAttribute('fill', 'freeze');
+      if (seqIndex === 0) {
+        animOpacity.setAttribute('begin', `0s; seq-runner-anim-${seqTotal - 1}.end`);
+      } else {
+        animOpacity.setAttribute('begin', `seq-runner-anim-${seqIndex - 1}.end`);
+      }
+      runner.appendChild(animOpacity);
+    } else {
+      runnerStyle.style.opacity = '1';
+
+      const animOffset = doc.createElementNS('http://www.w3.org/2000/svg', 'animate');
+      animOffset.setAttribute('attributeName', 'stroke-dashoffset');
+      animOffset.setAttribute('values', '6;-100');
+      animOffset.setAttribute('dur', '1.4s');
+      animOffset.setAttribute('repeatCount', 'indefinite');
+      runner.appendChild(animOffset);
+
+      const animOpacity = doc.createElementNS('http://www.w3.org/2000/svg', 'animate');
+      animOpacity.setAttribute('attributeName', 'opacity');
+      animOpacity.setAttribute('values', '0;1;1;0');
+      animOpacity.setAttribute('keyTimes', '0;0.1;0.85;1');
+      animOpacity.setAttribute('dur', '1.4s');
+      animOpacity.setAttribute('repeatCount', 'indefinite');
+      runner.appendChild(animOpacity);
+    }
+
     target.parentNode?.insertBefore(runner, target.nextSibling);
     return;
   }

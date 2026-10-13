@@ -113,7 +113,7 @@ body {
 .arrow-anim-packet-runner {
   stroke-dasharray: 6 100 !important;
   stroke-linecap: round !important;
-  animation: mermaid-arrow-packet 1.4s ease-in-out infinite !important;
+  animation: var(--packet-animation, mermaid-arrow-packet 1.4s ease-in-out infinite) !important;
   filter:
     drop-shadow(0 0 2px #ffffff)
     drop-shadow(0 0 6px currentColor)
