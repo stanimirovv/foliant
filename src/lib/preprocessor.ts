@@ -76,7 +76,7 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
     if (meta.color && options.hideColors?.includes(meta.color)) {
       shouldHide = true;
     }
-    if (meta.keys && options.hideKeys?.some(k => meta.keys?.includes(k))) {
+    if (meta.keys && meta.keys.length > 0 && meta.keys.every(k => options.hideKeys?.includes(k))) {
       shouldHide = true;
     }
 
@@ -137,8 +137,8 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
         (a.occurrence ?? 0) === occurrence);
       const own = entry?.keys ?? [];
       const inherited = entry?.keyMode === 'clean' ? [] : (config.actors?.[el.from]?.keys ?? []);
-      const effective = new Set([...own, ...inherited]);
-      if (hideKeys.some(k => effective.has(k))) {
+      const keysToCheck = own.length > 0 ? own : inherited;
+      if (keysToCheck.length > 0 && keysToCheck.every(k => hideKeys.includes(k))) {
         for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenMessageLines.add(i);
       }
     }
@@ -270,11 +270,6 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
       boxId = `key_${g.name}`;
       boxColor = '#ccc';
       boxTitle = g.key.toUpperCase();
-    } else if (config.actors?.[p.id]?.color) {
-      const c = config.actors![p.id].color as string;
-      boxId = `color_${c}`;
-      boxColor = c;
-      boxTitle = c.toUpperCase();
     }
 
     if (boxId) {

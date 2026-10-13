@@ -549,30 +549,171 @@ function resolveNodeColor(nodeId: string, config: DiagramConfig): string | null 
   return meta && meta.color ? meta.color : null;
 }
 
+function isLightColor(colorStr: string): boolean {
+  const c = colorStr.trim().toLowerCase();
+  if (c.startsWith('#')) {
+    const raw = c.slice(1);
+    let r = 0, g = 0, b = 0;
+    if (raw.length === 3) {
+      r = parseInt(raw[0] + raw[0], 16);
+      g = parseInt(raw[1] + raw[1], 16);
+      b = parseInt(raw[2] + raw[2], 16);
+    } else if (raw.length === 6) {
+      r = parseInt(raw.slice(0, 2), 16);
+      g = parseInt(raw.slice(2, 4), 16);
+      b = parseInt(raw.slice(4, 6), 16);
+    }
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness > 160;
+  }
+  const lightNames = ['yellow', 'cyan', 'white', 'lightgreen', 'lightblue', 'pink', 'lightgray', 'lightgrey'];
+  return lightNames.includes(c);
+}
+
 export function applyNodeColors(svg: string, config: DiagramConfig | null): string {
   if (!config || !config.actors) return svg;
   const root = parseSvgRoot(svg);
   if (!root) return svg;
-  // Flowchart nodes only (the sequence svg has no class="flowchart").
+  // Flowchart nodes vs sequence diagram actors.
   const rootClass = root.getAttribute('class') ?? '';
   const role = root.getAttribute('aria-roledescription') ?? '';
-  if (!rootClass.split(/\s+/).includes('flowchart') && role !== 'flowchart-v2') return svg;
+  const isFlowchart = rootClass.split(/\s+/).includes('flowchart') || role === 'flowchart-v2';
 
   try {
     let changed = false;
-    root.querySelectorAll('g.node[id]').forEach(g => {
-      const id = g.getAttribute('id');
-      if (!id) return;
-      const m = id.match(/-flowchart-(.+)-(\d+)$/);
-      if (!m) return;
-      const color = resolveNodeColor(m[1], config);
-      if (!color) return;
-      const shape = g.querySelector('.label-container');
-      if (!shape) return;
-      (shape as Styleable).style.fill = color;
-      (shape as Styleable).style.stroke = color;
-      changed = true;
-    });
+    if (isFlowchart) {
+      root.querySelectorAll('g.node[id]').forEach(g => {
+        const id = g.getAttribute('id');
+        if (!id) return;
+        const m = id.match(/-flowchart-(.+)-(\d+)$/);
+        if (!m) return;
+        const color = resolveNodeColor(m[1], config);
+        if (!color) return;
+        const shape = g.querySelector('.label-container');
+        if (!shape) return;
+        (shape as Styleable).style.fill = color;
+        (shape as Styleable).style.stroke = color;
+        changed = true;
+      });
+      return changed ? root.outerHTML : svg;
+    }
+
+    // Sequence diagrams: color participant boxes and actor stick figures
+    const actorEntries = Object.keys(config.actors);
+    if (actorEntries.length === 0) return svg;
+
+    for (const actorId of actorEntries) {
+      const color = resolveNodeColor(actorId, config);
+      if (!color) continue;
+      const textColor = isLightColor(color) ? '#0f172a' : '#ffffff';
+
+      // 1. Participant top groups: g[data-et="participant"]
+      root.querySelectorAll('g[data-et="participant"]').forEach(g => {
+        if (g.getAttribute('data-id') === actorId) {
+          g.setAttribute('data-colored', 'true');
+          g.querySelectorAll('rect').forEach(rect => {
+            rect.setAttribute('data-colored', 'true');
+            (rect as Styleable).style.setProperty('fill', color, 'important');
+            (rect as Styleable).style.setProperty('stroke', color, 'important');
+            rect.setAttribute('fill', color);
+            rect.setAttribute('stroke', color);
+            changed = true;
+          });
+          g.querySelectorAll('circle').forEach(c => {
+            c.setAttribute('data-colored', 'true');
+            (c as Styleable).style.setProperty('fill', color, 'important');
+            (c as Styleable).style.setProperty('stroke', color, 'important');
+            c.setAttribute('fill', color);
+            c.setAttribute('stroke', color);
+            changed = true;
+          });
+          g.querySelectorAll('line, path').forEach(l => {
+            l.setAttribute('data-colored', 'true');
+            (l as Styleable).style.setProperty('stroke', color, 'important');
+            l.setAttribute('stroke', color);
+            changed = true;
+          });
+          g.querySelectorAll('text.actor, text.actor-box, text').forEach(t => {
+            t.setAttribute('data-colored', 'true');
+            (t as Styleable).style.setProperty('fill', textColor, 'important');
+            t.setAttribute('fill', textColor);
+            t.querySelectorAll('tspan').forEach(ts => {
+              ts.setAttribute('data-colored', 'true');
+              (ts as Styleable).style.setProperty('fill', textColor, 'important');
+              ts.setAttribute('fill', textColor);
+            });
+            changed = true;
+          });
+        }
+      });
+
+      // 2. Rectangles by name attribute (matches bottom boxes and direct rect.actor)
+      root.querySelectorAll('rect.actor, rect').forEach(rect => {
+        if (rect.getAttribute('name') === actorId) {
+          rect.setAttribute('data-colored', 'true');
+          (rect as Styleable).style.setProperty('fill', color, 'important');
+          (rect as Styleable).style.setProperty('stroke', color, 'important');
+          rect.setAttribute('fill', color);
+          rect.setAttribute('stroke', color);
+          changed = true;
+
+          const parent = rect.parentElement;
+          if (parent) {
+            parent.setAttribute('data-colored', 'true');
+            parent.querySelectorAll('text.actor, text.actor-box, text').forEach(t => {
+              t.setAttribute('data-colored', 'true');
+              (t as Styleable).style.setProperty('fill', textColor, 'important');
+              t.setAttribute('fill', textColor);
+              t.querySelectorAll('tspan').forEach(ts => {
+                ts.setAttribute('data-colored', 'true');
+                (ts as Styleable).style.setProperty('fill', textColor, 'important');
+                ts.setAttribute('fill', textColor);
+              });
+              changed = true;
+            });
+          }
+        }
+      });
+
+      // 3. Stick figures by name attribute (matches bottom stick figures)
+      root.querySelectorAll('g.actor-man, .actor-man').forEach(man => {
+        if (man.getAttribute('name') === actorId) {
+          man.setAttribute('data-colored', 'true');
+          (man as Styleable).style.setProperty('fill', color, 'important');
+          (man as Styleable).style.setProperty('stroke', color, 'important');
+          man.querySelectorAll('circle').forEach(c => {
+            c.setAttribute('data-colored', 'true');
+            (c as Styleable).style.setProperty('fill', color, 'important');
+            (c as Styleable).style.setProperty('stroke', color, 'important');
+            c.setAttribute('fill', color);
+            c.setAttribute('stroke', color);
+            changed = true;
+          });
+          man.querySelectorAll('line, path').forEach(l => {
+            l.setAttribute('data-colored', 'true');
+            (l as Styleable).style.setProperty('stroke', color, 'important');
+            l.setAttribute('stroke', color);
+            changed = true;
+          });
+          const parent = man.parentElement;
+          if (parent) {
+            parent.setAttribute('data-colored', 'true');
+            parent.querySelectorAll('text.actor, text.actor-man, text').forEach(t => {
+              t.setAttribute('data-colored', 'true');
+              (t as Styleable).style.setProperty('fill', textColor, 'important');
+              t.setAttribute('fill', textColor);
+              t.querySelectorAll('tspan').forEach(ts => {
+                ts.setAttribute('data-colored', 'true');
+                (ts as Styleable).style.setProperty('fill', textColor, 'important');
+                ts.setAttribute('fill', textColor);
+              });
+              changed = true;
+            });
+          }
+        }
+      });
+    }
+
     return changed ? root.outerHTML : svg;
   } catch {
     return svg;

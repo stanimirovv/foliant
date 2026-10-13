@@ -270,7 +270,7 @@ body {
 }
 
 /* Default Mermaid Actor styling for Dark Mode to match main blue and dark background */
-.theme-dark rect.actor {
+.theme-dark rect.actor:not([data-colored="true"]) {
   stroke: #3b82f6 !important;
   fill: #1e293b !important;
 }
@@ -279,13 +279,13 @@ body {
   stroke: #334155 !important;
 }
 
-.theme-dark text.actor > tspan,
-.theme-dark text.actor {
+.theme-dark text.actor:not([data-colored="true"]) > tspan,
+.theme-dark text.actor:not([data-colored="true"]) {
   fill: #f8fafc !important;
 }
 
-.theme-dark .actor-man circle,
-.theme-dark .actor-man line {
+.theme-dark .actor-man:not([data-colored="true"]) circle,
+.theme-dark .actor-man:not([data-colored="true"]) line {
   stroke: #3b82f6 !important;
   fill: #1e293b !important;
 }

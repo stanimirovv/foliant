@@ -96,7 +96,7 @@ describe('processMermaid', () => {
 });
 
 describe('transformActors', () => {
-  it('colors box actors without merging them', () => {
+  it('does not wrap colored actors in box zones (colors apply via SVG post-processing)', () => {
     const code = `sequenceDiagram
   participant A
   participant B
@@ -111,10 +111,8 @@ describe('transformActors', () => {
     };
     const result = transformActors(code, config, {});
     expect(result).toBe(`sequenceDiagram
-    box red RED Zone
-    participant A
-    participant B
-    end
+  participant A
+  participant B
   A->>B: Message
   B->>C: Reply`);
   });
@@ -262,6 +260,30 @@ describe('transformActors', () => {
     expect(result).toBe(`flowchart TD
   MergedKey_backend[Merged backend] --> C[Client]`);
   });
+
+  it('when an actor has multiple tags, shows it if any tag is shown and hides it only when all tags are disabled', () => {
+    const code = `sequenceDiagram
+  participant A
+  participant B
+  A->>B: Call`;
+    const config = {
+      version: 1,
+      actors: {
+        A: { keys: ['backend', 'core'] },
+        B: { keys: ['frontend'] },
+      },
+    };
+    // Only one tag disabled: actor A is shown because 'core' is still enabled
+    const oneHidden = transformActors(code, config, { hideKeys: ['backend'] });
+    expect(oneHidden).toContain('participant A');
+    expect(oneHidden).toContain('A->>B: Call');
+
+    // All tags disabled: actor A is hidden
+    const allHidden = transformActors(code, config, { hideKeys: ['backend', 'core'] });
+    expect(allHidden).not.toContain('participant A');
+    expect(allHidden).not.toContain('A->>B: Call');
+    expect(allHidden).toContain('participant B');
+  });
 });
 
 describe('transformActors message/edge tags', () => {
@@ -360,6 +382,29 @@ describe('transformActors message/edge tags', () => {
     const merged = transformActors(code, config, { mergeByKeys: ['backend'] });
     expect(merged).toContain('MergedKey_backend->>B: Call');
     expect(merged).toContain('B->>C: Forward');
+  });
+
+  it('when an arrow has multiple tags, shows it if any tag is shown and hides it only when all tags are disabled', () => {
+    const multiTagCode = `sequenceDiagram
+  participant A
+  participant B
+  A->>B: MultiTag
+  A->>B: Other`;
+    const multiTagConfig = {
+      version: 1,
+      arrows: [
+        { from: 'A', to: 'B', label: 'MultiTag', keys: ['flaky', 'beta'] },
+      ],
+    };
+    // Only one tag disabled: arrow is shown because 'beta' is still enabled
+    const oneHidden = transformActors(multiTagCode, multiTagConfig, { hideKeys: ['flaky'] });
+    expect(oneHidden).toContain('A->>B: MultiTag');
+    expect(oneHidden).toContain('A->>B: Other');
+
+    // All tags disabled: arrow is hidden
+    const allHidden = transformActors(multiTagCode, multiTagConfig, { hideKeys: ['flaky', 'beta'] });
+    expect(allHidden).not.toContain('A->>B: MultiTag');
+    expect(allHidden).toContain('A->>B: Other');
   });
 });
 

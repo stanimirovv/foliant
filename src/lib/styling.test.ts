@@ -496,13 +496,101 @@ describe('applyNodeColors', () => {
     expect(rect.getAttribute('style')).toBeNull();
   });
 
-  it('is a no-op for sequence diagrams and missing actors', () => {
+  it('fills sequence diagram participant shapes from CONFIG.actors colors', () => {
     const config: DiagramConfig = { version: 1, actors: { A: { color: 'red' } } };
-    expect(applyNodeColors(SEQ_SVG, config)).toBe(SEQ_SVG);
+    const out = applyNodeColors(SEQ_SVG, config);
+    const root = parseSvgRoot(out);
+    const topA = root.querySelector('g[data-id="A"] rect.actor')!;
+    const bottomA = root.querySelector('rect.actor-bottom[name="A"]')!;
+    expect(styleOf(topA).fill).toBe('red');
+    expect(styleOf(topA).stroke).toBe('red');
+    expect(topA.getAttribute('data-colored')).toBe('true');
+    expect(topA.getAttribute('fill')).toBe('red');
+    expect(topA.getAttribute('stroke')).toBe('red');
+    expect((topA as unknown as SVGElement).style.getPropertyPriority('fill')).toBe('important');
+    expect((topA as unknown as SVGElement).style.getPropertyPriority('stroke')).toBe('important');
+
+    expect(styleOf(bottomA).fill).toBe('red');
+    expect(styleOf(bottomA).stroke).toBe('red');
+    expect(bottomA.getAttribute('data-colored')).toBe('true');
+    expect(bottomA.getAttribute('fill')).toBe('red');
+    expect(bottomA.getAttribute('stroke')).toBe('red');
+    expect((bottomA as unknown as SVGElement).style.getPropertyPriority('fill')).toBe('important');
+    expect((bottomA as unknown as SVGElement).style.getPropertyPriority('stroke')).toBe('important');
+
+    const topB = root.querySelector('g[data-id="B"] rect.actor')!;
+    expect(topB.getAttribute('style')).toBeNull();
+    expect(topB.getAttribute('data-colored')).toBeNull();
+  });
+
+  it('colors sequence stick figures and adjusts text contrast', () => {
+    const svgWithMan = SEQ_SVG.replace(
+      '<g class="actor-man actor-bottom" name="B"><text class="actor actor-man"><tspan>B</tspan></text></g>',
+      '<g class="actor-man actor-top" name="B" data-et="participant" data-id="B"><circle></circle><line></line><text class="actor actor-man"><tspan>B</tspan></text></g>'
+    );
+    const config: DiagramConfig = { version: 1, actors: { B: { color: '#fbbf24' } } }; // yellow (light color)
+    const out = applyNodeColors(svgWithMan, config);
+    const root = parseSvgRoot(out);
+    const man = root.querySelector('g.actor-man[name="B"]')!;
+    expect(man.getAttribute('data-colored')).toBe('true');
+    const circle = man.querySelector('circle')!;
+    expect(circle.getAttribute('data-colored')).toBe('true');
+    expect(styleOf(circle).fill).toBe(rgb('#fbbf24'));
+    expect((circle as unknown as SVGElement).style.getPropertyPriority('fill')).toBe('important');
+    const line = man.querySelector('line')!;
+    expect(line.getAttribute('data-colored')).toBe('true');
+    expect(styleOf(line).stroke).toBe(rgb('#fbbf24'));
+    expect((line as unknown as SVGElement).style.getPropertyPriority('stroke')).toBe('important');
+    const text = man.querySelector('text')!;
+    expect(text.getAttribute('data-colored')).toBe('true');
+    // light background yields dark text for contrast
+    expect(styleOf(text).fill).toBe(rgb('#0f172a'));
+    expect((text as unknown as SVGElement).style.getPropertyPriority('fill')).toBe('important');
+  });
+
+  it('preserves sequence actor colors under dark theme CSS rules', () => {
+    const config: DiagramConfig = { version: 1, actors: { A: { color: 'red' } } };
+    const out = applyNodeColors(SEQ_SVG, config);
+
+    // Simulate dark mode container and stylesheet as defined in globals.css
+    const doc = new DOMParser().parseFromString(`
+      <html>
+        <head>
+          <style>
+            .theme-dark rect.actor:not([data-colored="true"]) { stroke: #3b82f6 !important; fill: #1e293b !important; }
+            .theme-dark text.actor:not([data-colored="true"]) > tspan,
+            .theme-dark text.actor:not([data-colored="true"]) { fill: #f8fafc !important; }
+            .theme-dark .actor-man:not([data-colored="true"]) circle,
+            .theme-dark .actor-man:not([data-colored="true"]) line { stroke: #3b82f6 !important; fill: #1e293b !important; }
+          </style>
+        </head>
+        <body class="theme-dark">
+          <div id="container">${out}</div>
+        </body>
+      </html>
+    `, 'text/html');
+
+    const topA = doc.querySelector('g[data-id="A"] rect.actor') as SVGElement;
+    const topB = doc.querySelector('g[data-id="B"] rect.actor') as SVGElement;
+
+    // In a browser with CSS cascade, data-colored prevents dark mode rule from matching colored actor,
+    // and important priority guarantees inline custom color wins.
+    expect(topA.getAttribute('data-colored')).toBe('true');
+    expect(topA.style.getPropertyPriority('fill')).toBe('important');
+    expect(topA.style.fill).toBe('red');
+
+    // Uncolored actor does not have data-colored and receives default dark mode styles
+    expect(topB.getAttribute('data-colored')).toBeNull();
+  });
+
+  it('is a no-op when actors or colors are missing', () => {
+    const missing: DiagramConfig = { version: 1, actors: { X: { color: 'red' } } };
+    expect(applyNodeColors(SEQ_SVG, missing)).toBe(SEQ_SVG);
+    expect(applyNodeColors(SEQ_SVG, null)).toBe(SEQ_SVG);
     expect(applyNodeColors(FLOW_SVG, null)).toBe(FLOW_SVG);
     expect(applyNodeColors(FLOW_SVG, { version: 1 })).toBe(FLOW_SVG);
     expect(applyNodeColors(FLOW_SVG, { version: 1, actors: {} })).toBe(FLOW_SVG);
-    expect(applyNodeColors('garbage', config)).toBe('garbage');
+    expect(applyNodeColors('garbage', missing)).toBe('garbage');
   });
 });
 
@@ -604,14 +692,17 @@ describe('Step 11 — panel dispatch -> merge/hide integration (create -> change
     expect(styleOf(nodeB).fill).toBe(rgb('#2563eb'));
   });
 
-  it('sequence: component color flows through the box grouping', async () => {
+  it('sequence: component color renders as SVG fill on the participant', async () => {
     const raw = createSequenceDiagram();
     const colored = setActorColor(raw, null, 'p:0', '#e11d48');
-    const { processedCode } = await renderPipeline(colored.code);
-    // transformActors reads config.actors[id].color and regroups the
-    // participant into a box block
-    expect(processedCode).toContain('box #e11d48');
-    expect(processedCode.indexOf('participant A as Alice')).toBeGreaterThan(processedCode.indexOf('box #e11d48'));
+    const { svg, processedCode, config } = await renderPipeline(colored.code);
+    expect(processedCode).not.toContain('box #e11d48');
+    const out = applyStyles(svg, processedCode, config);
+    const root = parseSvgRoot(out);
+    const topA = root.querySelector('g[data-id="A"] rect.actor')!;
+    const bottomA = root.querySelector('rect.actor-bottom[name="A"]')!;
+    expect(styleOf(topA).fill).toBe(rgb('#e11d48'));
+    expect(styleOf(bottomA).fill).toBe(rgb('#e11d48'));
   });
 
   it('sequence: tagged actors merged by key — the internal styled arrow follows merge / clean / un-merge', async () => {

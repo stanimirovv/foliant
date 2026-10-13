@@ -68,4 +68,20 @@ sequenceDiagram
     expect(getArrowTags(clean.code, clean.config, 'm:0'))
       .toEqual({ keys: [], keyMode: 'clean', inherited: [] });
   });
+
+  it('an arrow with multiple tags is shown if any tag is shown, and hidden only when all tags are disabled', async () => {
+    const t1 = addTag(SEQ, null, 'm:1', 'flaky');
+    const t2 = addTag(t1.code, t1.config, 'm:1', 'beta');
+    expect(t2.warning).toBeUndefined();
+
+    // Hiding only one tag: arrow remains rendered
+    const oneHidden = await renderPipeline(t2.code, { hideKeys: ['flaky'] });
+    expect(oneHidden.model.elements.filter(e => e.kind === 'message')).toHaveLength(3);
+    expect(oneHidden.svg).toContain('Forward');
+
+    // Hiding all tags: arrow is removed from rendered diagram
+    const allHidden = await renderPipeline(t2.code, { hideKeys: ['flaky', 'beta'] });
+    expect(allHidden.model.elements.filter(e => e.kind === 'message')).toHaveLength(2);
+    expect(allHidden.svg).not.toContain('Forward');
+  });
 });

@@ -419,8 +419,6 @@ describe('ClientPage', () => {
   });
 
   it('dragging a participant reorders it in the rendered diagram and keeps it selected', async () => {
-    // Actor colors regroup participants into boxes, so the rendered order
-    // (C, Auth, DB, API) differs from the declaration order (Auth, DB, API, C).
     const COLORED = `%% CONFIG: {"version":1,"actors":{"Auth":{"color":"red"},"DB":{"color":"red"},"API":{"color":"blue"}}}
 sequenceDiagram
     participant Auth as Auth Service
@@ -430,22 +428,21 @@ sequenceDiagram
     Auth->>API: ping`;
     const viewer = await renderInEditMode(COLORED, 'Auth->>API: ping');
 
-    // Drag the rendered-rightmost participant (API, processed p:3) to the front.
+    // Drag the rightmost participant (C, processed p:3) to the front before Auth (p:0).
     fireEvent.click(screen.getByTestId('drag-move-participant-front'));
 
-    // Rendered order becomes C, API, Auth, DB (C is uncolored and stays first).
+    // Rendered order becomes C, Auth, DB, API.
     await waitFor(() => {
       const code = viewer.getAttribute('data-code') ?? '';
       const ids = [...code.matchAll(/^\s*participant\s+(\S+)/gm)].map(m => m[1]);
-      expect(ids).toEqual(['C', 'API', 'Auth', 'DB']);
+      expect(ids).toEqual(['C', 'Auth', 'DB', 'API']);
     }, { timeout: 3000 });
-    // The dragged participant stays selected: API is now rendered at index 1,
-    // so its processed key is p:1, and the right panel shows API's editor (not
-    // the participant that previously held the selection).
+    // The dragged participant stays selected: C is now rendered at index 0,
+    // so its processed key is p:0, and the right panel shows C's editor.
     await waitFor(() => {
-      expect(viewer.getAttribute('data-selection')).toBe('p:1');
+      expect(viewer.getAttribute('data-selection')).toBe('p:0');
     }, { timeout: 3000 });
-    const input = await screen.findByDisplayValue('API Gateway');
+    const input = await screen.findByDisplayValue('Client');
     expect(input).toBeTruthy();
   });
 
@@ -713,10 +710,9 @@ sequenceDiagram
     }, { timeout: 3000 });
 
     // delete a participant -> its messages cascade away with it, no confirmation.
-    // Both A and New1 are colored, B is uncolored. The processed order is
-    // uncolored (B), then box groups in order (A, then New1),
-    // i.e. processed key p:1 is A.
-    fireEvent.click(screen.getByTestId('select-p:1'));
+    // Participants preserve declaration order (A, B, New1),
+    // i.e. processed key p:0 is A.
+    fireEvent.click(screen.getByTestId('select-p:0'));
     await screen.findByDisplayValue('Alice');
     fireEvent.click(screen.getByTestId('panel-delete'));
     expect(screen.queryByTestId('delete-dialog')).toBeNull();
