@@ -4,7 +4,7 @@ export interface SvgExportOptions {
   notes?: StickyNoteType[];
   showNotes?: boolean;
   isDark?: boolean;
-  fileName?: string;
+  fileName?: string | null;
 }
 
 export const STICKY_NOTE_HEX: Record<StickyNoteColor, {
@@ -213,10 +213,12 @@ export function prepareSvgForExport(svg: SVGElement, options: SvgExportOptions =
     el.classList.remove('editor-selected');
   });
 
-  // 3. Ensure <defs> and embed all visual keyframes/styles
+  // 3. Ensure <defs> is at the very beginning of the SVG so defs + background precede all diagram content
   let defs = clone.querySelector('defs');
   if (!defs) {
     defs = doc.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    clone.insertBefore(defs, clone.firstChild);
+  } else if (defs !== clone.firstChild) {
     clone.insertBefore(defs, clone.firstChild);
   }
 
@@ -228,7 +230,43 @@ export function prepareSvgForExport(svg: SVGElement, options: SvgExportOptions =
     embeddedStyle.setAttribute('data-source', 'mermaid-viewer-export');
     defs.appendChild(embeddedStyle);
   }
-  embeddedStyle.textContent = (embeddedStyle.textContent || '') + '\n' + EMBEDDED_SVG_STYLES;
+
+  const isDark = !!options.isDark;
+  clone.classList.add(isDark ? 'theme-dark' : 'theme-light');
+
+  const actorStyles = isDark ? `
+/* --- Sequence Diagram Actor & Lifeline Styles (Dark Mode) --- */
+.theme-dark rect.actor:not([data-colored="true"]),
+rect.actor:not([data-colored="true"]) {
+  stroke: #3b82f6 !important;
+  fill: #1e293b !important;
+}
+.theme-dark line.actor-line,
+line.actor-line {
+  stroke: #334155 !important;
+}
+.theme-dark text.actor:not([data-colored="true"]) > tspan,
+.theme-dark text.actor:not([data-colored="true"]),
+text.actor:not([data-colored="true"]) > tspan,
+text.actor:not([data-colored="true"]) {
+  fill: #f8fafc !important;
+}
+.theme-dark .actor-man:not([data-colored="true"]) circle,
+.theme-dark .actor-man:not([data-colored="true"]) line,
+.actor-man:not([data-colored="true"]) circle,
+.actor-man:not([data-colored="true"]) line {
+  stroke: #3b82f6 !important;
+  fill: #1e293b !important;
+}
+` : `
+/* --- Sequence Diagram Actor & Lifeline Styles (Light Mode) --- */
+.actor-man:not([data-colored="true"]) circle,
+.actor-man:not([data-colored="true"]) line {
+  stroke: #28253D !important;
+}
+`;
+
+  embeddedStyle.textContent = (embeddedStyle.textContent || '') + '\n' + EMBEDDED_SVG_STYLES + '\n' + actorStyles;
 
   // 4. Ensure packet runners carry explicit SVG presentation attributes for viewers without CSS support
   clone.querySelectorAll('.arrow-anim-packet-runner').forEach((runner) => {
@@ -239,6 +277,23 @@ export function prepareSvgForExport(svg: SVGElement, options: SvgExportOptions =
     if (styleable.style) {
       styleable.style.strokeDasharray = '6 100';
       styleable.style.strokeLinecap = 'round';
+    }
+  });
+
+  // 5. Ensure stick-figure actors carry explicit stroke presentation attributes for viewers without CSS support
+  const actorStroke = isDark ? '#3b82f6' : '#28253D';
+  const actorFill = isDark ? '#1e293b' : '#ffffff';
+  clone.querySelectorAll('.actor-man line').forEach((line) => {
+    if (!line.getAttribute('stroke') || line.getAttribute('stroke') === 'none') {
+      line.setAttribute('stroke', actorStroke);
+    }
+  });
+  clone.querySelectorAll('.actor-man circle').forEach((circle) => {
+    if (!circle.getAttribute('stroke') || circle.getAttribute('stroke') === 'none') {
+      circle.setAttribute('stroke', actorStroke);
+    }
+    if (!circle.getAttribute('fill') || circle.getAttribute('fill') === 'none') {
+      circle.setAttribute('fill', actorFill);
     }
   });
 

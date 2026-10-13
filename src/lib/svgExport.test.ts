@@ -226,5 +226,69 @@ describe('svgExport', () => {
       expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
       expect(revokeObjectURLSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('places background rect behind all sequence diagram actors and lifelines (not covering them)', async () => {
+      const { renderPipeline } = await import('./editorTestHarness');
+      const code = `sequenceDiagram
+        actor C as Client
+        participant GW as API Gateway
+        C->>GW: POST /checkout`;
+      const res = await renderPipeline(code);
+      const div = document.createElement('div');
+      div.innerHTML = res.svg;
+      const svgEl = div.querySelector('svg') as SVGElement;
+      const exported = prepareSvgForExport(svgEl, { isDark: true });
+
+      const parsed = document.createElement('div');
+      parsed.innerHTML = exported;
+      const bg = parsed.querySelector('rect.diagram-export-bg')!;
+      expect(bg).toBeTruthy();
+
+      // All participant/actor elements must appear AFTER bg in document order
+      const actors = parsed.querySelectorAll('g[data-et="participant"], rect.actor, line.actor-line, text.actor, .actor-man');
+      expect(actors.length).toBeGreaterThan(0);
+      actors.forEach((actor) => {
+        // actor must be following bg in document order (not preceding it)
+        const position = bg.compareDocumentPosition(actor);
+        expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      });
+
+      // Verify actor styles are embedded
+      expect(exported).toContain('rect.actor:not([data-colored="true"])');
+      expect(exported).toContain('text.actor:not([data-colored="true"])');
+      expect(exported).toContain('.actor-man:not([data-colored="true"])');
+
+      // Verify stick figure actor has presentation stroke attributes
+      const manLines = parsed.querySelectorAll('.actor-man line');
+      expect(manLines.length).toBeGreaterThan(0);
+      manLines.forEach((l) => {
+        expect(l.getAttribute('stroke')).toBe('#3b82f6');
+      });
+    });
+
+    it('embeds light mode sequence actor styling and attributes when isDark is false', async () => {
+      const { renderPipeline } = await import('./editorTestHarness');
+      const code = `sequenceDiagram
+        actor C as Client
+        participant GW as API Gateway
+        C->>GW: POST /checkout`;
+      const res = await renderPipeline(code);
+      const div = document.createElement('div');
+      div.innerHTML = res.svg;
+      const svgEl = div.querySelector('svg') as SVGElement;
+      const exported = prepareSvgForExport(svgEl, { isDark: false });
+
+      const parsed = document.createElement('div');
+      parsed.innerHTML = exported;
+      const bg = parsed.querySelector('rect.diagram-export-bg')!;
+      expect(bg.getAttribute('fill')).toBe('#ffffff');
+
+      // Verify stick figure actor has light mode stroke presentation attributes
+      const manLines = parsed.querySelectorAll('.actor-man line');
+      expect(manLines.length).toBeGreaterThan(0);
+      manLines.forEach((l) => {
+        expect(l.getAttribute('stroke')).toBe('#28253D');
+      });
+    });
   });
 });

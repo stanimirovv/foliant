@@ -8,7 +8,7 @@ import mermaid from 'mermaid';
 
 let currentMockParams: Record<string, string> = { dir: '/old/dir' };
 const mockReplace = vi.fn();
-const mockGet = vi.fn((key: string) => currentMockParams[key] ?? null);
+const mockGet = vi.fn((key: string): string | null => currentMockParams[key] ?? null);
 const mockSearchParams = {
   get: mockGet,
   toString: () => new URLSearchParams(currentMockParams).toString()

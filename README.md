@@ -299,6 +299,7 @@ Click **Export SVG** in the toolbar to export the current diagram:
 Wrap flows, edge cases, and optional subsystems in custom comments. The pre-processor conditionally strips inactive regions and safely cleans up dangling syntax (like orphaned `alt/end` blocks or dangling connectors).
 
 ```mermaid
+sequenceDiagram
 %% @region-start: flow=user-registration
 C->>GW: POST /api/register
 GW->>Auth: Validate Credentials

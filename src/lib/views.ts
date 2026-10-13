@@ -56,6 +56,8 @@ export interface StickyNote {
   y: number;
   text: string;
   color?: StickyNoteColor;
+  width?: number;
+  height?: number;
 }
 
 export interface DiagramConfig {
