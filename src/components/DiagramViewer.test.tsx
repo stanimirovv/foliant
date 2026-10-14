@@ -193,6 +193,20 @@ describe('DiagramViewer', () => {
     expect(onSelect).toHaveBeenCalledWith('m:0', { shiftKey: true });
   });
 
+  it('shift-click on a note selects it for multi-selection', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={onSelect} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('g[data-et="note"]')).toBeTruthy();
+    });
+    const target = container.querySelector('g[data-et="note"] rect')!;
+    fireEvent.mouseDown(target, { shiftKey: true, button: 0 });
+    fireEvent.click(target, { shiftKey: true });
+    expect(onSelect).toHaveBeenCalledWith('note:0', { shiftKey: true });
+  });
+
   it('applies the highlight class to multiple selected elements when selection is an array', async () => {
     const { container } = render(
       <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={['m:0', 'm:1']} onSelect={() => {}} />

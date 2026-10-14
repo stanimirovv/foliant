@@ -4,8 +4,8 @@
 // (NFR-02), and malformed input is a no-op with a warning, never a
 // corruption (NFR-01).
 
-import { parseModel, parseShapeToken, parseParticipantLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NodeShape, ParticipantType } from './model';
-import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, DiagramConfig, updateViewsData } from './views';
+import { parseModel, parseShapeToken, parseParticipantLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeShape, ParticipantType } from './model';
+import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, DiagramConfig, NoteTagEntry, updateViewsData } from './views';
 import { ANIMATED_ARROW_COLORS } from './styling';
 
 export interface EditResult {
@@ -66,6 +66,7 @@ function cloneConfig(config: DiagramConfig | null): DiagramConfig | null {
       ? Object.fromEntries(Object.entries(config.actors).map(([k, v]) => [k, { ...v, keys: v.keys ? [...v.keys] : undefined }]))
       : undefined,
     arrows: config.arrows?.map(a => ({ ...a, keys: a.keys ? [...a.keys] : undefined })),
+    noteTags: config.noteTags?.map(n => ({ ...n, over: [...n.over], keys: n.keys ? [...n.keys] : undefined })),
   };
 }
 
@@ -73,6 +74,11 @@ function cloneConfig(config: DiagramConfig | null): DiagramConfig | null {
 // state ('clean' is the default and is stored as absent).
 function arrowEntryIsEmpty(a: ArrowStyle): boolean {
   return !a.color && !a.width && !a.dash && (!a.animation || a.animation === 'none') && (!a.keys || a.keys.length === 0) && a.keyMode !== 'merged';
+}
+
+// A note tag entry with no keys carries no state.
+function noteEntryIsEmpty(n: NoteTagEntry): boolean {
+  return !n.keys || n.keys.length === 0;
 }
 
 // Drop actor entries that carry no state, and empty containers.
@@ -88,6 +94,10 @@ function pruneConfig(config: DiagramConfig): void {
   if (config.arrows) {
     config.arrows = config.arrows.filter(a => !arrowEntryIsEmpty(a));
     if (config.arrows.length === 0) delete config.arrows;
+  }
+  if (config.noteTags) {
+    config.noteTags = config.noteTags.filter(n => !noteEntryIsEmpty(n));
+    if (config.noteTags.length === 0) delete config.noteTags;
   }
 }
 
@@ -124,6 +134,25 @@ function elementOccurrence(model: ReturnType<typeof parseModel>, el: ModelElemen
 function arrowsMatchEntry(entry: ArrowStyle, from: string, to: string, label: string | undefined, occurrence: number): boolean {
   return entry.from === from && entry.to === to &&
     (entry.label ?? undefined) === (label ?? undefined) &&
+    (entry.occurrence ?? 0) === occurrence;
+}
+
+// 0-based occurrence of el among same-(over, text) notes.
+function noteOccurrence(model: ReturnType<typeof parseModel>, el: NoteElement): number {
+  let occurrence = 0;
+  const overKey = el.over.join('\u0000');
+  for (const e of model.elements) {
+    if (e === el) break;
+    if (e.kind === 'note' && e.over.join('\u0000') === overKey && e.text === el.text) {
+      occurrence++;
+    }
+  }
+  return occurrence;
+}
+
+function notesMatchEntry(entry: NoteTagEntry, over: string[], text: string, occurrence: number): boolean {
+  return entry.over.length === over.length && entry.over.every((id, i) => id === over[i]) &&
+    entry.text === text &&
     (entry.occurrence ?? 0) === occurrence;
 }
 
@@ -1158,8 +1187,8 @@ export function deleteElement(code: string, config: DiagramConfig | null, key: s
   }
   const newCode = kept.join('\n');
 
-  // Config cleanup: drop the component's actor entry and the arrow styles of
-  // every removed element.
+  // Config cleanup: drop the component's actor entry and the arrow styles and
+  // note tags of every removed element.
   const newConfig = cloneConfig(config);
   if (newConfig) {
     if (isComponent(el) && newConfig.actors) delete newConfig.actors[el.id];
@@ -1173,6 +1202,15 @@ export function deleteElement(code: string, config: DiagramConfig | null, key: s
         if (isComponent(el) && (a.from === el.id || a.to === el.id)) return false;
         return !arrowTargets.some(t => arrowsMatchEntry(a, t.from, t.to, t.label, t.occurrence));
       });
+    }
+    const noteTargets: { over: string[]; text: string; occurrence: number }[] = [];
+    if (el.kind === 'note') noteTargets.push({ over: el.over, text: el.text, occurrence: noteOccurrence(model, el) });
+    for (const c of cascaded) {
+      if (c.kind === 'note') noteTargets.push({ over: c.over, text: c.text, occurrence: noteOccurrence(model, c) });
+    }
+    if (newConfig.noteTags) {
+      newConfig.noteTags = newConfig.noteTags.filter(n =>
+        !noteTargets.some(t => notesMatchEntry(n, t.over, t.text, t.occurrence)));
     }
     pruneConfig(newConfig);
   }
@@ -1208,8 +1246,8 @@ export function addTag(code: string, config: DiagramConfig | null, key: string, 
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
-  if (!el || (!isComponent(el) && !isArrow(el))) {
-    return fail(code, config, `Element ${key} is not a component or message`);
+  if (!el || (!isComponent(el) && !isArrow(el) && el.kind !== 'note')) {
+    return fail(code, config, `Element ${key} is not a component, message or note`);
   }
   const t = tag.trim();
   if (!TAG_RE.test(t)) return fail(code, config, `Invalid tag: ${tag}`);
@@ -1221,6 +1259,26 @@ export function addTag(code: string, config: DiagramConfig | null, key: string, 
     newConfig.actors[el.id] = meta;
     meta.keys = meta.keys ?? [];
     if (!meta.keys.includes(t)) meta.keys.push(t);
+    return { code: updateViewsData(code, newConfig), config: newConfig };
+  }
+
+  // Note: the tag rides on the note's CONFIG.noteTags entry (same
+  // (over, text, occurrence) keying as arrow styles).
+  if (el.kind === 'note') {
+    const occurrence = noteOccurrence(model, el);
+    const newConfig = cloneConfig(config) ?? { version: 1 };
+    const noteTags = newConfig.noteTags ? [...newConfig.noteTags] : [];
+    const idx = noteTags.findIndex(n => notesMatchEntry(n, el.over, el.text, occurrence));
+    if (idx >= 0) {
+      if (noteTags[idx].keys?.includes(t)) return { code, config }; // already there
+      noteTags[idx] = { ...noteTags[idx], keys: [...(noteTags[idx].keys ?? []), t] };
+    } else {
+      const entry: NoteTagEntry = { over: [...el.over], text: el.text };
+      if (occurrence > 0) entry.occurrence = occurrence;
+      entry.keys = [t];
+      noteTags.push(entry);
+    }
+    newConfig.noteTags = noteTags;
     return { code: updateViewsData(code, newConfig), config: newConfig };
   }
 
@@ -1248,8 +1306,8 @@ export function removeTag(code: string, config: DiagramConfig | null, key: strin
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
-  if (!el || (!isComponent(el) && !isArrow(el))) {
-    return fail(code, config, `Element ${key} is not a component or message`);
+  if (!el || (!isComponent(el) && !isArrow(el) && el.kind !== 'note')) {
+    return fail(code, config, `Element ${key} is not a component, message or note`);
   }
 
   if (isComponent(el)) {
@@ -1258,6 +1316,23 @@ export function removeTag(code: string, config: DiagramConfig | null, key: strin
     const newConfig = cloneConfig(config) ?? { version: 1 };
     const meta = newConfig.actors![el.id];
     meta.keys = meta.keys!.filter(k => k !== tag);
+    pruneConfig(newConfig);
+    return { code: updateViewsData(code, newConfig), config: newConfig };
+  }
+
+  // Note: drop the tag from the note's CONFIG.noteTags entry.
+  if (el.kind === 'note') {
+    const occurrence = noteOccurrence(model, el);
+    const existing = config?.noteTags?.find(n => notesMatchEntry(n, el.over, el.text, occurrence));
+    if (!existing?.keys?.includes(tag)) return { code, config }; // nothing to remove
+    const newConfig = cloneConfig(config) ?? { version: 1 };
+    const noteTags = newConfig.noteTags ? [...newConfig.noteTags] : [];
+    const idx = noteTags.findIndex(n => notesMatchEntry(n, el.over, el.text, occurrence));
+    const kept = (noteTags[idx].keys ?? []).filter(k => k !== tag);
+    const entry = { ...noteTags[idx] };
+    if (kept.length > 0) entry.keys = kept; else delete entry.keys;
+    noteTags[idx] = entry;
+    newConfig.noteTags = noteTags;
     pruneConfig(newConfig);
     return { code: updateViewsData(code, newConfig), config: newConfig };
   }
@@ -1296,6 +1371,17 @@ export function getArrowTags(code: string, config: DiagramConfig | null, key: st
   const keyMode: ArrowKeyMode = entry?.keyMode === 'merged' ? 'merged' : 'clean';
   const originKeys = keyMode === 'merged' ? (config?.actors?.[el.from]?.keys ?? []) : [];
   return { keys, keyMode, inherited: originKeys.filter(k => !keys.includes(k)) };
+}
+
+// The note's own tags (notes carry no tag behavior: no inheritance, so hiding
+// is on/off only, like arrows' own keys).
+export function getNoteTags(code: string, config: DiagramConfig | null, key: string): string[] {
+  const model = parseModel(code);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'note') return [];
+  const occurrence = noteOccurrence(model, el);
+  const entry = config?.noteTags?.find(n => notesMatchEntry(n, el.over, el.text, occurrence));
+  return entry?.keys ?? [];
 }
 
 // Set an arrow's tag behavior. 'clean' is the default and is stored as absent;

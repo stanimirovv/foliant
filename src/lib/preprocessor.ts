@@ -108,7 +108,8 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
 
 export function transformActors(code: string, config: DiagramConfig | null, options: ActorTransformOptions): string {
   const hasArrowTags = !!config?.arrows?.some(a => (a.keys && a.keys.length > 0) || a.keyMode === 'merged');
-  if (!config || (!config.actors && !hasArrowTags)) return code;
+  const hasNoteTags = !!config?.noteTags?.some(n => n.keys && n.keys.length > 0);
+  if (!config || (!config.actors && !hasArrowTags && !hasNoteTags)) return code;
 
   const { hide, clean, groups } = buildActorRewriteMap(config, options);
   const actorsToHide = Array.from(hide);
@@ -120,26 +121,40 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   // service it originates from. (Lines whose origin service carries the hidden
   // key are already dropped by the hidden-actor check above, so only the own
   // keys can add drops here; inherited keys are evaluated anyway to keep the
-  // semantics exact.)
+  // semantics exact.) Notes behave the same way with their own keys only —
+  // they carry no tag inheritance.
   const hideKeys = options.hideKeys ?? [];
-  const hiddenMessageLines = new Set<number>();
-  if (hideKeys.length > 0 && hasArrowTags) {
+  const hiddenElementLines = new Set<number>();
+  if (hideKeys.length > 0 && (hasArrowTags || hasNoteTags)) {
     const model = parseModel(code);
-    const occurrences = new Map<string, number>();
+    const arrowOccurrences = new Map<string, number>();
+    const noteOccurrences = new Map<string, number>();
     for (const el of model.elements) {
-      if (el.kind !== 'message' && el.kind !== 'edge') continue;
-      const occKey = `${el.from}\u0000${el.to}\u0000${el.label ?? ''}`;
-      const occurrence = occurrences.get(occKey) ?? 0;
-      occurrences.set(occKey, occurrence + 1);
-      const entry = config.arrows!.find(a =>
-        a.from === el.from && a.to === el.to &&
-        (a.label ?? undefined) === (el.label ?? undefined) &&
-        (a.occurrence ?? 0) === occurrence);
-      const own = entry?.keys ?? [];
-      const inherited = entry?.keyMode === 'merged' ? (config.actors?.[el.from]?.keys ?? []) : [];
-      const keysToCheck = Array.from(new Set([...own, ...inherited]));
+      if (el.kind !== 'message' && el.kind !== 'edge' && el.kind !== 'note') continue;
+      let keysToCheck: string[];
+      if (el.kind === 'note') {
+        const occKey = `${el.over.join('\u0000')}\u0000${el.text}`;
+        const occurrence = noteOccurrences.get(occKey) ?? 0;
+        noteOccurrences.set(occKey, occurrence + 1);
+        const entry = config.noteTags?.find(n =>
+          n.over.length === el.over.length && n.over.every((id, i) => id === el.over[i]) &&
+          n.text === el.text &&
+          (n.occurrence ?? 0) === occurrence);
+        keysToCheck = entry?.keys ?? [];
+      } else {
+        const occKey = `${el.from}\u0000${el.to}\u0000${el.label ?? ''}`;
+        const occurrence = arrowOccurrences.get(occKey) ?? 0;
+        arrowOccurrences.set(occKey, occurrence + 1);
+        const entry = config.arrows?.find(a =>
+          a.from === el.from && a.to === el.to &&
+          (a.label ?? undefined) === (el.label ?? undefined) &&
+          (a.occurrence ?? 0) === occurrence);
+        const own = entry?.keys ?? [];
+        const inherited = entry?.keyMode === 'merged' ? (config.actors?.[el.from]?.keys ?? []) : [];
+        keysToCheck = Array.from(new Set([...own, ...inherited]));
+      }
       if (keysToCheck.length > 0 && keysToCheck.every(k => hideKeys.includes(k))) {
-        for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenMessageLines.add(i);
+        for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenElementLines.add(i);
       }
     }
   }
@@ -162,7 +177,7 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     }
 
     if (skipLine) continue;
-    if (hiddenMessageLines.has(i)) continue;
+    if (hiddenElementLines.has(i)) continue;
 
     if (line.trim().startsWith('%% CONFIG:')) {
       result.push(line);

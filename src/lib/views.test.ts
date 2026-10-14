@@ -146,6 +146,21 @@ describe('CONFIG arrows — create -> change -> verify (harness)', () => {
     expect(emptied).toBe(diagram);
     expect(parseViewsData(emptied)).toBeNull();
   });
+
+  it('round-trips note tag entries and keeps a noteTags-only config', () => {
+    const diagram = createSequenceDiagram();
+    const config: DiagramConfig = {
+      version: 1,
+      noteTags: [{ over: ['A', 'B'], text: 'Shared note', keys: ['edge-case'] }],
+    };
+    const newCode = updateViewsData(diagram, config);
+    expect(newCode.endsWith(diagram)).toBe(true);
+    expect(parseViewsData(newCode)?.noteTags).toEqual(config.noteTags);
+    // Emptying noteTags removes the header entirely (no other state left).
+    const emptied = updateViewsData(newCode, { version: 1, noteTags: [] });
+    expect(emptied).toBe(diagram);
+    expect(parseViewsData(emptied)).toBeNull();
+  });
 });
 
 describe('CONFIG notes (StickyNote)', () => {

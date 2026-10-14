@@ -68,7 +68,7 @@ vi.mock('./DiagramViewer', () => ({
           </button>
         </>
       )}
-      {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0', 'n:0', 'n:1', 'e:0', 'e:1'].map(k => (
+      {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0', 'n:0', 'n:1', 'e:0', 'e:1', 'note:0', 'note:1'].map(k => (
         <button
           key={k}
           data-testid={`select-${k}`}
@@ -1682,6 +1682,94 @@ sequenceDiagram
     fireEvent.click(screen.getByTestId('select-p:1'), { shiftKey: true });
     await screen.findByText('Selected Elements (2)');
   });
+
+  it('notes support shift-select, tagging and hiding like other elements', async () => {
+    const DEMO_NOTES = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    Note over A,B: Retry policy
+    B-->>A: Hi there`;
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DEMO_NOTES);
+    const { rerender } = render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('Retry policy');
+    }, { timeout: 3000 });
+
+    // 1. Single click selects the note: the panel shows its tags editor
+    fireEvent.click(screen.getByTestId('select-note:0'));
+    expect(await screen.findByTestId('note-add-tag-input')).toBeTruthy();
+    expect(screen.queryByText('This element is not editable.')).toBeNull();
+
+    // 2. Shift-click the message: the note joins the multi-selection
+    fireEvent.click(screen.getByTestId('select-m:0'), { shiftKey: true });
+    await screen.findByText('Selected Elements (2)');
+
+    // 3. Add tag "shared" to all selected elements (note + message)
+    const tagInput = screen.getByTestId('multi-add-tag-input');
+    fireEvent.change(tagInput, { target: { value: 'shared' } });
+    fireEvent.click(screen.getByTestId('multi-add-tag'));
+
+    // CONFIG persisted the tag on both the note and the message
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const cfg = parseViewsData(code);
+      expect(cfg?.noteTags).toEqual([{ over: ['A', 'B'], text: 'Retry policy', keys: ['shared'] }]);
+      expect(cfg?.arrows?.find(a => a.from === 'A' && a.to === 'B')?.keys).toContain('shared');
+    }, { timeout: 3000 });
+
+    // 4. The tag appears in the sidebar under Actors -> By Key
+    await waitFor(() => {
+      expect(screen.getAllByText('shared').length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+
+    // 5. Remove the tag from the note only (per-element chip in multi-select)
+    fireEvent.click(screen.getByTestId('remove-tag-note:0-shared'));
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const cfg = parseViewsData(code);
+      expect(cfg?.noteTags ?? []).toHaveLength(0);
+      // the message keeps the tag
+      expect(cfg?.arrows?.find(a => a.from === 'A' && a.to === 'B')?.keys).toContain('shared');
+    }, { timeout: 3000 });
+
+    // 6. Tag the note alone through its own panel, then hide the key
+    fireEvent.click(screen.getByTestId('select-note:0'));
+    const noteInput = await screen.findByTestId('note-add-tag-input');
+    fireEvent.change(noteInput, { target: { value: 'flaky' } });
+    fireEvent.click(screen.getByTestId('note-add-tag'));
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const cfg = parseViewsData(code);
+      expect(cfg?.noteTags?.[0].keys).toContain('flaky');
+    }, { timeout: 3000 });
+
+    const keyItem = screen.getAllByText('flaky').find(el => el.closest('li'))!.closest('li')!;
+    fireEvent.click(within(keyItem).getByText('Off'));
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('hide_key=flaky'), { scroll: false });
+
+    // simulate the URL change taking effect: the note line is dropped
+    params.hide_key = 'flaky';
+    rerender(<ClientPage />);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).not.toContain('Note over A,B');
+    }, { timeout: 3000 });
+    // the untagged message and participants survive
+    expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    expect(viewer.getAttribute('data-code')).toContain('participant A as Alice');
+
+    // 7. Un-hide: the note returns
+    const keyItemOn = screen.getAllByText('flaky').find(el => el.closest('li'))!.closest('li')!;
+    fireEvent.click(within(keyItemOn).getByText('On'));
+    delete params.hide_key;
+    rerender(<ClientPage />);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('Note over A,B');
+    }, { timeout: 3000 });
+  }, 15000);
 
   it('adds a sticky note via + Note button, updates count, and persists to CONFIG', async () => {
     const viewer = await renderInEditMode(DEMO, 'Alice');

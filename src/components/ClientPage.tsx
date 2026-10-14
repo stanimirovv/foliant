@@ -17,7 +17,7 @@ import mermaid from 'mermaid';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  getArrowTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
+  getArrowTags, getNoteTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation,
   toggleNumberedSteps, hasNumberedSteps,
@@ -668,6 +668,12 @@ export default function ClientPage() {
         if (a.keys) a.keys.forEach(k => keys.add(k));
       }
     }
+    // Notes carry their own tags as well.
+    if (viewsData?.noteTags) {
+      for (const n of viewsData.noteTags) {
+        if (n.keys) n.keys.forEach(k => keys.add(k));
+      }
+    }
     return Array.from(keys);
   }, [viewsData]);
 
@@ -769,6 +775,8 @@ export default function ClientPage() {
         const info = getArrowTags(rawCode, viewsData, el.key);
         ownTags = info?.keys ?? [];
         inheritedTags = info?.inherited ?? [];
+      } else if (el.kind === 'note') {
+        ownTags = getNoteTags(rawCode, viewsData, el.key);
       }
       return {
         element: el,
@@ -1092,6 +1100,15 @@ export default function ClientPage() {
   const selectedArrowTags = useMemo(
     () => (selectedArrow ? getArrowTags(rawCode, viewsData, selectedArrow.key) : null),
     [selectedArrow, rawCode, viewsData]
+  );
+
+  const selectedNote = selectedRawElement && selectedRawElement.kind === 'note'
+    ? selectedRawElement
+    : null;
+
+  const selectedNoteTags = useMemo(
+    () => (selectedNote ? getNoteTags(rawCode, viewsData, selectedNote.key) : null),
+    [selectedNote, rawCode, viewsData]
   );
 
   // Current arrow style as a complete patch (setArrowStyle replaces the whole
@@ -2184,6 +2201,7 @@ export default function ClientPage() {
                         config={viewsData}
                         arrowStyle={selectedArrowStyle}
                         arrowTags={selectedArrowTags}
+                        noteTags={selectedNoteTags}
                         warning={editWarning}
                         pendingDelete={pendingDelete}
                         onEditLabel={handleEditLabel}
@@ -2230,6 +2248,7 @@ export default function ClientPage() {
                       config={viewsData}
                       arrowStyle={selectedArrowStyle}
                       arrowTags={selectedArrowTags}
+                      noteTags={selectedNoteTags}
                       warning={editWarning}
                       pendingDelete={pendingDelete}
                       onEditLabel={handleEditLabel}

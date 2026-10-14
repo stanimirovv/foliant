@@ -48,6 +48,17 @@ export interface ArrowStyle {
 // originates from.
 export type ArrowKeyMode = 'merged' | 'clean';
 
+// Tag entry of a sequence-diagram note (Note over / left of / right of),
+// keyed by (over, text, occurrence) like arrow entries are keyed by
+// (from, to, label, occurrence). Distinct from `notes` (sticky notes), which
+// are free-floating canvas annotations.
+export interface NoteTagEntry {
+  over: string[];               // participant ids the note spans, in the RAW file
+  text: string;                 // note text; disambiguates notes over the same actors
+  occurrence?: number;          // optional: nth note with the same (over, text), 0-based
+  keys?: string[];              // the note's own tags (hide keys)
+}
+
 export type StickyNoteColor = 'yellow' | 'green' | 'blue' | 'pink' | 'orange' | 'purple';
 
 export interface StickyNote {
@@ -65,6 +76,7 @@ export interface DiagramConfig {
   views?: SavedView[];
   actors?: Record<string, ActorMetadata>;
   arrows?: ArrowStyle[];
+  noteTags?: NoteTagEntry[];
   notes?: StickyNote[];
 }
 
@@ -99,8 +111,9 @@ export function updateViewsData(code: string, config: DiagramConfig | null): str
   const emptyViews = !config?.views || config.views.length === 0;
   const emptyActors = !config?.actors || Object.keys(config.actors).length === 0;
   const emptyArrows = !config?.arrows || config.arrows.length === 0;
+  const emptyNoteTags = !config?.noteTags || config.noteTags.length === 0;
   const emptyNotes = !config?.notes || config.notes.length === 0;
-  if (!config || (emptyViews && emptyActors && emptyArrows && emptyNotes)) {
+  if (!config || (emptyViews && emptyActors && emptyArrows && emptyNoteTags && emptyNotes)) {
     if (hasConfig) {
       lines.shift();
     }

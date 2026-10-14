@@ -208,6 +208,8 @@ Clicking any element on the canvas opens the context-sensitive side panel:
   - Configure stroke color, stroke width (1–10px), and line pattern (solid, dashed, dotted).
   - Lifeline activation control: *"Activate receiver (+)"* and *"Deactivate sender (-)"*.
   - Message tag inheritance: Toggle **Inherit service tags** (`keyMode: 'merged'` vs `'clean'`).
+- **Notes**:
+  - Assign domain tags (`keys`) that feed the sidebar filtering controls; a note is hidden when all its tags are set to **Off** in *By Key*.
 
 ### 3. Safety & Reliability Safeguards
 - **Two-Phase Cascade Deletion**: Deleting an actor or flowchart node detects all dependent messages or edges. A cascade confirmation modal details exactly what will be removed, ensuring no dangling references or broken syntax strings are left behind.

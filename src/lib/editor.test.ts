@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  getArrowTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
+  getArrowTags, getNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation, insertMessage,
   toggleNumberedSteps, hasNumberedSteps,
@@ -1315,6 +1315,118 @@ sequenceDiagram
     removeTag(SEQ, config, 'm:0', 'x');
     setArrowKeyMode(SEQ, config, 'm:0', 'clean');
     setArrowStyle(SEQ, config, 'm:0', { color: 'red' });
+    expect(JSON.stringify(config)).toBe(snapshot);
+  });
+});
+
+describe('note tags', () => {
+  // A CONFIG header is present so expectBodyIdentical can assert the body is
+  // byte-identical (the header line itself is replaced).
+  const NOTE_SEQ = `%% CONFIG: {"version":1}
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    Note over A,B: Shared note
+    Note over A: Left note
+    B-->>A: Hi`;
+  const NOTE_SEQ_CFG = parseConfig(NOTE_SEQ);
+
+  it('adds and removes tags on a note via CONFIG.noteTags, body byte-identical', () => {
+    const added = addTag(NOTE_SEQ, NOTE_SEQ_CFG, 'note:0', 'edge-case');
+    expect(added.warning).toBeUndefined();
+    expectBodyIdentical(NOTE_SEQ, added.code);
+    expect(added.config?.noteTags).toEqual([
+      { over: ['A', 'B'], text: 'Shared note', keys: ['edge-case'] },
+    ]);
+    expect(parseConfig(added.code)?.noteTags?.[0].keys).toEqual(['edge-case']);
+    // idempotent
+    const again = addTag(added.code, added.config, 'note:0', 'edge-case');
+    expect(again.config?.noteTags?.[0].keys).toEqual(['edge-case']);
+    // a second tag, then removals prune the entry and finally the noteTags field
+    const two = addTag(added.code, added.config, 'note:0', 'beta');
+    expect(two.config?.noteTags?.[0].keys).toEqual(['edge-case', 'beta']);
+    const one = removeTag(two.code, two.config, 'note:0', 'edge-case');
+    expect(one.config?.noteTags?.[0].keys).toEqual(['beta']);
+    const none = removeTag(one.code, one.config, 'note:0', 'beta');
+    expect(none.config?.noteTags).toBeUndefined();
+    // removing a tag the note does not have is a no-op
+    expect(removeTag(NOTE_SEQ, NOTE_SEQ_CFG, 'note:0', 'nope').code).toBe(NOTE_SEQ);
+  });
+
+  it('tags each note independently (over + text identify the entry)', () => {
+    const n1 = addTag(NOTE_SEQ, NOTE_SEQ_CFG, 'note:1', 'lefty');
+    expect(n1.config?.noteTags).toEqual([{ over: ['A'], text: 'Left note', keys: ['lefty'] }]);
+    const both = addTag(n1.code, n1.config, 'note:0', 'shared-key');
+    expect(both.config?.noteTags).toEqual([
+      { over: ['A'], text: 'Left note', keys: ['lefty'] },
+      { over: ['A', 'B'], text: 'Shared note', keys: ['shared-key'] },
+    ]);
+  });
+
+  it('disambiguates duplicate notes by occurrence', () => {
+    const code = `sequenceDiagram
+    participant A
+    participant B
+    Note over A: Same
+    Note over A: Same`;
+    const cfg = parseConfig(code);
+    const second = addTag(code, cfg, 'note:1', 'edge-case');
+    expect(second.config?.noteTags).toEqual([{ over: ['A'], text: 'Same', occurrence: 1, keys: ['edge-case'] }]);
+    const first = addTag(code, cfg, 'note:0', 'other');
+    expect(first.config?.noteTags).toEqual([{ over: ['A'], text: 'Same', keys: ['other'] }]);
+  });
+
+  it('creates the header on the first note tag edit and drops it when empty', () => {
+    const code = createSequenceDiagram();
+    const noNote = removeTag(code, null, 'm:0', 'nope'); // no-op sanity
+    expect(noNote.code).toBe(code);
+    const withNote = `${code}\n    Note over A,B: Heads up`;
+    const added = addTag(withNote, null, 'note:0', 'edge-case');
+    expect(parseConfig(added.code)?.noteTags).toEqual([{ over: ['A', 'B'], text: 'Heads up', keys: ['edge-case'] }]);
+    const removed = removeTag(added.code, added.config, 'note:0', 'edge-case');
+    expect(removed.code).toBe(withNote);
+    expect(parseConfig(removed.code)).toBeNull();
+  });
+
+  it('getNoteTags reports the note own tags only', () => {
+    expect(getNoteTags(NOTE_SEQ, NOTE_SEQ_CFG, 'note:0')).toEqual([]);
+    const tagged = addTag(NOTE_SEQ, NOTE_SEQ_CFG, 'note:0', 'edge-case');
+    expect(getNoteTags(tagged.code, tagged.config, 'note:0')).toEqual(['edge-case']);
+    // non-notes report no tags
+    expect(getNoteTags(NOTE_SEQ, NOTE_SEQ_CFG, 'm:0')).toEqual([]);
+    expect(getNoteTags(NOTE_SEQ, NOTE_SEQ_CFG, 'p:0')).toEqual([]);
+    expect(getNoteTags(NOTE_SEQ, NOTE_SEQ_CFG, 'nope')).toEqual([]);
+  });
+
+  it('deleting a note removes its tag entry; deleting an actor cascades to its notes', () => {
+    const tagged = addTag(NOTE_SEQ, NOTE_SEQ_CFG, 'note:0', 'edge-case');
+    const taggedNote1 = addTag(tagged.code, tagged.config, 'note:1', 'lefty');
+    const del = deleteElement(taggedNote1.code, taggedNote1.config, 'note:0');
+    expect(del.config?.noteTags).toEqual([{ over: ['A'], text: 'Left note', keys: ['lefty'] }]);
+    // deleting actor A cascades to both notes and drops their tag entries
+    const delActor = deleteElement(taggedNote1.code, taggedNote1.config, 'p:0');
+    expect(delActor.config?.noteTags).toBeUndefined();
+  });
+
+  it('soft-fails on invalid tags and non-taggable kinds', () => {
+    expect(addTag(NOTE_SEQ, NOTE_SEQ_CFG, 'note:0', 'has space').warning).toBeTruthy();
+    expect(addTag(NOTE_SEQ, NOTE_SEQ_CFG, 'note:0', '').warning).toBeTruthy();
+    // blocks and regions stay untaggable
+    const withBlock = `sequenceDiagram\n    participant A\n    alt x\n    end`;
+    expect(addTag(withBlock, null, 'b:0', 'ok').warning).toBeTruthy();
+    expect(removeTag(withBlock, null, 'b:0', 'ok').warning).toBeTruthy();
+  });
+
+  it('does not mutate the input config on note tag edits', () => {
+    const config: DiagramConfig = {
+      version: 1,
+      noteTags: [{ over: ['A'], text: 'Left note', keys: ['x'] }],
+    };
+    const snapshot = JSON.stringify(config);
+    addTag(NOTE_SEQ, config, 'note:1', 'y');
+    removeTag(NOTE_SEQ, config, 'note:1', 'x');
+    deleteElement(NOTE_SEQ, config, 'note:1');
     expect(JSON.stringify(config)).toBe(snapshot);
   });
 });

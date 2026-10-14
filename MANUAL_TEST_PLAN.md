@@ -95,6 +95,18 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Delete a tagged message → its CONFIG entry is gone; undo restores both the message and its tag.
 - [ ] Flowchart: tag an edge → same behaviors (panel chip, By Key list, Off hides the edge).
 
+## Increment 3c — Note tags (selection, tagging, hiding)
+
+> Stop here: notes behave like messages for shift-select, tagging and by-key hiding.
+
+- [ ] Select a note → the panel shows the note (over target + text) and a Tags section (no longer "not editable").
+- [ ] Add a tag (e.g. `edge-case`) to the note → a chip appears in the panel and the tag appears in the sidebar under Actors → By Key; persists after F5 in `%% CONFIG:` under `noteTags[].keys`.
+- [ ] Shift-click a note and a message → both join the multi-selection ("Selected Elements (2)"); **Add tag to all** tags the note and the message at once.
+- [ ] With a note tagged `edge-case`, set `edge-case` to **Off** in By Key → the note disappears from the canvas (its participants and messages stay); set it back **On** → the note returns.
+- [ ] Tag a note with two keys → hiding only one in By Key keeps the note; hiding both removes it.
+- [ ] Set a note's tag to **Merged** / **Clean** in By Key → the note is unaffected (notes respond to keys as on/off only).
+- [ ] Delete a tagged note → its CONFIG `noteTags` entry is gone.
+
 ## Increment 4 — Flowchart editing
 
 > Stop here: nodes and edges are editable with the same panel, and cascade delete keeps the diagram valid.

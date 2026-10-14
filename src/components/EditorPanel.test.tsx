@@ -296,8 +296,42 @@ describe('EditorPanel', () => {
   });
 
   it('shows a note for elements that are not editable', () => {
-    render(<EditorPanel {...makeProps({ element: note0 })} />);
+    const blockModel = parseModel(`sequenceDiagram\n    participant A\n    alt x\n    end`);
+    const block0 = el(blockModel, 'b:0');
+    render(<EditorPanel {...makeProps({ element: block0 })} />);
     expect(screen.getByText('This element is not editable.')).toBeTruthy();
+  });
+
+  it('note fields render the note and its tags, and dispatch add/remove', () => {
+    const props = makeProps({
+      element: note0,
+      noteTags: ['backend'],
+      config: {
+        version: 1,
+        noteTags: [{ over: ['A'], text: 'hi', keys: ['backend'] }],
+      },
+    });
+    render(<EditorPanel {...props} />);
+
+    expect(screen.getByText('A')).toBeTruthy(); // over target
+    expect(screen.getByText('hi')).toBeTruthy(); // note text
+    expect(screen.getByTestId('note-tag-chips').textContent).toContain('backend');
+
+    // add a tag via the free-text input
+    const input = screen.getByTestId('note-add-tag-input');
+    fireEvent.change(input, { target: { value: 'edge-case' } });
+    fireEvent.click(screen.getByTestId('note-add-tag'));
+    expect(props.onAddTag).toHaveBeenCalledWith('edge-case');
+
+    // add an existing tag via the dropdown (datalist collects note tags too)
+    const select = screen.getByTestId('note-select-existing-tag') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'backend' } });
+    fireEvent.click(screen.getByTestId('note-add-existing-tag'));
+    expect(props.onAddTag).toHaveBeenCalledWith('backend');
+
+    // remove a tag chip
+    fireEvent.click(screen.getByTestId('remove-note-tag-backend'));
+    expect(props.onRemoveTag).toHaveBeenCalledWith('backend');
   });
 
   it('allows adding existing tag from select dropdown in participant view', () => {
