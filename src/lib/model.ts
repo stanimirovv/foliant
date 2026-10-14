@@ -12,11 +12,21 @@ export interface BaseElement {
   lineEnd: number;    // inclusive
 }
 
+export type ParticipantType =
+  | 'participant'
+  | 'actor'
+  | 'database'
+  | 'queue'
+  | 'boundary'
+  | 'control'
+  | 'entity'
+  | 'collections';
+
 export interface ParticipantElement extends BaseElement {
   kind: 'participant';
   id: string;
   alias?: string;
-  participantType?: 'participant' | 'actor';
+  participantType?: ParticipantType;
 }
 
 export interface MessageElement extends BaseElement {
@@ -87,8 +97,44 @@ const SHAPE = String.raw`(?:\[.*?\]|\(\(.*?\)\)|\(.*?\)|\{.*?\}|>.*?\])`;
 const CONFIG_LINE_RE = /^%% (?:CONFIG|VIEWS): /;
 const REGION_START_RE = /^%%\s*@region-start:\s*([a-zA-Z0-9_-]+)(?:=([a-zA-Z0-9_-]+))?/;
 
+export interface ParsedParticipantLine {
+  indent: string;
+  keyword: 'participant' | 'actor';
+  id: string;
+  alias?: string;
+  participantType: ParticipantType;
+}
+
+export function parseParticipantLine(line: string): ParsedParticipantLine | null {
+  const m = line.match(/^(\s*)(participant|actor)\s+([A-Za-z0-9_-]+)(?:\s+(.*?))?$/);
+  if (!m) return null;
+  const indent = m[1];
+  const keyword = m[2] as 'participant' | 'actor';
+  const id = m[3];
+  let rest = m[4] ? m[4].trim() : '';
+
+  let typeFromMeta: ParticipantType | null = null;
+  const metaMatch = rest.match(/(?:^|\s+)@\{\s*(.*?)\s*\}\s*$/);
+  if (metaMatch) {
+    const metaStr = metaMatch[0];
+    const innerMeta = metaMatch[1];
+    const typeMatch = innerMeta.match(/["']?(?:type|shape)["']?\s*:\s*["']?([A-Za-z0-9_-]+)["']?/);
+    if (typeMatch) {
+      typeFromMeta = typeMatch[1] as ParticipantType;
+    }
+    rest = rest.slice(0, rest.length - metaStr.length).trim();
+  }
+
+  let alias: string | undefined = undefined;
+  if (rest.startsWith('as ')) {
+    alias = rest.slice(3).trim();
+  }
+
+  const participantType: ParticipantType = typeFromMeta || keyword;
+  return { indent, keyword, id, alias, participantType };
+}
+
 // Sequence diagrams
-const PARTICIPANT_RE = new RegExp(`^(\\s*)(participant|actor)\\s+(${ID})(?:\\s+as\\s+(.*))?$`);
 const NOTE_RE = new RegExp(`^\\s*Note\\s+(over|left of|right of)\\s+(${ID}(?:\\s*,\\s*${ID})*)\\s*:\\s*(.*)$`);
 // Full operator set of Section 4.8, including bare `-` / `--` lines and activation +/-.
 const MESSAGE_RE = new RegExp(`^\\s*([A-Za-z0-9_-]+?)\\s*(-->>|->>|--x|-x|-->o|->o|-->\\*|->\\*|--\\)|-\\)|-->|->|--|-)([+-]?)\\s*([A-Za-z0-9_-]+?)(?:\\s*:\\s*(.*))?$`);
@@ -226,15 +272,14 @@ export function parseModel(code: string): DiagramModel {
     if (BLOCK_CONT_RE.test(line)) continue; // else / and belong to the enclosing block
 
     if (type === 'sequence') {
-      const participant = line.match(PARTICIPANT_RE);
+      const participant = parseParticipantLine(line);
       if (participant) {
-        const alias = participant[4] ? participant[4].trim() : undefined;
         elements.push({
           key: nextKey('p'),
           kind: 'participant',
-          id: participant[3],
-          ...(alias !== undefined ? { alias } : {}),
-          ...(participant[2] === 'actor' ? { participantType: 'actor' } : {}),
+          id: participant.id,
+          ...(participant.alias !== undefined ? { alias: participant.alias } : {}),
+          ...(participant.participantType !== 'participant' ? { participantType: participant.participantType } : {}),
           lineStart: i,
           lineEnd: i,
         });

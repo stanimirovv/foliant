@@ -529,17 +529,19 @@ sequenceDiagram
     B -->|Reply| C[Charlie]`;
     const viewer = await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
 
-    // Drag from node A (n:0) to node B (n:1): appends an A --> B edge
+    // Drag from node A (n:0) to node B (n:1): appends an A -->|New message| B edge
     fireEvent.click(screen.getByTestId('drag-create-connection'));
 
     await waitFor(() => {
       const code = viewer.getAttribute('data-code') ?? '';
-      expect(code).toContain('    A --> B');
+      expect(code).toContain('    A -->|New message| B');
     }, { timeout: 3000 });
     // the new edge is selected (e:2), as with sequence message drags
     await waitFor(() => {
       expect(viewer.getAttribute('data-selection')).toBe('e:2');
     }, { timeout: 3000 });
+    const input = await screen.findByDisplayValue('New message');
+    expect(input).toBeTruthy();
   }, 10000);
 
   it('shows drag hints per diagram type', async () => {
@@ -2060,6 +2062,53 @@ sequenceDiagram
 
     await waitFor(() => {
       expect(viewer.getAttribute('data-code')).toContain('actor A as Alice');
+    });
+  });
+
+  it('toggles participant type to database and queue in sequence diagram', async () => {
+    const viewer = await renderInEditMode(DEMO, 'participant A as Alice');
+    expect(viewer.getAttribute('data-code')).toContain('participant A as Alice');
+
+    // Select participant A
+    fireEvent.click(screen.getByTestId('select-p:0'));
+
+    const kindSelect = await screen.findByTestId('participant-kind-select');
+    expect((kindSelect as HTMLSelectElement).value).toBe('participant');
+
+    fireEvent.change(kindSelect, { target: { value: 'database' } });
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('participant A as Alice @{ type: "database" }');
+    });
+
+    fireEvent.change(kindSelect, { target: { value: 'queue' } });
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('participant A as Alice @{ type: "queue" }');
+    });
+  });
+
+  it('changes flowchart node type to database (cylinder) and if/else (rhombus)', async () => {
+    const FLOW_DEMO = `flowchart TD\n    A[Alice] --> B[Bob]`;
+    const viewer = await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+    expect(viewer.getAttribute('data-code')).toContain('A[Alice]');
+
+    // Select node A
+    fireEvent.click(screen.getByTestId('select-n:0'));
+
+    const typeSelect = await screen.findByTestId('participant-kind-select');
+    expect((typeSelect as HTMLSelectElement).value).toBe('rect');
+
+    fireEvent.change(typeSelect, { target: { value: 'cylinder' } });
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A[(Alice)] --> B[Bob]');
+    });
+
+    fireEvent.change(typeSelect, { target: { value: 'rhombus' } });
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A{Alice} --> B[Bob]');
     });
   });
 

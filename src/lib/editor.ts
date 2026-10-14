@@ -4,7 +4,7 @@
 // (NFR-02), and malformed input is a no-op with a warning, never a
 // corruption (NFR-01).
 
-import { parseModel, parseShapeToken, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement } from './model';
+import { parseModel, parseShapeToken, parseParticipantLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NodeShape, ParticipantType } from './model';
 import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, DiagramConfig, updateViewsData } from './views';
 import { ANIMATED_ARROW_COLORS } from './styling';
 
@@ -31,7 +31,6 @@ const UNSUPPORTED = 'Unsupported diagram type (editing supports sequence and flo
 
 // Verbose line regexes: capture every whitespace segment so rebuilt lines
 // preserve the original spacing byte-for-byte outside the edited span.
-const SEQ_PARTICIPANT_V = /^(\s*)(participant|actor)\s+([A-Za-z0-9_-]+)(?:\s+as\s+(.*))?$/;
 const SEQ_MSG_V = /^(\s*)([A-Za-z0-9_-]+?)(\s*)(-->>|->>|--x|-x|-->o|->o|-->\*|->\*|--\)|-\)|-->|->|--|-)([+-]?)(\s*)([A-Za-z0-9_-]+?)(\s*)(?::([ \t]*)(.*))?$/;
 const FC_EDGE_PIPE_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)(${FC_OPS})(\\s*)(\\|([^|]*)\\|)?(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
 const FC_EDGE_TEXT_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)(--|---|-\\.)(\\s+)(.+?)(\\s+)(\\.->|\\.-|${FC_OPS})(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
@@ -208,6 +207,87 @@ function rewriteFlowchartNodeLabel(line: string, nodeId: string, alias: string):
   return undefined;
 }
 
+function shapeTokenForShape(shapeToken: string | undefined, newShape: NodeShape, defaultLabel: string): string {
+  const parsed = shapeToken ? parseShapeToken(shapeToken) : null;
+  const label = parsed ? parsed.label : defaultLabel;
+  const [open, close] = SHAPE_DELIMITERS[newShape];
+  return `${open}${label}${close}`;
+}
+
+function rewriteFlowchartNodeShape(line: string, nodeId: string, shape: NodeShape, defaultLabel: string): string | null | undefined {
+  const pipe = line.match(FC_EDGE_PIPE_V);
+  if (pipe) {
+    if (pipe[2] !== nodeId && pipe[11] !== nodeId) return undefined;
+    const from = pipe[2] === nodeId ? fromEndpoint(pipe[2], pipe[3], pipe[4], shapeTokenForShape(pipe[4], shape, defaultLabel), pipe[5]) : undefined;
+    const to = pipe[11] === nodeId ? toEndpoint(pipe[11], pipe[12], pipe[13], shapeTokenForShape(pipe[13], shape, defaultLabel), pipe[14]) : undefined;
+    if (!from && !to) return null;
+    const fromText = from ? from.text : `${pipe[2]}${pipe[3]}${pipe[4] ?? ''}`;
+    const fromSep = from ? from.sep : pipe[5];
+    const toText = to ? to.text : `${pipe[11]}${pipe[12]}${pipe[13] ?? ''}`;
+    const toTrail = to ? to.trailing : pipe[14];
+    return `${pipe[1]}${fromText}${fromSep}${pipe[6]}${pipe[7]}${pipe[8] ?? ''}${pipe[10]}${toText}${toTrail}`;
+  }
+  const text = line.match(FC_EDGE_TEXT_V);
+  if (text) {
+    if (text[2] !== nodeId && text[12] !== nodeId) return undefined;
+    const from = text[2] === nodeId ? fromEndpoint(text[2], text[3], text[4], shapeTokenForShape(text[4], shape, defaultLabel), text[5]) : undefined;
+    const to = text[12] === nodeId ? toEndpoint(text[12], text[13], text[14], shapeTokenForShape(text[14], shape, defaultLabel), text[15]) : undefined;
+    if (!from && !to) return null;
+    const fromText = from ? from.text : `${text[2]}${text[3]}${text[4] ?? ''}`;
+    const fromSep = from ? from.sep : text[5];
+    const toText = to ? to.text : `${text[12]}${text[13]}${text[14] ?? ''}`;
+    const toTrail = to ? to.trailing : text[15];
+    return `${text[1]}${fromText}${fromSep}${text[6]}${text[7]}${text[8]}${text[9]}${text[10]}${text[11]}${toText}${toTrail}`;
+  }
+  const node = line.match(FC_NODE_V);
+  if (node) {
+    if (node[2] !== nodeId) return undefined;
+    const newShape = shapeTokenForShape(node[4], shape, defaultLabel);
+    return `${node[1]}${node[2]}${node[3]}${newShape}${node[5]}`;
+  }
+  return undefined;
+}
+
+const SHAPE_ALIASES: Record<string, NodeShape> = {
+  database: 'cylinder',
+  'if-else': 'rhombus',
+  decision: 'rhombus',
+  diamond: 'rhombus',
+  box: 'rect',
+  process: 'rect',
+};
+
+export function setNodeShape(
+  code: string,
+  config: DiagramConfig | null,
+  key: string,
+  shape: NodeShape | string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'flowchart') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'node') return fail(code, config, `Element ${key} is not a node`);
+
+  const targetShape: NodeShape = (SHAPE_ALIASES[shape] ?? shape) as NodeShape;
+  if (!SHAPE_DELIMITERS[targetShape]) return fail(code, config, `Invalid node shape: ${shape}`);
+
+  if (el.shape === targetShape || (!el.shape && targetShape === 'rect')) return { code, config };
+
+  const currentLabel = el.label ?? el.id;
+  const forbiddenChars = targetShape === 'rhombus' ? ['{', '}']
+    : targetShape === 'round' || targetShape === 'circle' || targetShape === 'cylinder' ? ['(', ')']
+    : ['[', ']'];
+  if (forbiddenChars.some(c => currentLabel.includes(c))) {
+    return fail(code, config, `Label cannot contain '${forbiddenChars.join('')}' for this node shape`);
+  }
+
+  const line = code.split('\n')[el.lineStart];
+  const newLine = rewriteFlowchartNodeShape(line, el.id, targetShape, currentLabel);
+  if (newLine === undefined) return fail(code, config, `Cannot parse node line: ${line.trim()}`);
+  if (newLine === null) return { code, config };
+  return { code: replaceLines(code, el.lineStart, el.lineEnd, [newLine]), config };
+}
+
 // Rewrite the label of a flowchart edge (pipe form, open-text form, or plain).
 // Returns the new line, null for a no-op, or undefined for a non-edge line.
 function rewriteFlowchartEdgeLabel(line: string, newLabel: string): string | null | undefined {
@@ -329,9 +409,17 @@ export function renameParticipant(code: string, config: DiagramConfig | null, ke
   if (model.type === 'sequence') {
     if (el.kind !== 'participant') return fail(code, config, `Element ${key} is not a participant`);
     const line = code.split('\n')[el.lineStart];
-    const m = line.match(SEQ_PARTICIPANT_V);
-    if (!m) return fail(code, config, `Cannot parse participant line: ${line.trim()}`);
-    const newLine = `${m[1]}${m[2]} ${m[3]}${alias ? ` as ${alias}` : ''}`;
+    const parsed = parseParticipantLine(line);
+    if (!parsed) return fail(code, config, `Cannot parse participant line: ${line.trim()}`);
+    const { indent, id, participantType } = parsed;
+    let newLine: string;
+    if (participantType === 'actor') {
+      newLine = `${indent}actor ${id}${alias ? ` as ${alias}` : ''}`;
+    } else if (participantType === 'participant') {
+      newLine = `${indent}participant ${id}${alias ? ` as ${alias}` : ''}`;
+    } else {
+      newLine = `${indent}participant ${id}${alias ? ` as ${alias}` : ''} @{ type: "${participantType}" }`;
+    }
     return { code: replaceLines(code, el.lineStart, el.lineEnd, [newLine]), config };
   }
 
@@ -480,7 +568,7 @@ export function addParticipant(
   config: DiagramConfig | null,
   afterKey?: string,
   color?: string,
-  kind: 'participant' | 'actor' = 'participant',
+  kind: ParticipantType = 'participant',
 ): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
@@ -525,32 +613,53 @@ export function addParticipant(
     afterLine = lastParticipant ? lastParticipant.lineEnd : lines.findIndex(l => /^\s*sequenceDiagram\b/.test(l));
   }
   const alias = id === 'New1' ? 'New Participant' : `New Participant ${id.slice(3)}`;
-  lines.splice(afterLine + 1, 0, `    ${kind} ${id} as ${alias}`);
+  const aliasPart = ` as ${alias}`;
+  let lineStr: string;
+  if (kind === 'actor') {
+    lineStr = `    actor ${id}${aliasPart}`;
+  } else if (kind === 'participant') {
+    lineStr = `    participant ${id}${aliasPart}`;
+  } else {
+    lineStr = `    participant ${id}${aliasPart} @{ type: "${kind}" }`;
+  }
+  lines.splice(afterLine + 1, 0, lineStr);
   return {
     code: updateViewsData(lines.join('\n'), newConfig),
     config: newConfig,
   };
 }
 
+const VALID_PARTICIPANT_KINDS = new Set<string>([
+  'participant', 'actor', 'database', 'queue', 'boundary', 'control', 'entity', 'collections'
+]);
+
 export function setParticipantKind(
   code: string,
   config: DiagramConfig | null,
   key: string,
-  kind: 'participant' | 'actor',
+  kind: ParticipantType,
 ): EditResult {
   const model = parseModel(code);
   if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
   if (!el || el.kind !== 'participant') return fail(code, config, `Element ${key} is not a participant`);
-  if (kind !== 'participant' && kind !== 'actor') return fail(code, config, `Invalid participant kind: ${kind}`);
+  if (!VALID_PARTICIPANT_KINDS.has(kind)) return fail(code, config, `Invalid participant kind: ${kind}`);
 
   const line = code.split('\n')[el.lineStart];
-  const m = line.match(SEQ_PARTICIPANT_V);
-  if (!m) return fail(code, config, `Cannot parse participant line: ${line.trim()}`);
-  if (m[2] === kind) return { code, config };
+  const parsed = parseParticipantLine(line);
+  if (!parsed) return fail(code, config, `Cannot parse participant line: ${line.trim()}`);
+  if (parsed.participantType === kind) return { code, config };
 
-  const alias = m[4] !== undefined ? ` as ${m[4]}` : '';
-  const newLine = `${m[1]}${kind} ${m[3]}${alias}`;
+  const { indent, id, alias } = parsed;
+  const aliasPart = alias !== undefined ? ` as ${alias}` : '';
+  let newLine: string;
+  if (kind === 'actor') {
+    newLine = `${indent}actor ${id}${aliasPart}`;
+  } else if (kind === 'participant') {
+    newLine = `${indent}participant ${id}${aliasPart}`;
+  } else {
+    newLine = `${indent}participant ${id}${aliasPart} @{ type: "${kind}" }`;
+  }
   return { code: replaceLines(code, el.lineStart, el.lineEnd, [newLine]), config };
 }
 
@@ -660,7 +769,7 @@ export function addMessage(
 ): EditResult {
   const model = parseModel(code);
   const defaultOp = model.type === 'sequence' ? '->>' : '-->';
-  const defaultLabel = model.type === 'sequence' ? 'New message' : '';
+  const defaultLabel = 'New message';
   return insertMessage(code, config, fromKey, toKey, defaultLabel, defaultOp, position);
 }
 

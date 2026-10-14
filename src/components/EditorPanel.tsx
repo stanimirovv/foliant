@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
-import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, DiagramType } from '@/lib/model';
+import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, DiagramType, NodeShape, ParticipantType } from '@/lib/model';
 import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS } from '@/lib/editor';
 import { DiagramConfig, ArrowKeyMode, ArrowAnimationType } from '@/lib/views';
 import AnimatedArrowSelector from './AnimatedArrowSelector';
@@ -91,7 +91,8 @@ interface EditorPanelProps {
   onAddTag: (tag: string, targetKey?: string) => void;
   onRemoveTag: (tag: string, targetKey?: string) => void;
   onSetKeyMode: (mode: ArrowKeyMode) => void;
-  onSetParticipantKind?: (kind: 'participant' | 'actor') => void;
+  onSetParticipantKind?: (kind: ParticipantType) => void;
+  onSetNodeShape?: (shape: NodeShape) => void;
   onToggleActivation?: (endpoint: 'target' | 'source', active: boolean) => void;
   onGroupParticipants?: (participantKeys: string[], title: string, color?: string) => void;
   onRequestDelete: () => void;
@@ -145,6 +146,7 @@ export default function EditorPanel({
   onRemoveTag,
   onSetKeyMode,
   onSetParticipantKind,
+  onSetNodeShape,
   onToggleActivation,
   onGroupParticipants,
   onRequestDelete,
@@ -205,6 +207,7 @@ export default function EditorPanel({
           onEditLabel={onEditLabel}
           onSetColor={onSetColor}
           onSetParticipantKind={onSetParticipantKind}
+          onSetNodeShape={onSetNodeShape}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
           onRequestDelete={onRequestDelete}
@@ -485,7 +488,8 @@ interface ComponentFieldsProps {
   actorKeys: string[];
   onEditLabel: (newLabel: string) => void;
   onSetColor: (color: string) => void;
-  onSetParticipantKind?: (kind: 'participant' | 'actor') => void;
+  onSetParticipantKind?: (kind: ParticipantType) => void;
+  onSetNodeShape?: (shape: NodeShape) => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
   onRequestDelete: () => void;
@@ -493,7 +497,7 @@ interface ComponentFieldsProps {
 
 function ParticipantFields({
   element, config, actorColors, actorKeys,
-  onEditLabel, onSetColor, onSetParticipantKind, onAddTag, onRemoveTag, onRequestDelete,
+  onEditLabel, onSetColor, onSetParticipantKind, onSetNodeShape, onAddTag, onRemoveTag, onRequestDelete,
 }: ComponentFieldsProps) {
   const [tagInput, setTagInput] = useState('');
   const [existingTagSelect, setExistingTagSelect] = useState('');
@@ -539,10 +543,78 @@ function ParticipantFields({
               className={fieldInput}
               data-testid="participant-kind-select"
               value={element.participantType ?? 'participant'}
-              onChange={(e) => onSetParticipantKind(e.target.value as 'participant' | 'actor')}
+              onChange={(e) => onSetParticipantKind(e.target.value as ParticipantType)}
             >
               <option value="participant">Participant (Box)</option>
               <option value="actor">Actor (Stick figure)</option>
+              <option value="database">Database</option>
+              <option value="queue">Queue</option>
+              <option value="boundary">Boundary</option>
+              <option value="control">Control</option>
+              <option value="entity">Entity</option>
+              <option value="collections">Collections</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className={fieldLabel}>Color</span>
+            <div className="flex items-center space-x-1.5">
+              <input
+                type="color"
+                aria-label="Color"
+                data-testid="actor-color-picker"
+                className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
+                list="editor-actor-color-list"
+                value={colorToHex(meta?.color)}
+                onChange={(e) => onSetColor(e.target.value)}
+              />
+              <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={meta?.color || 'Default'}>
+                {meta?.color || 'Default'}
+              </span>
+              {meta?.color && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Clear color"
+                  data-testid="clear-actor-color"
+                  title="Reset to default color"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onSetColor('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSetColor('');
+                    }
+                  }}
+                  className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none shrink-0"
+                >
+                  Clear
+                </span>
+              )}
+            </div>
+            <datalist id="editor-actor-color-list">
+              {actorColors.map(c => <option key={c} value={c} />)}
+            </datalist>
+          </label>
+        </div>
+      ) : element.kind === 'node' && onSetNodeShape ? (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className={fieldLabel}>Type</span>
+            <select
+              className={fieldInput}
+              data-testid="participant-kind-select"
+              value={element.shape ?? 'rect'}
+              onChange={(e) => onSetNodeShape(e.target.value as NodeShape)}
+            >
+              <option value="rect">Rectangle (Process)</option>
+              <option value="cylinder">Database (Cylinder)</option>
+              <option value="rhombus">If / Else (Decision)</option>
+              <option value="round">Rounded</option>
+              <option value="circle">Circle</option>
+              <option value="asymmetric">Flag (Asymmetric)</option>
             </select>
           </label>
 

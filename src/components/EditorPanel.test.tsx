@@ -436,6 +436,31 @@ describe('EditorPanel', () => {
     expect(select.value).toBe('participant');
     fireEvent.change(select, { target: { value: 'actor' } });
     expect(onSetParticipantKind).toHaveBeenCalledWith('actor');
+
+    fireEvent.change(select, { target: { value: 'database' } });
+    expect(onSetParticipantKind).toHaveBeenCalledWith('database');
+
+    fireEvent.change(select, { target: { value: 'queue' } });
+    expect(onSetParticipantKind).toHaveBeenCalledWith('queue');
+  });
+
+  it('dispatches onSetNodeShape when changing flowchart node shape/type', () => {
+    const onSetNodeShape = vi.fn();
+    const props = makeProps({
+      element: nodeA,
+      diagramType: 'flowchart',
+      onSetNodeShape,
+    });
+    render(<EditorPanel {...props} />);
+
+    const select = screen.getByTestId('participant-kind-select') as HTMLSelectElement;
+    expect(select.value).toBe('rect');
+
+    fireEvent.change(select, { target: { value: 'cylinder' } });
+    expect(onSetNodeShape).toHaveBeenCalledWith('cylinder');
+
+    fireEvent.change(select, { target: { value: 'rhombus' } });
+    expect(onSetNodeShape).toHaveBeenCalledWith('rhombus');
   });
 
   it('dispatches onToggleActivation for receiver (+) and sender (-)', () => {

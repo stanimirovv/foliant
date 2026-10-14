@@ -4,7 +4,7 @@ import {
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
   getArrowTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
-  setParticipantKind, toggleActivation, groupParticipants, toggleDiagramOrientation, insertMessage,
+  setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation, insertMessage,
   toggleNumberedSteps, hasNumberedSteps,
 } from './editor';
 import { parseModel } from './model';
@@ -623,11 +623,11 @@ describe('addMessage', () => {
     expect(lines[7]).toBe('    A->>B: Hello');
   });
 
-  it('appends a flowchart edge at the end of the file', () => {
+  it('appends a flowchart edge with default message at the end of the file', () => {
     const res = addMessage(FLOW, FLOW_CFG, 'n:0', 'n:1');
-    expect(res.code).toBe(FLOW + '\n    A --> B');
+    expect(res.code).toBe(FLOW + '\n    A -->|New message| B');
     const model = parseModel(res.code);
-    expect(model.elements[model.elements.length - 1]).toMatchObject({ kind: 'edge', from: 'A', to: 'B', operator: '-->' });
+    expect(model.elements[model.elements.length - 1]).toMatchObject({ kind: 'edge', from: 'A', to: 'B', operator: '-->', label: 'New message' });
   });
 
   it('keeps a trailing newline when appending', () => {
@@ -1565,7 +1565,7 @@ describe('create -> change -> verify (harness)', () => {
     const flow = addParticipant(createFlowchartDiagram(), null);
     expect(keysOf(flow.code, 'node')).toEqual(['n:0', 'n:1', 'n:2']);
     const flowMsg = addMessage(flow.code, flow.config, 'n:2', 'n:0');
-    expect(parseModel(flowMsg.code).elements[parseModel(flowMsg.code).elements.length - 1]).toMatchObject({ kind: 'edge', from: 'New1', to: 'A' });
+    expect(parseModel(flowMsg.code).elements[parseModel(flowMsg.code).elements.length - 1]).toMatchObject({ kind: 'edge', from: 'New1', to: 'A', label: 'New message' });
   });
 
   it('deletes with cascade on a newly created sequence diagram', () => {
@@ -1785,11 +1785,68 @@ describe('setParticipantKind', () => {
     expect(res.code).toBe(`sequenceDiagram\n    participant A as Alice\n    participant B as Bob`);
   });
 
+  it('toggles participant to database in sequence diagram', () => {
+    const code = `sequenceDiagram\n    participant A as Alice\n    participant B as Bob`;
+    const res = setParticipantKind(code, null, 'p:0', 'database');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    participant A as Alice @{ type: "database" }\n    participant B as Bob`);
+  });
+
+  it('toggles participant to queue in sequence diagram', () => {
+    const code = `sequenceDiagram\n    participant A as Alice\n    participant B as Bob`;
+    const res = setParticipantKind(code, null, 'p:0', 'queue');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    participant A as Alice @{ type: "queue" }\n    participant B as Bob`);
+  });
+
+  it('toggles database to queue and vice versa in sequence diagram', () => {
+    const code = `sequenceDiagram\n    participant DB as Main Database @{ type: "database" }`;
+    const res = setParticipantKind(code, null, 'p:0', 'queue');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    participant DB as Main Database @{ type: "queue" }`);
+
+    const res2 = setParticipantKind(res.code, null, 'p:0', 'database');
+    expect(res2.warning).toBeUndefined();
+    expect(res2.code).toBe(`sequenceDiagram\n    participant DB as Main Database @{ type: "database" }`);
+  });
+
+  it('toggles database to actor and participant', () => {
+    const code = `sequenceDiagram\n    participant DB as Main Database @{ type: "database" }`;
+    const toActor = setParticipantKind(code, null, 'p:0', 'actor');
+    expect(toActor.code).toBe(`sequenceDiagram\n    actor DB as Main Database`);
+
+    const toParticipant = setParticipantKind(code, null, 'p:0', 'participant');
+    expect(toParticipant.code).toBe(`sequenceDiagram\n    participant DB as Main Database`);
+  });
+
+  it('handles participants without aliases', () => {
+    const code = `sequenceDiagram\n    participant DB`;
+    const res = setParticipantKind(code, null, 'p:0', 'database');
+    expect(res.code).toBe(`sequenceDiagram\n    participant DB @{ type: "database" }`);
+
+    const toActor = setParticipantKind(res.code, null, 'p:0', 'actor');
+    expect(toActor.code).toBe(`sequenceDiagram\n    actor DB`);
+
+    const toParticipant = setParticipantKind(toActor.code, null, 'p:0', 'participant');
+    expect(toParticipant.code).toBe(`sequenceDiagram\n    participant DB`);
+  });
+
+  it('preserves metadata when renaming a participant', () => {
+    const code = `sequenceDiagram\n    participant DB as OldName @{ type: "database" }`;
+    const res = renameParticipant(code, null, 'p:0', 'NewName');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`sequenceDiagram\n    participant DB as NewName @{ type: "database" }`);
+  });
+
   it('is a no-op when already same kind', () => {
     const code = `sequenceDiagram\n    actor A as Alice`;
     const res = setParticipantKind(code, null, 'p:0', 'actor');
     expect(res.warning).toBeUndefined();
     expect(res.code).toBe(code);
+
+    const dbCode = `sequenceDiagram\n    participant DB as Database @{ type: "database" }`;
+    const resDb = setParticipantKind(dbCode, null, 'p:0', 'database');
+    expect(resDb.code).toBe(dbCode);
   });
 
   it('fails gracefully for flowchart diagrams', () => {
@@ -1804,6 +1861,88 @@ describe('addParticipant with kind', () => {
     const res = addParticipant(code, null, undefined, undefined, 'actor');
     expect(res.warning).toBeUndefined();
     expect(res.code).toContain('    actor New1 as New Participant');
+  });
+
+  it('adds database participant when kind is database', () => {
+    const code = `sequenceDiagram\n    participant A as Alice`;
+    const res = addParticipant(code, null, undefined, undefined, 'database');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('    participant New1 as New Participant @{ type: "database" }');
+  });
+
+  it('adds queue participant when kind is queue', () => {
+    const code = `sequenceDiagram\n    participant A as Alice`;
+    const res = addParticipant(code, null, undefined, undefined, 'queue');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('    participant New1 as New Participant @{ type: "queue" }');
+  });
+});
+
+describe('setNodeShape', () => {
+  const FC_BASE = `flowchart TD\n    A[Start] --> B[Process]`;
+
+  it('changes node shape to cylinder (database)', () => {
+    const res = setNodeShape(FC_BASE, null, 'n:1', 'cylinder');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A[Start] --> B[(Process)]`);
+  });
+
+  it('changes node shape to rhombus (if/else)', () => {
+    const res = setNodeShape(FC_BASE, null, 'n:1', 'rhombus');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A[Start] --> B{Process}`);
+  });
+
+  it('accepts shape aliases like database and if-else', () => {
+    const resDb = setNodeShape(FC_BASE, null, 'n:1', 'database');
+    expect(resDb.code).toBe(`flowchart TD\n    A[Start] --> B[(Process)]`);
+
+    const resIf = setNodeShape(FC_BASE, null, 'n:1', 'if-else');
+    expect(resIf.code).toBe(`flowchart TD\n    A[Start] --> B{Process}`);
+  });
+
+  it('changes standalone node shape', () => {
+    const code = `flowchart TD\n    A[(Database)]\n    A --> B`;
+    const res = setNodeShape(code, null, 'n:0', 'rhombus');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A{Database}\n    A --> B`);
+  });
+
+  it('changes bare node on an edge line', () => {
+    const code = `flowchart TD\n    A --> B`;
+    const res = setNodeShape(code, null, 'n:0', 'cylinder');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A[(A)] --> B`);
+  });
+
+  it('changes target node on an edge line with pipe label', () => {
+    const code = `flowchart TD\n    A[Process] -->|Yes| B`;
+    const res = setNodeShape(code, null, 'n:1', 'rhombus');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A[Process] -->|Yes| B{B}`);
+  });
+
+  it('is a no-op when already same shape', () => {
+    const code = `flowchart TD\n    A[(DB)] --> B`;
+    const res = setNodeShape(code, null, 'n:0', 'cylinder');
+    expect(res.code).toBe(code);
+  });
+
+  it('fails on forbidden characters for the target shape', () => {
+    const code = `flowchart TD\n    A[Choice {x}] --> B`;
+    const res = setNodeShape(code, null, 'n:0', 'rhombus');
+    expect(res.warning).toMatch(/cannot contain '\{\}'/);
+    expect(res.code).toBe(code);
+  });
+
+  it('fails cleanly on sequence diagrams', () => {
+    const res = setNodeShape(SEQ, null, 'p:0', 'cylinder');
+    expect(res.warning).toMatch(/unsupported/i);
+  });
+
+  it('fails on invalid shape name', () => {
+    const res = setNodeShape(FC_BASE, null, 'n:0', 'not-a-shape' as unknown as import('./model').NodeShape);
+    expect(res.warning).toMatch(/invalid node shape/i);
   });
 });
 
@@ -1972,6 +2111,13 @@ describe('insertMessage', () => {
     const res = insertMessage(code, null, 'p:0', 'p:1', 'Return', '-->>', { type: 'bottom' }, { deactivateSource: true });
     expect(res.warning).toBeUndefined();
     expect(res.code).toContain('A-->>-B: Return');
+  });
+
+  it('inserts flowchart edge with default message when label is omitted', () => {
+    const code = `flowchart TD\n    A[Alice] --> B[Bob]`;
+    const res = insertMessage(code, null, 'n:0', 'n:1');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A[Alice] --> B[Bob]\n    A -->|New message| B`);
   });
 });
 

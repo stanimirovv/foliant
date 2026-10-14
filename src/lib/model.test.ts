@@ -135,6 +135,23 @@ ${bareOps.map((op, i) => `    A${op}B: bare ${i}`).join('\n')}`;
       { key: 'm:0', kind: 'message', from: 'MergedColor_red', to: 'MergedColor_red', operator: '->>', label: 'Message', lineStart: 4, lineEnd: 4 },
     ]);
   });
+
+  it('parses participants with metadata types including database, queue and actor', () => {
+    const code = `sequenceDiagram
+    participant Standard
+    actor User as Human
+    participant DB as Main Database @{ type: "database" }
+    participant Q @{ type: "queue" }
+    participant Cache as Redis @{ "type": "collections" }`;
+    const model = parseModel(code);
+    expect(model.elements).toEqual([
+      { key: 'p:0', kind: 'participant', id: 'Standard', lineStart: 1, lineEnd: 1 },
+      { key: 'p:1', kind: 'participant', id: 'User', alias: 'Human', participantType: 'actor', lineStart: 2, lineEnd: 2 },
+      { key: 'p:2', kind: 'participant', id: 'DB', alias: 'Main Database', participantType: 'database', lineStart: 3, lineEnd: 3 },
+      { key: 'p:3', kind: 'participant', id: 'Q', participantType: 'queue', lineStart: 4, lineEnd: 4 },
+      { key: 'p:4', kind: 'participant', id: 'Cache', alias: 'Redis', participantType: 'collections', lineStart: 5, lineEnd: 5 },
+    ]);
+  });
 });
 
 describe('parseModel — flowchart edges and nodes', () => {

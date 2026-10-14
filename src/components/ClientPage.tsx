@@ -10,7 +10,7 @@ import { processMermaid, transformActors, ActorTransformOptions, isPathHidden } 
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
-import { parseModel, ModelElement } from '@/lib/model';
+import { parseModel, ModelElement, NodeShape, ParticipantType } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
 import mermaid from 'mermaid';
 import {
@@ -18,7 +18,7 @@ import {
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
   getArrowTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
-  setParticipantKind, toggleActivation, groupParticipants, toggleDiagramOrientation,
+  setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation,
   toggleNumberedSteps, hasNumberedSteps,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
@@ -1022,9 +1022,14 @@ export default function ClientPage() {
     applyEditResult(setArrowKeyMode(rawCode, viewsData, selectedArrow.key, mode));
   };
 
-  const handleSetParticipantKind = (kind: 'participant' | 'actor') => {
+  const handleSetParticipantKind = (kind: ParticipantType) => {
     if (!selectedRawElement || selectedRawElement.kind !== 'participant') return;
     applyEditResult(setParticipantKind(rawCode, viewsData, selectedRawElement.key, kind));
+  };
+
+  const handleSetNodeShape = (shape: NodeShape) => {
+    if (!selectedRawElement || selectedRawElement.kind !== 'node') return;
+    applyEditResult(setNodeShape(rawCode, viewsData, selectedRawElement.key, shape));
   };
 
   const handleToggleActivation = (endpoint: 'target' | 'source', active: boolean) => {
@@ -1890,6 +1895,7 @@ export default function ClientPage() {
                         onRemoveTag={handleRemoveTag}
                         onSetKeyMode={handleSetArrowKeyMode}
                         onSetParticipantKind={handleSetParticipantKind}
+                        onSetNodeShape={handleSetNodeShape}
                         onToggleActivation={handleToggleActivation}
                         onGroupParticipants={handleGroupParticipants}
                         onRequestDelete={handleRequestDelete}
@@ -1935,6 +1941,7 @@ export default function ClientPage() {
                       onRemoveTag={handleRemoveTag}
                       onSetKeyMode={handleSetArrowKeyMode}
                       onSetParticipantKind={handleSetParticipantKind}
+                      onSetNodeShape={handleSetNodeShape}
                       onToggleActivation={handleToggleActivation}
                       onGroupParticipants={handleGroupParticipants}
                       onRequestDelete={handleRequestDelete}

@@ -1,5 +1,5 @@
 import { DiagramConfig } from './views';
-import { parseModel } from './model';
+import { parseModel, parseParticipantLine } from './model';
 
 export interface RegionContext {
   type: string;
@@ -224,23 +224,28 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
       continue;
     }
 
-    const match = line.match(/^(\s*)(participant|actor)\s+([A-Za-z0-9_-]+)(?:\s+as\s+(.*))?$/);
-    if (match) {
-      const indent = match[1];
-      const type = match[2];
-      const id = match[3];
-      let alias = match[4];
+    const parsed = parseParticipantLine(line);
+    if (parsed) {
+      const { indent, keyword, id, alias: parsedAlias, participantType } = parsed;
+      let alias = parsedAlias;
 
       const mergeGroup = groupMap.get(id);
       if (mergeGroup) {
         alias = mergeGroup.alias;
       }
 
+      const metaPart = (participantType !== 'participant' && participantType !== 'actor')
+        ? ` @{ type: "${participantType}" }`
+        : '';
+      const lineStr = alias
+        ? `${indent}${keyword} ${id} as ${alias}${metaPart}`
+        : `${indent}${keyword} ${id}${metaPart}`;
+
       participants.push({
-        type,
+        type: keyword,
         id,
         alias,
-        line: alias ? `${indent}${type} ${id} as ${alias}` : `${indent}${type} ${id}`
+        line: lineStr,
       });
     } else {
       restOfCode.push(line);
