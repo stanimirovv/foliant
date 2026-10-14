@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, reorderSequenceLayers, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
+import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, reorderSequenceLayers, markPanExclusionTargets, PAN_EXCLUDE_CLASS, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
 import { buildActorRewriteMap, transformActors } from './preprocessor';
 import { parseModel, MessageElement, EdgeElement } from './model';
 import { updateViewsData, DiagramConfig } from './views';
@@ -935,6 +935,53 @@ describe('reorderSequenceLayers', () => {
     const res = await renderPipeline(code);
     const out = reorderSequenceLayers(res.svg);
     expect(out).toBe(res.svg);
+  });
+});
+
+describe('markPanExclusionTargets', () => {
+  it('tags participants, lifelines, messages, texts and notes in a real sequence render', async () => {
+    const code = `sequenceDiagram
+      participant A as Alice
+      participant B as Bob
+      rect rgb(200, 200, 200)
+      A->>B: Hello
+      B-->>A: Hi there
+      end
+      Note over A, B: a note`;
+    const res = await renderPipeline(code);
+    const root = parseSvgRoot(markPanExclusionTargets(res.svg));
+    expect(root.querySelectorAll(`g[data-et="participant"].${PAN_EXCLUDE_CLASS}`).length).toBe(2);
+    expect(root.querySelectorAll(`line.actor-line.${PAN_EXCLUDE_CLASS}`).length).toBe(2);
+    expect(root.querySelectorAll(`[data-et="message"].${PAN_EXCLUDE_CLASS}`).length).toBe(2);
+    expect(root.querySelectorAll(`text.messageText.${PAN_EXCLUDE_CLASS}`).length).toBe(2);
+    expect(root.querySelectorAll(`g[data-et="note"].${PAN_EXCLUDE_CLASS}`).length).toBe(1);
+    // decorative background rects are not drag targets — stay unmarked
+    expect(root.querySelectorAll('rect.rect').length).toBeGreaterThan(0);
+    expect(root.querySelectorAll(`rect.rect.${PAN_EXCLUDE_CLASS}`).length).toBe(0);
+  });
+
+  it('tags flowchart nodes but not edges in a real flowchart render', async () => {
+    const res = await renderPipeline(createFlowchartDiagram());
+    const root = parseSvgRoot(markPanExclusionTargets(res.svg));
+    expect(root.querySelectorAll(`g.node.${PAN_EXCLUDE_CLASS}`).length).toBe(2);
+    expect(root.querySelectorAll(`path[data-et="edge"].${PAN_EXCLUDE_CLASS}`).length).toBe(0);
+  });
+
+  it('tags the arrow animation overlays created by applyArrowStyles', () => {
+    const out = applyArrowStyles(SEQ_SVG, parseModel(SEQ_CODE), {
+      version: 1,
+      arrows: [
+        { from: 'A', to: 'B', label: 'm1', color: '#10b981', animation: 'pulse' },
+        { from: 'B', to: 'A', label: 'm2', color: '#e11d48', animation: 'broken-network' },
+      ],
+    });
+    const root = parseSvgRoot(markPanExclusionTargets(out));
+    expect(root.querySelectorAll(`.arrow-anim-packet-runner.${PAN_EXCLUDE_CLASS}`).length).toBeGreaterThan(0);
+    expect(root.querySelectorAll(`.arrow-x-mark.${PAN_EXCLUDE_CLASS}`).length).toBeGreaterThan(0);
+  });
+
+  it('returns the input unchanged when there is no svg', () => {
+    expect(markPanExclusionTargets('not an svg')).toBe('not an svg');
   });
 });
 

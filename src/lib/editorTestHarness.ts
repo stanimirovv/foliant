@@ -6,7 +6,7 @@
 import { parseViewsData, DiagramConfig } from './views';
 import { DiagramModel, parseModel } from './model';
 import { ActorTransformOptions, PreprocessorOptions, processMermaid, transformActors } from './preprocessor';
-import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, rewriteArrowStyles } from './styling';
+import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, markPanExclusionTargets, rewriteArrowStyles } from './styling';
 
 export function createSequenceDiagram(): string {
   return `sequenceDiagram
@@ -71,14 +71,15 @@ export async function renderPipeline(rawCode: string, options: RenderPipelineOpt
   };
 }
 
-// Applies the resolved arrow styles + node colors to a rendered SVG — the
-// same two calls DiagramViewer makes after mermaid.render.
+// Applies the resolved arrow styles + node colors + pan-exclusion marking to
+// a rendered SVG — the same calls DiagramViewer makes after mermaid.render.
 export function applyStyles(svg: string, processedCode: string, config: DiagramConfig | null, options: ActorTransformOptions = {}): string {
   const model = parseModel(processedCode);
   const resolved = rewriteArrowStyles(config, options);
   let out = reorderSequenceLayers(svg);
   out = applyArrowStyles(out, model, resolved);
   out = applyNodeColors(out, resolved);
+  out = markPanExclusionTargets(out);
   return out;
 }
 

@@ -941,3 +941,48 @@ export function reorderSequenceLayers(svg: string): string {
   }
 }
 
+// --- Pan exclusion marking ---------------------------------------------------
+
+// react-zoom-pan-pinch builds the exclusion selector for each
+// `panning.excluded` entry E as `.react-transform-wrapper E` plus `.E`
+// variants (with `*` descendant variants) and calls Element.matches() with
+// it on every mouse-down inside the wrapper. E must therefore be a bare
+// class name — an attribute or dotted selector produces an invalid selector
+// and matches() throws, which surfaced as an unhandled error in tests and
+// silently killed drag-panning in edit mode in real browsers.
+export const PAN_EXCLUDE_CLASS = 'pan-exclude';
+
+// Drag targets in edit mode: sequence participants (top boxes, lifelines,
+// bottom boxes/men), messages (line/path + label), notes, flowchart nodes,
+// and the arrow animation overlays created by applyArrowStyles. The marker
+// is added to the element itself; the library's `.E *` variant also covers
+// descendants.
+const PAN_EXCLUDE_TARGETS = [
+  'g[data-et="participant"]',
+  'line.actor-line',
+  'rect.actor',
+  'g.actor-man',
+  '[data-et="message"]',
+  'text.messageText',
+  '.arrow-anim-packet-runner',
+  '.arrow-x-mark',
+  'g[data-et="note"]',
+  'g.node',
+];
+
+// Render-pipeline post-process step. Runs after applyArrowStyles, which
+// creates the .arrow-anim-packet-runner / .arrow-x-mark overlays.
+export function markPanExclusionTargets(svg: string): string {
+  try {
+    const doc = new DOMParser().parseFromString(svg, 'text/html');
+    const root = doc.querySelector('svg');
+    if (!root) return svg;
+    root.querySelectorAll(PAN_EXCLUDE_TARGETS.join(', ')).forEach(el => {
+      el.classList.add(PAN_EXCLUDE_CLASS);
+    });
+    return root.outerHTML;
+  } catch {
+    return svg;
+  }
+}
+

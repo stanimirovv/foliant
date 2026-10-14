@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, MouseEvent as ReactMouseEvent } f
 import mermaid from 'mermaid';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { parseModel, ParticipantElement } from '@/lib/model';
-import { applyArrowStyles, applyNodeColors, reorderSequenceLayers } from '@/lib/styling';
+import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, markPanExclusionTargets, PAN_EXCLUDE_CLASS } from '@/lib/styling';
 import {
   elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf,
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
@@ -63,28 +63,18 @@ const ENDPOINT_GRAB_RADIUS = 8;
 // lifelines stays easy.
 const ENDPOINT_GRAB_RADIUS_SELECTED = 24;
 
-// SVG selectors for every element that resolves to a participant (the same
-// set elementKeyAtTarget checks). Excluded from TransformWrapper panning in
-// edit mode so dragging a participant reorders / creates a message instead
-// of panning the screen. Flowchart node drags exclude the node groups.
-const PARTICIPANT_PAN_EXCLUSIONS = [
-  'g[data-et="participant"]',
-  'line.actor-line',
-  'rect.actor',
-  'g.actor-man',
-];
-const MESSAGE_PAN_EXCLUSIONS = [
-  '[data-et="message"]',
-  'text.messageText',
-  '.messageLine0',
-  '.messageLine1',
-  'path.messageLine0',
-  '.arrow-anim-packet-runner',
-  '.arrow-x-mark',
-  'g[data-et="note"]',
-];
-const NODE_PAN_EXCLUSIONS = ['g.node'];
-const STICKY_PAN_EXCLUSIONS = ['sticky-note-card', 'sticky-note-handle'];
+// Elements that are drag targets in edit mode (participants, lifelines,
+// messages, notes, flowchart nodes, arrow animation overlays) are excluded
+// from TransformWrapper panning so dragging them edits instead of panning
+// the screen. react-zoom-pan-pinch expands each `panning.excluded` entry E
+// into `.react-transform-wrapper E` / `.<E>` selector variants and calls
+// Element.matches() with them on every mouse-down, so every entry MUST be a
+// bare class name — anything else makes matches() throw. The draggable SVG
+// elements are tagged with PAN_EXCLUDE_CLASS by markPanExclusionTargets()
+// during the render pipeline; sticky notes are the app's own components and
+// already carry their classes.
+export const DIAGRAM_PAN_EXCLUSIONS = [PAN_EXCLUDE_CLASS];
+export const STICKY_PAN_EXCLUSIONS = ['sticky-note-card', 'sticky-note-handle'];
 
 interface DragState {
   type: 'reorder' | 'message' | 'node' | 'endpoint';
@@ -406,9 +396,8 @@ export default function DiagramViewer({
   const isFlowchartDiagram = diagramType === 'flowchart';
   const panExcluded = editMode && !isVisualLocked && (isSequenceDiagram || isFlowchartDiagram) && !!onSelect;
   const panExclusions = useMemo(() => {
-    const base = isFlowchartDiagram ? NODE_PAN_EXCLUSIONS : [...PARTICIPANT_PAN_EXCLUSIONS, ...MESSAGE_PAN_EXCLUSIONS];
-    return [...STICKY_PAN_EXCLUSIONS, ...(panExcluded ? base : [])];
-  }, [isFlowchartDiagram, panExcluded]);
+    return [...STICKY_PAN_EXCLUSIONS, ...(panExcluded ? DIAGRAM_PAN_EXCLUSIONS : [])];
+  }, [panExcluded]);
 
   const dragRef = useRef<DragState | null>(null);
   const suppressClickRef = useRef(false);
@@ -470,11 +459,14 @@ export default function DiagramViewer({
         // Add a random ID to prevent caching issues if code changes but ID doesn't
         const id = `mermaid-svg-${Math.random().toString(36).substr(2, 9)}`;
         const { svg } = await mermaid.render(id, code);
-        // Post-process: normalize sequence diagram layers, apply arrow styles and node colors
+        // Post-process: normalize sequence diagram layers, apply arrow styles
+        // and node colors, tag pan-exclusion targets (after the arrow styles,
+        // which create the .arrow-anim-packet-runner / .arrow-x-mark overlays)
         const model = parseModel(code);
         let styled = reorderSequenceLayers(svg);
         styled = applyArrowStyles(styled, model, arrowStyles);
         styled = applyNodeColors(styled, nodeColors);
+        styled = markPanExclusionTargets(styled);
         if (isMounted) {
           setSvgStr(styled);
         }

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import mermaid from 'mermaid';
-import DiagramViewer from './DiagramViewer';
+import DiagramViewer, { DIAGRAM_PAN_EXCLUSIONS, STICKY_PAN_EXCLUSIONS } from './DiagramViewer';
 import { SEQ_SVG, SEQ_CODE, FLOW_SVG, FLOW_CODE } from '@/lib/svgTestFixtures';
+import { PAN_EXCLUDE_CLASS } from '@/lib/styling';
 import { DiagramConfig } from '@/lib/views';
 
 // mermaid.render is mocked to return the fixture SVGs (ids rewritten to the
@@ -981,6 +982,67 @@ describe('DiagramViewer pan exclusion (participant drag)', () => {
       expect(container.querySelector('#diagram-container svg')).toBeNull();
     });
     expect(container.querySelector('[data-testid="no-diagram"]')?.textContent).toBe('No diagram selected');
+  });
+});
+
+// --- Pan exclusion contract (react-zoom-pan-pinch) ---------------------------
+
+// The library expands each `panning.excluded` entry E into
+// `.react-transform-wrapper E, .react-transform-wrapper .E,
+// .react-transform-wrapper E *, .react-transform-wrapper .E *` and calls
+// Element.matches() with it on every mouse-down inside the wrapper. E must
+// be a bare class name — anything else is an invalid selector and matches()
+// throws, which surfaced as an unhandled error and silently killed
+// drag-panning in edit mode in real browsers (regression test for the old
+// `[data-et="message"]` exclusion entry).
+describe('pan exclusion config', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  const expandLikeLibrary = (entry: string) =>
+    `.react-transform-wrapper ${entry}, .react-transform-wrapper .${entry}, ` +
+    `.react-transform-wrapper ${entry} *, .react-transform-wrapper .${entry} *`;
+
+  it.each([...DIAGRAM_PAN_EXCLUSIONS, ...STICKY_PAN_EXCLUSIONS])(
+    'exclusion entry "%s" expands to a valid selector',
+    (entry) => {
+      const probe = document.createElement('div');
+      expect(() => probe.matches(expandLikeLibrary(entry))).not.toThrow();
+    }
+  );
+
+  it('marks draggable sequence elements with the exclusion class', async () => {
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    const marked = (selector: string) => {
+      const el = container.querySelector(selector);
+      expect(el, selector).toBeTruthy();
+      expect(el!.classList.contains(PAN_EXCLUDE_CLASS), selector).toBe(true);
+    };
+    marked('g[data-et="participant"]');
+    marked('line.actor-line');
+    marked('[data-et="message"]');
+    marked('text.messageText');
+    marked('g[data-et="note"]');
+    // the svg root itself stays unmarked — background drags must still pan
+    const svgRoot = container.querySelector('#diagram-container svg');
+    expect(svgRoot!.classList.contains(PAN_EXCLUDE_CLASS)).toBe(false);
+  });
+
+  it('marks flowchart nodes with the exclusion class', async () => {
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    const node = container.querySelector('g.node');
+    expect(node).toBeTruthy();
+    expect(node!.classList.contains(PAN_EXCLUDE_CLASS)).toBe(true);
   });
 });
 
