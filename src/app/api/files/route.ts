@@ -8,7 +8,10 @@ export async function GET(request: Request) {
     await fs.mkdir(diagramsDir, { recursive: true });
     const files = await fs.readdir(diagramsDir);
     const mmdFiles = files.filter(f => f.endsWith('.mmd'));
-    return NextResponse.json({ files: mmdFiles });
+    const markdownFiles = files
+      .filter(f => f.endsWith('.md') || f.endsWith('.markdown'))
+      .sort();
+    return NextResponse.json({ files: mmdFiles, markdownFiles });
   } catch {
     return NextResponse.json({ error: 'Failed to read directory' }, { status: 500 });
   }

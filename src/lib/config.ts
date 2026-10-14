@@ -24,3 +24,19 @@ export function getDiagramsDir(req?: Request) {
   }
   return path.join(process.cwd(), 'diagrams');
 }
+
+// Resolve a file name to a path inside the diagrams directory, rejecting
+// anything that could escape it (path separators, '..', absolute paths).
+export function resolveDiagramFilePath(diagramsDir: string, filename: string): string {
+  if (
+    !filename ||
+    filename.includes('/') ||
+    filename.includes('\\') ||
+    filename === '.' ||
+    filename === '..' ||
+    path.isAbsolute(filename)
+  ) {
+    throw new Error('Invalid file name');
+  }
+  return path.join(diagramsDir, filename);
+}

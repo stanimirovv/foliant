@@ -6,17 +6,21 @@
     "dev": "node server.js",
     "build": "next build",
     "start": "NODE_ENV=production node server.js",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:e2e": "cypress run"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "chokidar": "^5.0.0",
     "lucide-react": "^1.51.0",
+    "mdast-util-from-markdown": "^2.1.0",
     "mermaid": "^12.1.0",
     "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18",
-    "react-zoom-pan-pinch": "^4.2.0"
+    "react-zoom-pan-pinch": "^4.2.0",
+    "remark-parse": "^11.0.0"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.2",

@@ -12,7 +12,7 @@ const dirs = new Map<string, DirState>();
 function getOrCreateDirState(dir: string): DirState {
   if (!dirs.has(dir)) {
     const clients = new Set<ReadableStreamDefaultController>();
-    const watcher = chokidar.watch('*.mmd', { cwd: dir, ignoreInitial: true });
+    const watcher = chokidar.watch(['*.mmd', '*.md', '*.markdown'], { cwd: dir, ignoreInitial: true });
     
     watcher.on('all', (event: string, file: string) => {
       const data = `data: ${JSON.stringify({ event, file })}\n\n`;

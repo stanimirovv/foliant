@@ -8,7 +8,7 @@ import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { parseModel, ModelElement, NodeShape, ParticipantType } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
@@ -26,6 +26,7 @@ import { buildSelectionMap } from '@/lib/svgmap';
 import { rewriteArrowStyles, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS } from '@/lib/styling';
 import { exportSvgToFile } from '@/lib/svgExport';
 import { PendingDelete } from './EditorPanel';
+import type { MdDiagramMeta } from '@/lib/markdownTypes';
 
 // Undo/redo history depth: capped so both stacks stay small (10-15 steps).
 const HISTORY_LIMIT = 15;
@@ -49,6 +50,14 @@ export default function ClientPage() {
 
   const [files, setFiles] = useState<string[]>([]);
   const [filesError, setFilesError] = useState<string | null>(null);
+  // Markdown files in the directory and the mermaid diagrams embedded in them.
+  // The Files menu lists each .md file as a parent row with its detected
+  // diagrams as nested children; selecting a child opens that diagram in the
+  // editor, and saving writes it back into the markdown file (through a
+  // background job — see saveEmbeddedDiagram).
+  const [markdownFiles, setMarkdownFiles] = useState<string[]>([]);
+  const [mdDiagrams, setMdDiagrams] = useState<Record<string, MdDiagramMeta[]>>({});
+  const [saveConflict, setSaveConflict] = useState<string | null>(null);
   const [rawCode, setRawCode] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
 
@@ -77,6 +86,7 @@ export default function ClientPage() {
   // ignored and anything else is adopted as an external change.
   const lastWrittenRef = useRef<string | null>(null);
   const rawCodeFileRef = useRef<string | null>(null); // which file rawCode belongs to
+  const rawCodeDiagramRef = useRef<number | null>(null); // which embedded diagram (index) rawCode belongs to
   const saveSeqRef = useRef(0);                       // only the latest save applies its result
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [reloadNotice, setReloadNotice] = useState(false);
@@ -178,6 +188,15 @@ export default function ClientPage() {
   const theme: 'default' | 'dark' = themeParam === 'default' ? 'default' : 'dark';
   const isDark = theme === 'dark';
   const dirParam = searchParams.get('dir') || '';
+
+  // A markdown file selected with a `diagram` index opens that embedded
+  // diagram (0-based among the ```mermaid blocks of the file) instead of the
+  // file itself; a markdown file without the index shows a placeholder.
+  const diagramParam = searchParams.get('diagram');
+  const diagramIndex = diagramParam !== null && /^\d+$/.test(diagramParam) ? parseInt(diagramParam, 10) : null;
+  const isMarkdownFile = Boolean(currentFile && /\.(md|markdown)$/i.test(currentFile));
+  const isEmbeddedDiagram = Boolean(isMarkdownFile && diagramIndex !== null);
+  const isMarkdownPlaceholder = Boolean(isMarkdownFile && diagramIndex === null);
   
   const [customDirInput, setCustomDirInput] = useState(dirParam);
   const [recentDirs, setRecentDirs] = useState<string[]>([]);
@@ -211,7 +230,8 @@ export default function ClientPage() {
       params.delete('dir');
     }
     params.delete('file');
-    
+    params.delete('diagram');
+
     const newQueryString = params.toString();
     if (newQueryString === searchParams.toString()) {
       setRefreshKey(k => k + 1);
@@ -219,7 +239,22 @@ export default function ClientPage() {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false });
     }
   };
-  
+
+  // Select a markdown file (no diagram -> placeholder) or one of its embedded
+  // diagrams (?file=notes.md&diagram=N).
+  const selectMarkdownFile = (filename: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('file', filename);
+    params.delete('diagram');
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+  const selectMarkdownDiagram = (filename: string, index: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('file', filename);
+    params.set('diagram', String(index));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
   // Hidden paths
   const hiddenPathsParam = searchParams.get('hidden') || '';
   const hiddenPaths = useMemo(() => new Set(hiddenPathsParam.split(',').filter(Boolean)), [hiddenPathsParam]);
@@ -327,19 +362,50 @@ export default function ClientPage() {
         }
         setFilesError(null);
         setFiles(data.files || []);
+        setMarkdownFiles(data.markdownFiles || []);
         if (!currentFile && data.files && data.files.length > 0) {
           const params = new URLSearchParams(searchParams.toString());
           params.set('file', data.files[0]);
+          params.delete('diagram');
+          router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+        } else if (!currentFile && data.markdownFiles && data.markdownFiles.length > 0) {
+          const params = new URLSearchParams(searchParams.toString());
+          params.set('file', data.markdownFiles[0]);
+          params.delete('diagram');
           router.replace(`${pathname}?${params.toString()}`, { scroll: false });
         }
       })
       .catch(() => {
         if (ignore) return;
         setFiles([]);
+        setMarkdownFiles([]);
         setFilesError('Failed to read directory');
       });
     return () => { ignore = true; };
   }, [currentFile, pathname, router, searchParams, dirParam, refreshKey]);
+
+  // Fetch the embedded mermaid diagrams of every markdown file, for the Files
+  // menu (nested under each .md file).
+  useEffect(() => {
+    let ignore = false;
+    if (markdownFiles.length === 0) {
+      setMdDiagrams({});
+      return;
+    }
+    const dirQs = dirParam ? `&dir=${encodeURIComponent(dirParam)}` : '';
+    Promise.all(markdownFiles.map(async f => {
+      try {
+        const r = await fetch(`/api/markdown/diagrams?file=${encodeURIComponent(f)}${dirQs}`);
+        const data = await r.json();
+        return [f, Array.isArray(data.diagrams) ? data.diagrams as MdDiagramMeta[] : []] as const;
+      } catch {
+        return [f, [] as MdDiagramMeta[]] as const;
+      }
+    })).then(entries => {
+      if (!ignore) setMdDiagrams(Object.fromEntries(entries));
+    });
+    return () => { ignore = true; };
+  }, [markdownFiles, dirParam, refreshKey]);
 
   const fetchFileContent = useCallback(async (filename: string): Promise<string | null> => {
     try {
@@ -351,6 +417,29 @@ export default function ClientPage() {
       return null;
     }
   }, [dirParam]);
+
+  // The full source of one embedded diagram (the fenced block's content,
+  // including the %% CONFIG comment as its first line).
+  const fetchEmbeddedDiagram = useCallback(async (filename: string, index: number): Promise<string | null> => {
+    try {
+      const qs = dirParam ? `&dir=${encodeURIComponent(dirParam)}` : '';
+      const r = await fetch(`/api/markdown/diagram?file=${encodeURIComponent(filename)}&index=${index}${qs}`);
+      const data = await r.json();
+      return typeof data.content === 'string' ? data.content : null;
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+  }, [dirParam]);
+
+  // The "editable content" of a selection: the whole file for .mmd files, the
+  // embedded block's source for a diagram inside a markdown file.
+  const fetchCurrentContent = useCallback(async (filename: string, index: number | null): Promise<string | null> => {
+    if (index !== null && /\.(md|markdown)$/i.test(filename)) {
+      return fetchEmbeddedDiagram(filename, index);
+    }
+    return fetchFileContent(filename);
+  }, [fetchEmbeddedDiagram, fetchFileContent]);
 
   const postFile = useCallback(async (filename: string, content: string): Promise<boolean> => {
     try {
@@ -366,26 +455,91 @@ export default function ClientPage() {
     }
   }, [dirParam]);
 
-  const loadFile = useCallback(async (filename: string) => {
-    const content = await fetchFileContent(filename);
-    if (content === null) return;
+  // Save an embedded diagram through the background job queue: the POST only
+  // enqueues the job (the read -> AST splice -> atomic write happens
+  // server-side, off the request path, so editing never freezes), then the
+  // job status is polled until it reaches a terminal state.
+  const saveEmbeddedDiagram = useCallback(async (
+    filename: string,
+    index: number,
+    content: string,
+    expectedContent: string,
+  ): Promise<{ ok: boolean; code?: string; message?: string }> => {
+    try {
+      const qs = dirParam ? `?dir=${encodeURIComponent(dirParam)}` : '';
+      const r = await fetch(`/api/markdown/save${qs}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: filename, index, content, expectedContent }),
+      });
+      if (!r.ok) return { ok: false, message: 'Save request rejected' };
+      const data = await r.json();
+      if (typeof data.jobId !== 'string') return { ok: false, message: 'Save request rejected' };
+      const deadline = Date.now() + 30000;
+      for (;;) {
+        const jr = await fetch(`/api/jobs/${encodeURIComponent(data.jobId)}`);
+        if (!jr.ok) return { ok: false, message: 'Could not check the save status' };
+        const job = await jr.json();
+        if (job.status === 'done') return { ok: true };
+        if (job.status === 'failed') {
+          return {
+            ok: false,
+            code: typeof job.code === 'string' ? job.code : undefined,
+            message: typeof job.error === 'string' ? job.error : 'Save failed',
+          };
+        }
+        if (Date.now() > deadline) return { ok: false, message: 'Save timed out' };
+        await new Promise(resolve => setTimeout(resolve, 400));
+      }
+    } catch (e) {
+      console.error(e);
+      return { ok: false, message: 'Save failed' };
+    }
+  }, [dirParam]);
+
+  const loadFile = useCallback(async (filename: string, index: number | null): Promise<boolean> => {
+    const content = await fetchCurrentContent(filename, index);
+    if (content === null) {
+      if (index !== null) {
+        // Stale diagram index (e.g. a hand-edited URL): show an empty editor
+        // rather than the previously loaded file's content under the new URL.
+        lastWrittenRef.current = '';
+        rawCodeFileRef.current = filename;
+        rawCodeDiagramRef.current = index;
+        setRawCode('');
+      }
+      return false;
+    }
     lastWrittenRef.current = content;
     rawCodeFileRef.current = filename;
+    rawCodeDiagramRef.current = index;
     setRawCode(content);
-  }, [fetchFileContent]);
+    return true;
+  }, [fetchCurrentContent]);
 
   useEffect(() => {
     if (currentFile) {
-      loadFile(currentFile);
+      if (isMarkdownPlaceholder) {
+        // A markdown file without a diagram selection: there is nothing to
+        // edit; the main area shows a placeholder.
+        lastWrittenRef.current = '';
+        rawCodeFileRef.current = currentFile;
+        rawCodeDiagramRef.current = null;
+        setRawCode('');
+      } else {
+        loadFile(currentFile, diagramIndex);
+      }
       setSelection(null);
       setPendingDelete(null);
     } else {
       rawCodeFileRef.current = null;
+      rawCodeDiagramRef.current = null;
       setRawCode('');
       setSelection(null);
       setPendingDelete(null);
     }
     setSelectedViewName(null);
+    setSaveConflict(null);
     // Switching files or directories resets the undo history (Section 4.11).
     setHistoryPast([]);
     setHistoryFuture([]);
@@ -396,17 +550,18 @@ export default function ClientPage() {
     }
     setChangedLines([]);
     setSourceValidationError(null);
-  }, [currentFile, loadFile]);
+  }, [currentFile, diagramIndex, isMarkdownPlaceholder, loadFile]);
 
   useEffect(() => {
     const evtSource = new EventSource(`/api/events${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
     evtSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (!currentFile || data.file !== currentFile) return;
+      if (isMarkdownPlaceholder) return; // no diagram loaded: nothing to reload
       // Refetch and route through the last-written comparison (Section 4.10):
       // identical content is our own write echoed back — ignore it; anything
       // else is an external change — adopt it, do not clobber it.
-      fetchFileContent(currentFile).then(content => {
+      fetchCurrentContent(currentFile, diagramIndex).then(content => {
         if (content === null) return;
         if (content === lastWrittenRef.current) return;
         lastWrittenRef.current = content;
@@ -417,7 +572,7 @@ export default function ClientPage() {
       });
     };
     return () => evtSource.close();
-  }, [currentFile, fetchFileContent, dirParam]);
+  }, [currentFile, fetchCurrentContent, dirParam, diagramIndex, isMarkdownPlaceholder]);
 
   // The "Reloaded from disk" notice auto-dismisses.
   useEffect(() => {
@@ -425,6 +580,13 @@ export default function ClientPage() {
     const timer = setTimeout(() => setReloadNotice(false), 5000);
     return () => clearTimeout(timer);
   }, [reloadNotice]);
+
+  // The save-conflict notice auto-dismisses.
+  useEffect(() => {
+    if (!saveConflict) return;
+    const timer = setTimeout(() => setSaveConflict(null), 8000);
+    return () => clearTimeout(timer);
+  }, [saveConflict]);
 
   const [debouncedCode, setDebouncedCode] = useState(rawCode);
   useEffect(() => {
@@ -438,26 +600,59 @@ export default function ClientPage() {
   // write-through POST. Skipped when there is no file, when the content
   // belongs to another file (a switch discarded it), or when it is already
   // the last successfully written content (initial load, own SSE echo, or an
-  // undo back to the saved state).
+  // undo back to the saved state). Diagrams embedded in a markdown file save
+  // through the background job queue instead of a direct POST.
   useEffect(() => {
     if (!currentFile) return;
     if (rawCodeFileRef.current !== currentFile) return;
     if (rawCode === lastWrittenRef.current) return;
+    if (isMarkdownPlaceholder) return;
     setSaveStatus('saving');
+    setSaveConflict(null);
     const seq = ++saveSeqRef.current;
+    const contentToSave = rawCode;
     const timer = setTimeout(() => {
-      postFile(currentFile, rawCode).then(ok => {
-        if (seq !== saveSeqRef.current) return; // a newer edit superseded this save
-        if (ok) {
-          lastWrittenRef.current = rawCode;
-          setSaveStatus('saved');
-        } else {
-          setSaveStatus('error'); // retried on the next edit
-        }
-      });
+      if (isEmbeddedDiagram && diagramIndex !== null) {
+        // Compare-and-swap: the job re-reads the markdown file and refuses to
+        // write when the target block changed on disk since it was loaded.
+        const expectedContent = lastWrittenRef.current ?? '';
+        // Optimistically mark the content as written so the SSE echo of our
+        // own save is ignored (same pattern as the direct POST below).
+        lastWrittenRef.current = contentToSave;
+        saveEmbeddedDiagram(currentFile, diagramIndex, contentToSave, expectedContent).then(result => {
+          if (seq !== saveSeqRef.current) return; // a newer edit superseded this save
+          if (result.ok) {
+            setSaveStatus('saved');
+          } else {
+            setSaveStatus('error');
+            if (result.code === 'conflict') {
+              setSaveConflict(result.message || 'The diagram changed on disk; it was reloaded.');
+            }
+            // Roll back the optimistic marker to the real disk content, so the
+            // next edit saves again with a fresh compare-and-swap base. Only
+            // when the selection is still the one this save was for — after a
+            // file/diagram switch the load already set the correct marker.
+            fetchCurrentContent(currentFile, diagramIndex).then(disk => {
+              if (disk !== null && rawCodeFileRef.current === currentFile && rawCodeDiagramRef.current === diagramIndex) {
+                lastWrittenRef.current = disk;
+              }
+            });
+          }
+        });
+      } else {
+        postFile(currentFile, contentToSave).then(ok => {
+          if (seq !== saveSeqRef.current) return; // a newer edit superseded this save
+          if (ok) {
+            lastWrittenRef.current = contentToSave;
+            setSaveStatus('saved');
+          } else {
+            setSaveStatus('error'); // retried on the next edit
+          }
+        });
+      }
     }, 800);
     return () => clearTimeout(timer);
-  }, [rawCode, currentFile, postFile]);
+  }, [rawCode, currentFile, postFile, isEmbeddedDiagram, isMarkdownPlaceholder, diagramIndex, saveEmbeddedDiagram, fetchCurrentContent]);
 
   const regionRoots = useMemo(() => extractRegions(debouncedCode), [debouncedCode]);
 
@@ -1103,6 +1298,7 @@ export default function ClientPage() {
     setPendingNew(false);
     const params = new URLSearchParams(searchParams.toString());
     params.set('file', name);
+    params.delete('diagram');
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     return null;
   };
@@ -1364,8 +1560,8 @@ export default function ClientPage() {
                 {filesError}{dirParam ? `: ${dirParam}` : ''}
               </p>
             )}
-            {!filesError && files.length === 0 && (
-              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'} italic mb-1`}>No .mmd files in this directory</p>
+            {!filesError && files.length === 0 && markdownFiles.length === 0 && (
+              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'} italic mb-1`}>No .mmd or .md files in this directory</p>
             )}
             <ul className="space-y-1">
               {files.map(f => (
@@ -1379,6 +1575,7 @@ export default function ClientPage() {
                     onClick={() => {
                       const params = new URLSearchParams(searchParams.toString());
                       params.set('file', f);
+                      params.delete('diagram');
                       router.replace(`${pathname}?${params.toString()}`);
                     }}
                   >
@@ -1387,6 +1584,65 @@ export default function ClientPage() {
                 </li>
               ))}
             </ul>
+            {markdownFiles.length > 0 && (
+              <ul className="space-y-1 mt-1" data-testid="markdown-files">
+                {markdownFiles.map(mf => {
+                  const diagrams = mdDiagrams[mf];
+                  const isMdSelected = currentFile === mf;
+                  const mdBadge = `text-[9px] font-bold px-1 py-0.5 rounded uppercase tracking-wide ${
+                    isDark ? 'bg-slate-700 text-slate-300' : 'bg-gray-200 text-gray-600'
+                  }`;
+                  return (
+                    <li key={mf}>
+                      <button
+                        data-testid={`md-file-${mf}`}
+                        className={`w-full text-left px-2 py-1 rounded text-sm transition-colors flex items-center space-x-1.5 ${
+                          isMdSelected
+                            ? (isDark ? 'bg-blue-900/40 text-blue-300 border border-blue-700/50 font-medium' : 'bg-blue-100 text-blue-700 font-medium')
+                            : (isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-gray-700 hover:bg-gray-100')
+                        }`}
+                        onClick={() => selectMarkdownFile(mf)}
+                        title={`${mf} — select one of its mermaid diagrams to edit it`}
+                      >
+                        <FileText size={12} className="shrink-0 opacity-70" />
+                        <span className="truncate flex-1">{mf}</span>
+                        <span data-testid={`md-badge-${mf}`} className={mdBadge}>MD</span>
+                      </button>
+                      {diagrams && diagrams.length > 0 && (
+                        <ul className="mt-0.5 space-y-0.5" data-testid={`md-diagrams-${mf}`}>
+                          {diagrams.map(d => {
+                            const isDiagramSelected = isMdSelected && diagramIndex === d.index;
+                            return (
+                              <li key={d.index}>
+                                <button
+                                  data-testid={`md-diagram-${mf}-${d.index}`}
+                                  className={`w-full text-left pl-6 pr-2 py-1 rounded text-xs transition-colors flex items-center space-x-1.5 ${
+                                    isDiagramSelected
+                                      ? (isDark ? 'bg-blue-900/40 text-blue-300 border border-blue-700/50 font-medium' : 'bg-blue-100 text-blue-700 font-medium')
+                                      : (isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-gray-600 hover:bg-gray-100')
+                                  }`}
+                                  onClick={() => selectMarkdownDiagram(mf, d.index)}
+                                  title={`${mf} — mermaid diagram ${d.index + 1} (lines ${d.startLine}-${d.endLine})`}
+                                >
+                                  <span className={mdBadge}>MD</span>
+                                  <span className="shrink-0">Diagram {d.index + 1}</span>
+                                  <span className="truncate opacity-60 font-normal">{d.title}</span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                      {diagrams && diagrams.length === 0 && (
+                        <p className={`pl-7 py-0.5 text-[10px] italic ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                          no mermaid diagrams
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
           <div className="mb-6">
@@ -1722,6 +1978,16 @@ export default function ClientPage() {
             </button>
           </div>
           <div className="flex items-center space-x-3">
+            {isEmbeddedDiagram && diagramIndex !== null && (
+              <span
+                data-testid="embedded-diagram-badge"
+                className={`text-xs flex items-center space-x-1 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}
+                title="Diagram embedded in a markdown file — saving updates the .md file"
+              >
+                <FileText size={12} />
+                <span>{currentFile} · Diagram {diagramIndex + 1}</span>
+              </span>
+            )}
             {saveStatus !== 'idle' && (
               <span
                 data-testid="save-indicator"
@@ -1734,6 +2000,11 @@ export default function ClientPage() {
                 }`}
               >
                 {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : 'Save failed'}
+              </span>
+            )}
+            {saveConflict && (
+              <span data-testid="save-conflict" className="text-xs text-red-500" title={saveConflict}>
+                Save conflict — the diagram changed on disk
               </span>
             )}
             {reloadNotice && (
@@ -1780,26 +2051,39 @@ export default function ClientPage() {
 
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 p-4 overflow-hidden relative min-w-0">
-            <DiagramViewer
-              code={processedCode}
-              searchQuery={searchQuery}
-              theme={theme}
-              editMode={editMode}
-              isVisualLocked={isVisualLocked}
-              arrowStyles={resolvedArrowStyles}
-              nodeColors={viewsData}
-              selection={processedSelection}
-              onSelect={handleSelect}
-              onMoveParticipant={handleMoveParticipant}
-              onCreateMessageDrag={handleCreateMessageDrag}
-              onMoveMessageEndpoint={handleMoveMessageEndpoint}
-              onMoveMessage={handleMoveMessage}
-              notes={stickyNotes}
-              showNotes={showNotes}
-              onUpdateNote={handleUpdateNote}
-              onDeleteNote={handleDeleteNote}
-            />
-            {!isVisualLocked && (
+            {isMarkdownPlaceholder ? (
+              <div
+                data-testid="markdown-placeholder"
+                className={`h-full flex flex-col items-center justify-center text-center space-y-2 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}
+              >
+                <FileText size={32} className="opacity-40" />
+                <p className="text-sm font-medium">{currentFile}</p>
+                <p className="text-xs opacity-70 max-w-xs">
+                  This is a markdown file. Select one of its mermaid diagrams in the Files menu to view and edit it — the markdown text itself is not edited here.
+                </p>
+              </div>
+            ) : (
+              <DiagramViewer
+                code={processedCode}
+                searchQuery={searchQuery}
+                theme={theme}
+                editMode={editMode}
+                isVisualLocked={isVisualLocked}
+                arrowStyles={resolvedArrowStyles}
+                nodeColors={viewsData}
+                selection={processedSelection}
+                onSelect={handleSelect}
+                onMoveParticipant={handleMoveParticipant}
+                onCreateMessageDrag={handleCreateMessageDrag}
+                onMoveMessageEndpoint={handleMoveMessageEndpoint}
+                onMoveMessage={handleMoveMessage}
+                notes={stickyNotes}
+                showNotes={showNotes}
+                onUpdateNote={handleUpdateNote}
+                onDeleteNote={handleDeleteNote}
+              />
+            )}
+            {!isVisualLocked && !isMarkdownPlaceholder && (
               <BottomAnimatedArrowBar
                 currentAnimation={selectedArrowStyle?.animation}
                 currentColor={selectedArrowStyle?.color}

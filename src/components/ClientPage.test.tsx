@@ -1472,16 +1472,16 @@ sequenceDiagram
     expect(err.textContent).toContain('/bad/dir');
   });
 
-  it('shows a hint when the directory has no .mmd files', async () => {
+  it('shows a hint when the directory has no .mmd or .md files', async () => {
     mockParams({ dir: '/empty/dir' });
     const mockFetch = global.fetch as import('vitest').Mock;
     mockFetch.mockResolvedValue({
-      json: async () => ({ files: [] })
+      json: async () => ({ files: [], markdownFiles: [] })
     });
 
     render(<ClientPage />);
 
-    expect(await screen.findByText('No .mmd files in this directory')).toBeTruthy();
+    expect(await screen.findByText('No .mmd or .md files in this directory')).toBeTruthy();
     expect(screen.queryByTestId('files-error')).toBeNull();
   });
 
@@ -2219,6 +2219,215 @@ sequenceDiagram
 
     // Source code returns to raw code (contains Secret Internal)
     expect((screen.getByTestId('monaco-editor-textarea') as HTMLTextAreaElement).value).toContain('Secret Internal');
+  });
+
+  describe('markdown embedded diagrams', () => {
+    const BLOCK0 = 'sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: First diagram';
+    const BLOCK1 = '%% CONFIG: {"version":1,"actors":{"A":{"color":"#e11d48"}}}\nsequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: Second diagram';
+
+    const mockMarkdownFetch = (opts?: {
+      diagrams?: Array<{ index: number; title: string; startLine: number; endLine: number }>;
+      jobStatus?: 'done' | 'failed';
+      jobCode?: string;
+      jobError?: string;
+    }) => {
+      const mockFetch = global.fetch as import('vitest').Mock;
+      const saveBodies: Array<Record<string, unknown>> = [];
+      mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
+        const u = String(url);
+        if (init?.method === 'POST' && u.startsWith('/api/markdown/save')) {
+          saveBodies.push(JSON.parse(init.body ?? '{}'));
+          return { ok: true, status: 202, json: async () => ({ jobId: 'job_test_1' }) };
+        }
+        if (u.startsWith('/api/jobs/')) {
+          if (opts?.jobStatus === 'failed') {
+            return {
+              ok: true,
+              json: async () => ({ id: 'job_test_1', status: 'failed', code: opts.jobCode ?? 'conflict', error: opts.jobError ?? 'changed on disk' }),
+            };
+          }
+          return { ok: true, json: async () => ({ id: 'job_test_1', status: 'done' }) };
+        }
+        if (u.startsWith('/api/markdown/diagrams')) {
+          return {
+            ok: true,
+            json: async () => ({
+              file: 'notes.md',
+              diagrams: opts?.diagrams ?? [
+                { index: 0, title: 'sequenceDiagram', startLine: 5, endLine: 9 },
+                { index: 1, title: 'sequenceDiagram', startLine: 15, endLine: 20 },
+              ],
+            }),
+          };
+        }
+        if (u.startsWith('/api/markdown/diagram?')) {
+          const index = Number(new URL(`http://test${u}`).searchParams.get('index'));
+          return { ok: true, json: async () => ({ file: 'notes.md', index, content: index === 1 ? BLOCK1 : BLOCK0 }) };
+        }
+        if (u.startsWith('/api/files')) {
+          return { ok: true, json: async () => ({ files: ['demo.mmd'], markdownFiles: ['notes.md'] }) };
+        }
+        if (u.startsWith('/api/file/')) {
+          return { ok: true, json: async () => ({ content: '' }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+      return { saveBodies };
+    };
+
+    it('lists markdown files with their embedded diagrams in the Files menu', async () => {
+      mockParams({ file: 'demo.mmd' });
+      mockMarkdownFetch();
+      render(<ClientPage />);
+
+      // .mmd files are still listed
+      expect(await screen.findByText('demo.mmd')).toBeTruthy();
+      // the markdown file is a parent row with an MD badge
+      const mdFile = await screen.findByTestId('md-file-notes.md');
+      expect(mdFile.textContent).toContain('notes.md');
+      expect(screen.getByTestId('md-badge-notes.md').textContent).toBe('MD');
+      // its diagrams are nested children, clearly marked as md diagrams
+      const d0 = await screen.findByTestId('md-diagram-notes.md-0');
+      const d1 = await screen.findByTestId('md-diagram-notes.md-1');
+      expect(d0.textContent).toContain('Diagram 1');
+      expect(d1.textContent).toContain('Diagram 2');
+      expect(d0.textContent).toContain('sequenceDiagram');
+    });
+
+    it('marks markdown files without mermaid diagrams in the menu', async () => {
+      mockParams({ file: 'demo.mmd' });
+      mockMarkdownFetch({ diagrams: [] });
+      render(<ClientPage />);
+
+      await screen.findByTestId('md-file-notes.md');
+      expect(await screen.findByText('no mermaid diagrams')).toBeTruthy();
+      expect(screen.queryByTestId('md-diagram-notes.md-0')).toBeNull();
+    });
+
+    it('opens an embedded diagram and loads only its block content (config line included)', async () => {
+      mockParams({ file: 'notes.md', diagram: '1' });
+      mockMarkdownFetch();
+      render(<ClientPage />);
+
+      const viewer = await screen.findByTestId('diagram-viewer');
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('A->>B: Second diagram');
+      }, { timeout: 3000 });
+      // the config comment is part of the loaded diagram
+      expect(viewer.getAttribute('data-code')).toContain('%% CONFIG:');
+      // the raw markdown file itself is never loaded into the editor
+      const mockFetch = global.fetch as import('vitest').Mock;
+      expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/markdown/diagram?'))).toBe(true);
+      expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/file/notes.md'))).toBe(false);
+      // the toolbar badge marks it as an md-embedded diagram
+      const badge = await screen.findByTestId('embedded-diagram-badge');
+      expect(badge.textContent).toContain('notes.md');
+      expect(badge.textContent).toContain('Diagram 2');
+
+      // clicking a child sets file + diagram params
+      mockReplace.mockClear();
+      fireEvent.click(screen.getByTestId('md-diagram-notes.md-0'));
+      await waitFor(() => {
+        const url = mockReplace.mock.calls.at(-1)?.[0] as string;
+        expect(url).toContain('file=notes.md');
+        expect(url).toContain('diagram=0');
+      });
+    });
+
+    it('shows a placeholder when a markdown file is selected without a diagram', async () => {
+      mockParams({ file: 'notes.md' });
+      mockMarkdownFetch();
+      render(<ClientPage />);
+
+      const placeholder = await screen.findByTestId('markdown-placeholder');
+      expect(placeholder.textContent).toContain('notes.md');
+      expect(placeholder.textContent).toContain('Select one of its mermaid diagrams');
+      expect(screen.queryByTestId('diagram-viewer')).toBeNull();
+      // no diagram content is fetched for the placeholder
+      const mockFetch = global.fetch as import('vitest').Mock;
+      expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/markdown/diagram?'))).toBe(false);
+    });
+
+    it('clicking a markdown file clears the diagram param', async () => {
+      mockParams({ file: 'notes.md', diagram: '1' });
+      mockMarkdownFetch();
+      render(<ClientPage />);
+      await screen.findByTestId('diagram-viewer');
+
+      mockReplace.mockClear();
+      fireEvent.click(screen.getByTestId('md-file-notes.md'));
+      await waitFor(() => {
+        const url = mockReplace.mock.calls.at(-1)?.[0] as string;
+        expect(url).toContain('file=notes.md');
+        expect(url).not.toContain('diagram=');
+      });
+    });
+
+    it('saves an edit to an embedded diagram through the background job queue', async () => {
+      mockParams({ file: 'notes.md', diagram: '1' });
+      const { saveBodies } = mockMarkdownFetch();
+      render(<ClientPage />);
+
+      const viewer = await screen.findByTestId('diagram-viewer');
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('A->>B: Second diagram');
+      }, { timeout: 3000 });
+
+      fireEvent.click(screen.getByTestId('select-m:0'));
+      const input = await screen.findByDisplayValue('Second diagram');
+      fireEvent.change(input, { target: { value: 'Edited label' } });
+
+      // the debounced auto-save enqueues a background job (POST /api/markdown/save)
+      await waitFor(() => {
+        expect(saveBodies.length).toBeGreaterThan(0);
+      }, { timeout: 3000 });
+      const body = saveBodies[0];
+      expect(body.file).toBe('notes.md');
+      expect(body.index).toBe(1);
+      // the full diagram is stored, config comment first
+      expect(String(body.content).startsWith('%% CONFIG:')).toBe(true);
+      expect(body.content).toContain('A->>B: Edited label');
+      expect(body.content).not.toContain('Second diagram');
+      // compare-and-swap base: the originally loaded block content
+      expect(body.expectedContent).toBe(BLOCK1);
+
+      // the job status was polled and the save reported as saved
+      const mockFetch = global.fetch as import('vitest').Mock;
+      await waitFor(() => {
+        expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/jobs/'))).toBe(true);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+      }, { timeout: 3000 });
+
+      // the markdown file itself is never POSTed directly
+      expect(
+        mockFetch.mock.calls.some(c =>
+          String(c[0]).startsWith('/api/file/notes.md') && (c[1] as { method?: string } | undefined)?.method === 'POST'
+        )
+      ).toBe(false);
+    }, 10000);
+
+    it('shows a conflict notice when the save job reports the diagram changed on disk', async () => {
+      mockParams({ file: 'notes.md', diagram: '1' });
+      mockMarkdownFetch({ jobStatus: 'failed', jobCode: 'conflict', jobError: 'changed on disk' });
+      render(<ClientPage />);
+
+      const viewer = await screen.findByTestId('diagram-viewer');
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('A->>B: Second diagram');
+      }, { timeout: 3000 });
+
+      fireEvent.click(screen.getByTestId('select-m:0'));
+      const input = await screen.findByDisplayValue('Second diagram');
+      fireEvent.change(input, { target: { value: 'Edited label' } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('save-indicator').textContent).toBe('Save failed');
+      }, { timeout: 3000 });
+      const conflict = await screen.findByTestId('save-conflict');
+      expect(conflict.textContent).toContain('changed on disk');
+    }, 10000);
   });
 });
 
