@@ -8,7 +8,6 @@ sequenceDiagram
     %% Actors specific to user-registration
     participant Auth as Auth Service
     participant DB as User Database
-    participant ES as Email Service
 
     rect rgb(255, 255, 255)
         Note over C, ES: Flow: User Registration
@@ -82,6 +81,7 @@ sequenceDiagram
     %% @region-start: flow=password-reset
     %% Re-uses Email Service, introduces new Notification specific actor
     participant Auth as Auth Service
+    participant ES as Email Service
     participant ES as Email Service
     participant SMS as SMS Service
 

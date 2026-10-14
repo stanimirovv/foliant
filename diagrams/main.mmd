@@ -15,6 +15,7 @@ sequenceDiagram
     
     %% @region-start: edge-case=invalid-password
     Auth-->>API: 401 Unauthorized
+    C->>API: New message
     API-->>C: Error: Invalid Credentials
     %% @region-end
     

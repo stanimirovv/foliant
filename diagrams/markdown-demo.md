@@ -13,7 +13,7 @@ The first block carries a `%% CONFIG:` line, so canvas edits (colors, sticky
 notes, saved views) round-trip through the markdown save.
 
 ```mermaid
-%% CONFIG: {"version":1}
+%% CONFIG: {"version":1,"arrows":[{"from":"C","to":"API","label":"New message","color":"#00ff9d","animation":"flow"}]}
 sequenceDiagram
     participant C as Client
     participant API as API Gateway
@@ -23,6 +23,7 @@ sequenceDiagram
     C->>API: POST /login
     API->>Auth: Validate Credentials
     Auth->>DB: Fetch User Data
+    C->>API: New message
     DB-->>Auth: User Record
     Auth-->>API: JWT Token
     API-->>C: 200 OK + Token
@@ -41,6 +42,7 @@ flowchart TD
     Auth -.->|Token OK| Gateway
     Client <--> Gateway
     Orders --- Queue[Message Queue]
+    Client -->|New message| Orders
 ```
 
 ## Not a diagram
