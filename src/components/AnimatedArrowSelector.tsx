@@ -53,7 +53,7 @@ export default function AnimatedArrowSelector({
         <div className={`grid ${compact ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-6'} gap-1.5`}>
           {ANIMATED_ARROW_PRESETS.map((preset) => {
             const isSelected = currentAnimation === preset.id;
-            const previewColor = (compact || currentColor) ? activeColor : (preset.isError ? '#ff2a85' : '#00ff9d');
+            const previewColor = preset.isError ? '#ff2a85' : '#00ff9d';
             const markerId = `marker-${preset.id}-${compact ? 'compact' : 'full'}`;
 
             return (

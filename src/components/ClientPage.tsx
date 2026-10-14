@@ -23,7 +23,7 @@ import {
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
 import { buildSelectionMap } from '@/lib/svgmap';
-import { rewriteArrowStyles } from '@/lib/styling';
+import { rewriteArrowStyles, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS } from '@/lib/styling';
 import { exportSvgToFile } from '@/lib/svgExport';
 import { PendingDelete } from './EditorPanel';
 
@@ -36,6 +36,11 @@ const NEW_DIAGRAM_TEMPLATES: Record<'sequence' | 'flowchart', string> = {
   sequence: 'sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: Hello\n    B-->>A: Hi there',
   flowchart: 'flowchart TD\n    A[Alice] --> B[Bob]\n    B -->|Reply| A',
 };
+
+const RICH_ARROW_LAST_POSITIVE_COLOR_KEY = 'mermaid_rich_arrow_last_positive_color';
+const RICH_ARROW_LAST_ERROR_COLOR_KEY = 'mermaid_rich_arrow_last_error_color';
+const DEFAULT_RICH_ARROW_POSITIVE_COLOR = '#00ff9d';
+const DEFAULT_RICH_ARROW_ERROR_COLOR = '#ff2a85';
 
 export default function ClientPage() {
   const router = useRouter();
@@ -84,7 +89,45 @@ export default function ClientPage() {
   const [historyPast, setHistoryPast] = useState<string[]>([]);
   const [historyFuture, setHistoryFuture] = useState<string[]>([]);
 
-  // Source Code panel and visual edit mutual exclusion state:
+  const [lastPositiveColor, setLastPositiveColor] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        return window.localStorage.getItem(RICH_ARROW_LAST_POSITIVE_COLOR_KEY) || DEFAULT_RICH_ARROW_POSITIVE_COLOR;
+      } catch {
+        return DEFAULT_RICH_ARROW_POSITIVE_COLOR;
+      }
+    }
+    return DEFAULT_RICH_ARROW_POSITIVE_COLOR;
+  });
+
+  const [lastErrorColor, setLastErrorColor] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        return window.localStorage.getItem(RICH_ARROW_LAST_ERROR_COLOR_KEY) || DEFAULT_RICH_ARROW_ERROR_COLOR;
+      } catch {
+        return DEFAULT_RICH_ARROW_ERROR_COLOR;
+      }
+    }
+    return DEFAULT_RICH_ARROW_ERROR_COLOR;
+  });
+
+  const updateLastPositiveColor = (color: string) => {
+    setLastPositiveColor(color);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem(RICH_ARROW_LAST_POSITIVE_COLOR_KEY, color);
+      } catch {}
+    }
+  };
+
+  const updateLastErrorColor = (color: string) => {
+    setLastErrorColor(color);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem(RICH_ARROW_LAST_ERROR_COLOR_KEY, color);
+      } catch {}
+    }
+  };
   const [sidebarTab, setSidebarTab] = useState<'properties' | 'source'>('properties');
   const [isSplitView, setIsSplitView] = useState(false);
   const [editModeKind, setEditModeKind] = useState<'visual' | 'code'>('visual');
@@ -871,6 +914,27 @@ export default function ClientPage() {
   };
 
   const handleSetColor = (color: string) => {
+    const trimmed = color.trim().toLowerCase();
+    if (trimmed) {
+      const currentAnim = selectedArrowStyle?.animation;
+      const isErrorAnim = currentAnim && ANIMATED_ARROW_PRESETS.some(p => p.id === currentAnim && p.isError);
+      const isPosAnim = currentAnim && ANIMATED_ARROW_PRESETS.some(p => p.id === currentAnim && !p.isError);
+
+      if (isErrorAnim) {
+        updateLastErrorColor(trimmed);
+      } else if (isPosAnim) {
+        updateLastPositiveColor(trimmed);
+      } else {
+        const isErrorPalette = ANIMATED_ARROW_COLORS.error.some(c => c.hex.toLowerCase() === trimmed);
+        const isPosPalette = ANIMATED_ARROW_COLORS.positive.some(c => c.hex.toLowerCase() === trimmed);
+        if (isErrorPalette) {
+          updateLastErrorColor(trimmed);
+        } else if (isPosPalette) {
+          updateLastPositiveColor(trimmed);
+        }
+      }
+    }
+
     if (selectedComponent) {
       applyEditResult(setActorColor(rawCode, viewsData, selectedComponent.key, color));
     } else if (selectedArrow) {
@@ -903,7 +967,14 @@ export default function ClientPage() {
   const handleSetAnimation = (animation: ArrowAnimationType) => {
     if (!selectedArrow) return;
     const patch = currentArrowPatch();
+    const isCurrentlyAnimated = Boolean(selectedArrowStyle?.animation && selectedArrowStyle.animation !== 'none');
     patch.animation = animation === 'none' ? undefined : animation;
+
+    if (animation !== 'none' && !isCurrentlyAnimated) {
+      const isError = ANIMATED_ARROW_PRESETS.some(p => p.id === animation && p.isError);
+      const inheritedColor = isError ? lastErrorColor : lastPositiveColor;
+      patch.color = inheritedColor;
+    }
     applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
   };
 

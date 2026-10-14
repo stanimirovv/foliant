@@ -503,7 +503,7 @@ describe('EditorPanel', () => {
     expect(widthParent?.className).toContain('grid-cols-2');
   });
 
-  it('ensures animated arrows in the properties menu always match the color from the picker', () => {
+  it('ensures animated arrows in the properties menu always maintain green for happy paths and red for negative paths in preview', () => {
     const props = makeProps({
       element: message0,
       arrowStyle: { color: '#9333ea' },
@@ -514,15 +514,16 @@ describe('EditorPanel', () => {
     const arrowPicker = screen.getByTestId('arrow-color-picker') as HTMLInputElement;
     expect(arrowPicker.value).toBe('#9333ea');
 
-    // All 6 animated arrow previews in the properties menu match the picker color
+    // Previews strictly stay green (#00ff9d) for happy paths and red (#ff2a85) for negative paths
     const flowBtn = screen.getByTestId('select-animation-flow');
     const pulseBtn = screen.getByTestId('select-animation-pulse');
     const brokenSenderBtn = screen.getByTestId('select-animation-broken-sender');
 
-    expect(flowBtn.querySelector('svg')?.style.color === '#9333ea' || flowBtn.querySelector('svg')?.style.color === 'rgb(147, 51, 234)').toBe(true);
-    expect(pulseBtn.querySelector('svg')?.style.color === '#9333ea' || pulseBtn.querySelector('svg')?.style.color === 'rgb(147, 51, 234)').toBe(true);
-    expect(brokenSenderBtn.querySelector('svg')?.style.color === '#9333ea' || brokenSenderBtn.querySelector('svg')?.style.color === 'rgb(147, 51, 234)').toBe(true);
-    expect(flowBtn.querySelector('marker path')?.getAttribute('fill')).toBe('#9333ea');
+    expect(flowBtn.querySelector('svg')?.style.color === '#00ff9d' || flowBtn.querySelector('svg')?.style.color === 'rgb(0, 255, 157)').toBe(true);
+    expect(pulseBtn.querySelector('svg')?.style.color === '#00ff9d' || pulseBtn.querySelector('svg')?.style.color === 'rgb(0, 255, 157)').toBe(true);
+    expect(brokenSenderBtn.querySelector('svg')?.style.color === '#ff2a85' || brokenSenderBtn.querySelector('svg')?.style.color === 'rgb(255, 42, 133)').toBe(true);
+    expect(flowBtn.querySelector('marker path')?.getAttribute('fill')).toBe('#00ff9d');
+    expect(brokenSenderBtn.querySelector('marker path')?.getAttribute('fill')).toBe('#ff2a85');
   });
 });
 

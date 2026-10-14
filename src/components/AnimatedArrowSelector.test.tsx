@@ -94,7 +94,7 @@ describe('AnimatedArrowSelector', () => {
     expect(onConvertDiagram).toHaveBeenCalledTimes(1);
   });
 
-  it('renders all animated arrows with the currently selected color in compact mode', () => {
+  it('strictly renders happy path animated arrows in green and negative path animated arrows in red in the preview', () => {
     render(
       <AnimatedArrowSelector
         currentAnimation="none"
@@ -109,9 +109,11 @@ describe('AnimatedArrowSelector', () => {
       const btn = screen.getByTestId(`select-animation-${preset.id}`);
       const svg = btn.querySelector('svg');
       expect(svg).toBeTruthy();
-      expect(svg?.style.color === '#2563eb' || svg?.style.color === 'rgb(37, 99, 235)').toBe(true);
+      const expectedHex = preset.isError ? '#ff2a85' : '#00ff9d';
+      const expectedRgb = preset.isError ? 'rgb(255, 42, 133)' : 'rgb(0, 255, 157)';
+      expect(svg?.style.color === expectedHex || svg?.style.color === expectedRgb).toBe(true);
       const markerPath = btn.querySelector('marker path');
-      expect(markerPath?.getAttribute('fill')).toBe('#2563eb');
+      expect(markerPath?.getAttribute('fill')).toBe(expectedHex);
     }
   });
 });

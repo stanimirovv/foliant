@@ -1741,6 +1741,105 @@ sequenceDiagram
     }, { timeout: 3000 });
   }, 20000);
 
+  it('inherits default green color when selecting a rich happy path arrow', async () => {
+    localStorage.clear();
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+
+    // Expand bottom bar
+    const bar = screen.getByTestId('bottom-animated-arrow-bar');
+    fireEvent.click(within(bar).getByTestId('toggle-animated-arrows-bar'));
+
+    // Select flow animation (happy path)
+    const flowBtn = await within(bar).findByTestId('select-animation-flow');
+    fireEvent.click(flowBtn);
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const parsed = parseViewsData(code);
+      expect(parsed?.arrows).toEqual([
+        { from: 'A', to: 'B', label: 'Hello', animation: 'flow', color: '#00ff9d' },
+      ]);
+    }, { timeout: 3000 });
+  }, 20000);
+
+  it('inherits default red color when selecting a rich negative path arrow', async () => {
+    localStorage.clear();
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+
+    // Expand bottom bar
+    const bar = screen.getByTestId('bottom-animated-arrow-bar');
+    fireEvent.click(within(bar).getByTestId('toggle-animated-arrows-bar'));
+
+    // Select broken-sender animation (negative path)
+    const brokenSenderBtn = await within(bar).findByTestId('select-animation-broken-sender');
+    fireEvent.click(brokenSenderBtn);
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const parsed = parseViewsData(code);
+      expect(parsed?.arrows).toEqual([
+        { from: 'A', to: 'B', label: 'Hello', animation: 'broken-sender', color: '#ff2a85' },
+      ]);
+    }, { timeout: 3000 });
+  }, 20000);
+
+  it('inherits last used color for subsequent arrows and preserves color when switching style', async () => {
+    localStorage.clear();
+    const TWO_MSGS = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: First
+    B->>A: Second`;
+    const viewer = await renderInEditMode(TWO_MSGS, 'A->>B: First');
+
+    // Select first message
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('First');
+
+    const bar = screen.getByTestId('bottom-animated-arrow-bar');
+    fireEvent.click(within(bar).getByTestId('toggle-animated-arrows-bar'));
+
+    // Select flow animation and set color to teal (#00f0ff)
+    fireEvent.click(await within(bar).findByTestId('select-animation-flow'));
+    fireEvent.click(within(bar).getByTestId('color-positive-teal'));
+
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const parsed = parseViewsData(code);
+      expect(parsed?.arrows?.find(a => a.label === 'First')?.color).toBe('#00f0ff');
+    }, { timeout: 3000 });
+
+    // Switch style on first message to cyber: it should PRESERVE the existing color (#00f0ff)
+    fireEvent.click(within(bar).getByTestId('select-animation-cyber'));
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const parsed = parseViewsData(code);
+      expect(parsed?.arrows?.find(a => a.label === 'First')).toMatchObject({
+        animation: 'cyber',
+        color: '#00f0ff',
+      });
+    }, { timeout: 3000 });
+
+    // Now select second message (plain non-animated arrow)
+    fireEvent.click(screen.getByTestId('select-m:1'));
+    await screen.findByDisplayValue('Second');
+
+    // Select cyber animation: should INHERIT the last used positive color (#00f0ff)
+    fireEvent.click(within(bar).getByTestId('select-animation-cyber'));
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      const parsed = parseViewsData(code);
+      expect(parsed?.arrows?.find(a => a.label === 'Second')).toMatchObject({
+        animation: 'cyber',
+        color: '#00f0ff',
+      });
+    }, { timeout: 3000 });
+  }, 25000);
+
   it('converts entire diagram to animated arrows via bottom bar Convert button', async () => {
     const DEMO_ERR = `sequenceDiagram
     participant A
