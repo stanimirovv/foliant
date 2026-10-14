@@ -312,6 +312,9 @@ describe('zip + click against real mermaid renders', () => {
 import {
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
   nearestParticipantAtX,
+  sequenceConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
+  nearestNodeAtPoint, nearestNodeHandleAt,
+  SEQ_CONNECT_HANDLE_OFFSET, CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo,
 } from './svgmap';
 
@@ -480,6 +483,130 @@ describe('nearestParticipantAtX', () => {
 
   it('handles a single participant', () => {
     expect(nearestParticipantAtX([participants[0]], 999)?.id).toBe('A');
+  });
+});
+
+describe('connect-handle helpers ("handles connect, body moves")', () => {
+  // Same geometry as the sequence fixture mocks: boxes at Y=10..50, so the
+  // connect handle sits at Y=64 on each lifeline.
+  const participants: ParticipantScreenInfo[] = [
+    { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
+    { key: 'p:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30 },
+    { key: 'p:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30 },
+  ];
+  const nodes: ParticipantScreenInfo[] = [
+    { key: 'n:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
+    { key: 'n:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30 },
+    { key: 'n:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30 },
+  ];
+
+  describe('sequenceConnectHandlePos', () => {
+    it('sits on the lifeline just below the top actor box', () => {
+      expect(sequenceConnectHandlePos(participants[0])).toEqual({ x: 50, y: 50 + SEQ_CONNECT_HANDLE_OFFSET });
+      expect(sequenceConnectHandlePos(participants[2])).toEqual({ x: 350, y: 50 + SEQ_CONNECT_HANDLE_OFFSET });
+    });
+  });
+
+  describe('nodeConnectHandlePositions', () => {
+    it('returns the four edge midpoints of the node box', () => {
+      expect(nodeConnectHandlePositions(nodes[0])).toEqual([
+        { x: 50, y: 10 },   // top
+        { x: 100, y: 30 },  // right
+        { x: 50, y: 50 },   // bottom
+        { x: 0, y: 30 },    // left
+      ]);
+    });
+  });
+
+  describe('nearestConnectHandleAt', () => {
+    it('finds the handle within the grab radius', () => {
+      const hit = nearestConnectHandleAt(participants, 50, 64);
+      expect(hit?.participant.key).toBe('p:0');
+      expect(hit?.handle).toEqual({ x: 50, y: 64 });
+    });
+
+    it('grabs at the edge of the radius', () => {
+      expect(nearestConnectHandleAt(participants, 50 + CONNECT_HANDLE_GRAB_RADIUS, 64)?.participant.key).toBe('p:0');
+      expect(nearestConnectHandleAt(participants, 50 + CONNECT_HANDLE_GRAB_RADIUS + 1, 64)).toBeNull();
+    });
+
+    it('returns null on the lifeline away from the handle', () => {
+      // A lifeline press at a message Y must NOT start a message drag.
+      expect(nearestConnectHandleAt(participants, 50, 130)).toBeNull();
+    });
+
+    it('picks the nearest handle when two handles overlap', () => {
+      // Columns only 15px apart: both handles are within the grab radius of
+      // X=57 (7px from A's, 8px from B's).
+      const close: ParticipantScreenInfo[] = [
+        { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
+        { key: 'p:1', id: 'B', left: 15, right: 115, top: 10, bottom: 50, centerX: 65, centerY: 30 },
+      ];
+      expect(nearestConnectHandleAt(close, 57, 64)?.participant.key).toBe('p:0');
+      expect(nearestConnectHandleAt(close, 58, 64)?.participant.key).toBe('p:1');
+    });
+
+    it('returns null for an empty list', () => {
+      expect(nearestConnectHandleAt([], 50, 64)).toBeNull();
+    });
+  });
+
+  describe('nearestNodeAtPoint', () => {
+    it('finds the node whose padded box contains the point', () => {
+      expect(nearestNodeAtPoint(nodes, 50, 30, null, NODE_HOVER_PAD)?.key).toBe('n:0');
+      // just outside the box, inside the pad
+      expect(nearestNodeAtPoint(nodes, 105, 30, null, NODE_HOVER_PAD)?.key).toBe('n:0');
+      expect(nearestNodeAtPoint(nodes, 111, 30, null, NODE_HOVER_PAD)).toBeNull();
+    });
+
+    it('prefers the nearest center when padded boxes overlap', () => {
+      // Nodes 10px apart: with pad=20 their padded boxes overlap (A: -20..120,
+      // B: 90..230). X=110 is inside both; B's center (160) is nearer than
+      // A's (50).
+      const overlapping: ParticipantScreenInfo[] = [
+        { key: 'n:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
+        { key: 'n:1', id: 'B', left: 110, right: 210, top: 10, bottom: 50, centerX: 160, centerY: 30 },
+      ];
+      expect(nearestNodeAtPoint(overlapping, 110, 30, null, NODE_DROP_PAD)?.key).toBe('n:1');
+      // ...and the reverse: X=100 is nearer A's center.
+      expect(nearestNodeAtPoint(overlapping, 100, 30, null, NODE_DROP_PAD)?.key).toBe('n:0');
+    });
+
+    it('excludes the given key (self-drop cancels)', () => {
+      expect(nearestNodeAtPoint(nodes, 50, 30, 'n:0', NODE_DROP_PAD)).toBeNull();
+      expect(nearestNodeAtPoint(nodes, 200, 30, 'n:0', NODE_DROP_PAD)?.key).toBe('n:1');
+    });
+
+    it('returns null when nothing is near', () => {
+      expect(nearestNodeAtPoint(nodes, 500, 300, null, NODE_DROP_PAD)).toBeNull();
+    });
+  });
+
+  describe('nearestNodeHandleAt', () => {
+    it('finds the handle within the grab radius', () => {
+      expect(nearestNodeHandleAt(nodes[0], 100, 30)).toEqual({ x: 100, y: 30 }); // right
+      expect(nearestNodeHandleAt(nodes[0], 50, 10))?.toEqual({ x: 50, y: 10 });  // top
+    });
+
+    it('returns null on the node body away from the edge midpoints', () => {
+      expect(nearestNodeHandleAt(nodes[0], 50, 30)).toBeNull(); // center: 20px from top/bottom handles
+    });
+
+    it('picks the nearest of the four handles', () => {
+      // ~7px from the right handle (100,30), ~47px from the bottom one (50,50).
+      expect(nearestNodeHandleAt(nodes[0], 95, 35)).toEqual({ x: 100, y: 30 });
+    });
+
+    it('shrinks the grab radius for small nodes so the body stays movable', () => {
+      // A 30x20 node (a small rendering): its top/bottom handles sit 10px from
+      // the center — exactly the fixed grab radius. The radius shrinks to fit
+      // the box, so the center is still a body press (move), never a connect.
+      const small: ParticipantScreenInfo = {
+        key: 'n:0', id: 'A', left: 0, right: 30, top: 10, bottom: 30, centerX: 15, centerY: 20,
+      };
+      expect(nearestNodeHandleAt(small, 15, 20)).toBeNull(); // center: 10px from the top/bottom handles
+      expect(nearestNodeHandleAt(small, 15, 12))?.toEqual({ x: 15, y: 10 }); // 2px from the top handle
+    });
   });
 });
 

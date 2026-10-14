@@ -536,6 +536,117 @@ export function nearestParticipantAtX(
   return closest;
 }
 
+// --- Connect-handle helpers ("handles connect, body moves") -----------------
+// In edit mode every drag has exactly one meaning per region: connecting starts
+// only from a visible connect handle, moving/reordering starts from the
+// element body. These helpers locate the handles and hit-test them.
+
+// How far below the top actor box the sequence connect handle sits on the
+// lifeline. The handle is the ONLY way to start a message-creation drag; the
+// lifeline and actor boxes reorder the participant.
+export const SEQ_CONNECT_HANDLE_OFFSET = 14;
+
+// How close (px) the cursor must be to a connect handle to grab it. Sized to
+// cover the rendered handle (a 12px-radius dot in DiagramViewer) so the whole
+// visible dot is grabbable.
+export const CONNECT_HANDLE_GRAB_RADIUS = 13;
+
+// Padding (px) around a flowchart node's box for hover/handle hit-testing.
+export const NODE_HOVER_PAD = 10;
+
+// Padding (px) around a flowchart node's box for connect drop-target
+// hit-testing (a generous drop zone; the handle grab radius stays small).
+export const NODE_DROP_PAD = 20;
+
+// The sequence connect handle of a participant: a fixed point on the lifeline,
+// just below the top actor box. On small renderings the first message's tail
+// endpoint can sit close to the handle; the component gives the handle
+// precedence over endpoint grab zones within its grab radius, so the handle
+// always starts message creation.
+export function sequenceConnectHandlePos(p: ParticipantScreenInfo): { x: number; y: number } {
+  return { x: p.centerX, y: p.bottom + SEQ_CONNECT_HANDLE_OFFSET };
+}
+
+// The four connect handles of a flowchart node: the midpoints of the node
+// box's edges (draw.io/Figma style). Edge creation drags start only from here.
+export function nodeConnectHandlePositions(n: ParticipantScreenInfo): { x: number; y: number }[] {
+  return [
+    { x: n.centerX, y: n.top },
+    { x: n.right, y: n.centerY },
+    { x: n.centerX, y: n.bottom },
+    { x: n.left, y: n.centerY },
+  ];
+}
+
+// The participant whose connect handle is nearest to (x, y) within the grab
+// radius (null when the cursor is not on any handle).
+export function nearestConnectHandleAt(
+  participants: ParticipantScreenInfo[],
+  x: number,
+  y: number,
+): { participant: ParticipantScreenInfo; handle: { x: number; y: number } } | null {
+  let best: { participant: ParticipantScreenInfo; handle: { x: number; y: number }; d: number } | null = null;
+  for (const p of participants) {
+    const handle = sequenceConnectHandlePos(p);
+    const d = Math.hypot(handle.x - x, handle.y - y);
+    if (d <= CONNECT_HANDLE_GRAB_RADIUS && (!best || d < best.d)) {
+      best = { participant: p, handle, d };
+    }
+  }
+  return best ? { participant: best.participant, handle: best.handle } : null;
+}
+
+// The node whose padded box contains (x, y), nearest by center distance
+// (null when the cursor is not over any node). Used for flowchart hover,
+// connect-handle hit-testing and connect drop targets. Nearest-center wins
+// over model order, so overlapping padded boxes stay unambiguous.
+export function nearestNodeAtPoint(
+  nodes: ParticipantScreenInfo[],
+  x: number,
+  y: number,
+  excludeKey: string | null,
+  pad: number,
+): ParticipantScreenInfo | null {
+  let best: ParticipantScreenInfo | null = null;
+  let bestD = Infinity;
+  for (const n of nodes) {
+    if (n.key === excludeKey) continue;
+    if (x >= n.left - pad && x <= n.right + pad && y >= n.top - pad && y <= n.bottom + pad) {
+      const d = Math.hypot(n.centerX - x, n.centerY - y);
+      if (d < bestD) {
+        bestD = d;
+        best = n;
+      }
+    }
+  }
+  return best;
+}
+
+// The connect handle of a node nearest to (x, y) within the grab radius
+// (null when the cursor is not on any of the node's four handles). The radius
+// shrinks for small nodes so the four handle zones never swallow the body:
+// pressing a node's center must always move it, never connect it.
+export function nearestNodeHandleAt(
+  node: ParticipantScreenInfo,
+  x: number,
+  y: number,
+): { x: number; y: number } | null {
+  const radius = Math.min(
+    CONNECT_HANDLE_GRAB_RADIUS,
+    Math.min(node.right - node.left, node.bottom - node.top) / 2 - 2,
+  );
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  for (const h of nodeConnectHandlePositions(node)) {
+    const d = Math.hypot(h.x - x, h.y - y);
+    if (d <= radius && d < bestD) {
+      bestD = d;
+      best = h;
+    }
+  }
+  return best;
+}
+
 // Selection map (processed -> raw), plan 4.7: parses both models, rewrites
 // the raw model's ids through buildActorRewriteMap, and joins on
 // (kind, from, to, label, occurrence). Elements stripped by the transform

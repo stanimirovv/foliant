@@ -339,10 +339,13 @@ function mockRect(el: Element, left: number, top: number, width: number, height:
 }
 
 // Mock screen rects for the SEQ fixture: participants A(0), B(150), C(300)
-// at the top, messages at Y=100,150,200,250.
+// at the top (boxes Y=10..50), messages at Y=100,150,200,250. The connect
+// handle of each participant sits at (centerX, 64) — 14px below the top box.
 function mockSeqScreenRects(container: HTMLElement) {
   const svg = container.querySelector('#diagram-container svg');
   if (!svg) return;
+  // the svg root rect bounds the lifeline hover zone
+  mockRect(svg, 0, 0, 500, 400);
   const groups = svg.querySelectorAll('g[data-et="participant"]');
   const byId = new Map<string, Element>();
   groups.forEach(g => { const id = g.getAttribute('data-id'); if (id) byId.set(id, g); });
@@ -457,7 +460,7 @@ describe('DiagramViewer drag interactions', () => {
     expect(onMoveParticipant).toHaveBeenCalledWith('p:0', 'p:2'); // move A before C
   });
 
-  it('dragging a lifeline fires onCreateMessageDrag with insert position', async () => {
+  it('dragging the connect handle fires onCreateMessageDrag with insert position', async () => {
     const onCreateMessageDrag = vi.fn();
     const onMoveParticipant = vi.fn();
     const onSelect = vi.fn();
@@ -470,14 +473,19 @@ describe('DiagramViewer drag interactions', () => {
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockSeqScreenRects(container);
 
-    // Mouse down on A's lifeline → message drag
-    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 130 });
+    // Mouse down on A's connect handle (50, 64 — on the lifeline, 14px below
+    // the top box) → message drag
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 64 });
     expect(onSelect).toHaveBeenCalledWith('p:0');
 
     // Drag to participant C at Y=180 (between messages at 150 and 200)
     fireEvent.mouseMove(window, { clientX: 350, clientY: 180 });
     await waitFor(() => expect(container.querySelector('[data-testid="message-drag-line"]')).toBeTruthy());
     await waitFor(() => expect(container.querySelector('[data-testid="message-insert-indicator"]')).toBeTruthy());
+    // The drag line starts at the grabbed handle.
+    const line = container.querySelector('[data-testid="message-drag-line"]')!;
+    expect(line.getAttribute('x1')).toBe('50');
+    expect(line.getAttribute('y1')).toBe('64');
 
     fireEvent.mouseUp(window, { clientX: 350, clientY: 180 });
     expect(onCreateMessageDrag).toHaveBeenCalledWith(
@@ -487,27 +495,66 @@ describe('DiagramViewer drag interactions', () => {
     expect(onMoveParticipant).not.toHaveBeenCalled();
   });
 
-  it('grabbing near a lifeline from empty space starts a message drag', async () => {
+  it('the connect handle wins over an endpoint grab zone that overlaps it', async () => {
     const onCreateMessageDrag = vi.fn();
+    const onMoveMessageEndpoint = vi.fn();
+    const onSelect = vi.fn();
     const { container } = render(
       <DiagramViewer
         code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
-        onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag}
+        onSelect={onSelect} onCreateMessageDrag={onCreateMessageDrag} onMoveMessageEndpoint={onMoveMessageEndpoint}
       />
     );
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockSeqScreenRects(container);
 
-    // Mouse down on the SVG background near A's lifeline (centerX=50, within 20px)
+    // Move m:0's line up to Y=70 (center 71): its tail endpoint (50, 71) now
+    // sits 7px below A's connect handle (50, 64) — inside BOTH the 8px
+    // endpoint grab zone and the 10px handle grab radius. On small renderings
+    // the first message crowds the handle like this.
+    const firstMsg = container.querySelector('#diagram-container [data-et="message"]') as Element;
+    mockRect(firstMsg, 0, 70, 200, 2);
+
+    // Press the handle itself: the dot is the dedicated affordance, so it wins
+    // over the endpoint zone → message-creation drag.
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 64 });
+    expect(onSelect).toHaveBeenCalledWith('p:0');
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 150 });
+    await waitFor(() => expect(container.querySelector('[data-testid="message-drag-line"]')).toBeTruthy());
+    fireEvent.mouseUp(window, { clientX: 200, clientY: 150 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith('p:0', 'p:1', { type: 'before', key: 'm:1' });
+    expect(onMoveMessageEndpoint).not.toHaveBeenCalled();
+
+    // The endpoint stays grabbable just outside the handle's grab radius.
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 78 });
+    expect(onSelect).toHaveBeenCalledWith('m:0');
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 150 });
+    await waitFor(() => expect(container.querySelector('[data-testid="endpoint-drag-line"]')).toBeTruthy());
+    fireEvent.mouseUp(window, { clientX: 350, clientY: 150 });
+    expect(onMoveMessageEndpoint).toHaveBeenCalledWith('m:0', 'from', 'p:2');
+  });
+
+  it('pressing empty space near a lifeline starts no drag (message creation is handle-only)', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // Mouse down on the SVG background near A's lifeline (centerX=50, within
+    // 20px, but not on the connect handle at Y=64)
     const svgRoot = container.querySelector('#diagram-container svg') as Element;
     fireEvent.mouseDown(svgRoot, { button: 0, clientX: 55, clientY: 130 });
     // Drag to C
     fireEvent.mouseMove(window, { clientX: 350, clientY: 180 });
     fireEvent.mouseUp(window, { clientX: 350, clientY: 180 });
-    expect(onCreateMessageDrag).toHaveBeenCalledWith(
-      'p:0', 'p:2',
-      expect.objectContaining({ type: 'before' })
-    );
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+    expect(onMoveParticipant).not.toHaveBeenCalled();
   });
 
   it('releasing a message drag over the same participant does not create a message', async () => {
@@ -521,8 +568,8 @@ describe('DiagramViewer drag interactions', () => {
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockSeqScreenRects(container);
 
-    // Drag from A's lifeline back to A — no valid target
-    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 130 });
+    // Drag from A's connect handle back to A — no valid target
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 64 });
     fireEvent.mouseMove(window, { clientX: 50, clientY: 180 });
     fireEvent.mouseUp(window, { clientX: 50, clientY: 180 });
     expect(onCreateMessageDrag).not.toHaveBeenCalled();
@@ -547,7 +594,7 @@ describe('DiagramViewer drag interactions', () => {
     expect(onCreateMessageDrag).not.toHaveBeenCalled();
   });
 
-  it('dragging from a lifeline to create a message at the top inserts before the first message', async () => {
+  it('dragging the connect handle to create a message at the top inserts before the first message', async () => {
     const onCreateMessageDrag = vi.fn();
     const { container } = render(
       <DiagramViewer
@@ -558,7 +605,7 @@ describe('DiagramViewer drag interactions', () => {
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockSeqScreenRects(container);
 
-    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 130 });
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 64 });
     // Drag to C at Y=60 (above the first message at Y=100)
     fireEvent.mouseMove(window, { clientX: 350, clientY: 60 });
     fireEvent.mouseUp(window, { clientX: 350, clientY: 60 });
@@ -568,7 +615,7 @@ describe('DiagramViewer drag interactions', () => {
     );
   });
 
-  it('dragging from a lifeline to create a message at the bottom inserts after the last message', async () => {
+  it('dragging the connect handle to create a message at the bottom inserts after the last message', async () => {
     const onCreateMessageDrag = vi.fn();
     const { container } = render(
       <DiagramViewer
@@ -579,7 +626,7 @@ describe('DiagramViewer drag interactions', () => {
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockSeqScreenRects(container);
 
-    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 130 });
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 64 });
     // Drag to C at Y=350 (below the last message at Y=250)
     fireEvent.mouseMove(window, { clientX: 350, clientY: 350 });
     fireEvent.mouseUp(window, { clientX: 350, clientY: 350 });
@@ -758,26 +805,30 @@ describe('DiagramViewer drag interactions', () => {
     expect(onCreateMessageDrag).not.toHaveBeenCalled();
   });
 
-  it('pressing the lifeline away from endpoints still creates a message', async () => {
+  it('pressing the lifeline away from endpoints reorders the participant instead of creating a message', async () => {
     const onMoveMessageEndpoint = vi.fn();
     const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
     const { container } = render(
       <DiagramViewer
         code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
         onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag} onMoveMessageEndpoint={onMoveMessageEndpoint}
+        onMoveParticipant={onMoveParticipant}
       />
     );
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockSeqScreenRects(container);
 
-    // 29px below m:0's head and 21px above m:1's tail — outside the grab zones
+    // 29px below m:0's head and 21px above m:1's tail — outside the grab
+    // zones, and away from B's connect handle (200, 64): a lifeline press is
+    // a reorder drag now, so it must never create or retarget a message.
     fireEvent.mouseDown(lifelineOf(container, 'B'), { button: 0, clientX: 200, clientY: 130 });
-    fireEvent.mouseMove(window, { clientX: 50, clientY: 180 });
-    fireEvent.mouseUp(window, { clientX: 50, clientY: 180 });
-    expect(onCreateMessageDrag).toHaveBeenCalledWith(
-      'p:1', 'p:0',
-      expect.objectContaining({ type: 'before' })
-    );
+    fireEvent.mouseMove(window, { clientX: 400, clientY: 180 });
+    await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
+    fireEvent.mouseUp(window, { clientX: 400, clientY: 180 });
+    // B dragged right past C's center (350) → move to end
+    expect(onMoveParticipant).toHaveBeenCalledWith('p:1', null);
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
     expect(onMoveMessageEndpoint).not.toHaveBeenCalled();
   });
 
@@ -866,25 +917,27 @@ describe('DiagramViewer drag interactions', () => {
   it('an unselected message keeps the small grab zone when another message is selected', async () => {
     const onMoveMessageEndpoint = vi.fn();
     const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
     const { container } = render(
       <DiagramViewer
         code={SEQ_CODE} searchQuery="" theme="default" editMode selection="m:1"
         onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag} onMoveMessageEndpoint={onMoveMessageEndpoint}
+        onMoveParticipant={onMoveParticipant}
       />
     );
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockSeqScreenRects(container);
 
     // 19px below m:0's head: m:0 is NOT selected, so its zone stays at 8px and
-    // the press falls through to a lifeline message-create drag.
+    // the press is not an endpoint drag. It lands on B's lifeline (away from
+    // the connect handle), so it reorders B instead.
     fireEvent.mouseDown(lifelineOf(container, 'B'), { button: 0, clientX: 200, clientY: 120 });
-    fireEvent.mouseMove(window, { clientX: 350, clientY: 180 });
-    fireEvent.mouseUp(window, { clientX: 350, clientY: 180 });
+    fireEvent.mouseMove(window, { clientX: 300, clientY: 180 });
+    fireEvent.mouseUp(window, { clientX: 300, clientY: 180 });
     expect(onMoveMessageEndpoint).not.toHaveBeenCalled();
-    expect(onCreateMessageDrag).toHaveBeenCalledWith(
-      'p:1', 'p:2',
-      { type: 'before', key: 'm:2' } // between msg at Y=150 (m:1) and Y=200 (m:2)
-    );
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+    // cursor X=300: past B's center (200), before C's center (350) → move B before C
+    expect(onMoveParticipant).toHaveBeenCalledWith('p:1', 'p:2');
   });
 
   it('does not start an endpoint drag outside edit mode', async () => {
@@ -902,6 +955,58 @@ describe('DiagramViewer drag interactions', () => {
     fireEvent.mouseMove(window, { clientX: 350, clientY: 150 });
     fireEvent.mouseUp(window, { clientX: 350, clientY: 150 });
     expect(onMoveMessageEndpoint).not.toHaveBeenCalled();
+  });
+
+  // --- Hover affordances (connect handle) ------------------------------------
+
+  it('hovering an actor column reveals the connect handle just below the top box', async () => {
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    const diagramContainer = container.querySelector('#diagram-container') as HTMLElement;
+    // Hover A's lifeline at Y=130 (below the top box, within 20px of centerX=50)
+    fireEvent.mouseMove(diagramContainer, { clientX: 50, clientY: 130 });
+    await waitFor(() => expect(container.querySelector('[data-testid="sequence-connect-handle"]')).toBeTruthy());
+    const handle = container.querySelector('[data-testid="sequence-connect-handle"]')!;
+    // A's top box is (0,10,100,40): the handle sits at (centerX=50, bottom+14=64)
+    expect(handle.getAttribute('transform')).toBe('translate(50, 64)');
+    // the column body is a reorder zone → grab cursor
+    expect(diagramContainer.style.cursor).toBe('grab');
+
+    // Hovering the handle itself switches to a crosshair
+    fireEvent.mouseMove(diagramContainer, { clientX: 50, clientY: 64 });
+    await waitFor(() => expect(diagramContainer.style.cursor).toBe('crosshair'));
+  });
+
+  it('hovering the top actor box also reveals the connect handle', async () => {
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    const diagramContainer = container.querySelector('#diagram-container') as HTMLElement;
+    fireEvent.mouseMove(diagramContainer, { clientX: 200, clientY: 30 }); // over B's top box
+    await waitFor(() => expect(container.querySelector('[data-testid="sequence-connect-handle"]')).toBeTruthy());
+    expect(container.querySelector('[data-testid="sequence-connect-handle"]')!.getAttribute('transform'))
+      .toBe('translate(200, 64)');
+  });
+
+  it('hovering empty space far from any column shows no connect handle', async () => {
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    const diagramContainer = container.querySelector('#diagram-container') as HTMLElement;
+    // X=450 is 100px right of C's center (350) — outside the 20px lifeline zone
+    fireEvent.mouseMove(diagramContainer, { clientX: 450, clientY: 130 });
+    expect(container.querySelector('[data-testid="sequence-connect-handle"]')).toBeNull();
+    expect(diagramContainer.style.cursor).toBe('');
   });
 });
 
@@ -1079,7 +1184,7 @@ describe('DiagramViewer flowchart node drag', () => {
     cleanup();
   });
 
-  it('dragging a node onto another node fires onCreateMessageDrag', async () => {
+  it('dragging a node connect handle onto another node fires onCreateMessageDrag', async () => {
     const onCreateMessageDrag = vi.fn();
     const onMoveParticipant = vi.fn();
     const onSelect = vi.fn();
@@ -1092,16 +1197,79 @@ describe('DiagramViewer flowchart node drag', () => {
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockFlowScreenRects(container);
 
-    // Press node A, drag onto node B's box
-    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    // Press A's right-edge connect handle (100, 30) → connect drag
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 100, clientY: 30 });
     expect(onSelect).toHaveBeenCalledWith('n:0');
 
     fireEvent.mouseMove(window, { clientX: 200, clientY: 30 }); // over B (150-250)
     await waitFor(() => expect(container.querySelector('[data-testid="message-drag-line"]')).toBeTruthy());
+    // The drag line starts at the grabbed handle, and the target node snaps.
+    const line = container.querySelector('[data-testid="message-drag-line"]')!;
+    expect(line.getAttribute('x1')).toBe('100');
+    expect(line.getAttribute('y1')).toBe('30');
+    expect(container.querySelector('[data-testid="target-lifeline-snap-rect"]')).toBeTruthy();
 
     fireEvent.mouseUp(window, { clientX: 200, clientY: 30 });
     expect(onCreateMessageDrag).toHaveBeenCalledWith('n:0', 'n:1', { type: 'bottom' });
     expect(onMoveParticipant).not.toHaveBeenCalled();
+  });
+
+  it('dragging a node body over another node moves it — no accidental edge', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    // Press A's body (50, 30) — 20px from every edge-midpoint handle → move drag
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 250, clientY: 30 }); // over B's right half
+    await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
+    fireEvent.mouseUp(window, { clientX: 250, clientY: 30 });
+    // Releasing over another node must NOT create an edge — the node moves:
+    // cursor X=250 is past B's center (200) → A lands after B (before C).
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2');
+  });
+
+  it('a small node’s body still moves even when the handle zones reach its center', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    // Shrink A to a 30x20 box (a small rendering): its top/bottom handles sit
+    // 10px from the center — exactly the fixed grab radius. The radius shrinks
+    // to fit the box, so the center is still a body press (move), while a
+    // press next to the top handle is a connect drag.
+    const a = flowNodeOf(container, '-A-0');
+    mockRect(a, 0, 10, 30, 20); // center (15, 20), handles at (15,10) (30,20) (15,30) (0,20)
+
+    // Body press at the center → move, never connect.
+    fireEvent.mouseDown(a, { button: 0, clientX: 15, clientY: 20 });
+    fireEvent.mouseMove(window, { clientX: 250, clientY: 20 });
+    await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
+    fireEvent.mouseUp(window, { clientX: 250, clientY: 20 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2');
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+
+    // Press next to the top handle (2px away) → connect drag.
+    fireEvent.mouseDown(a, { button: 0, clientX: 15, clientY: 12 });
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 20 }); // over B
+    await waitFor(() => expect(container.querySelector('[data-testid="message-drag-line"]')).toBeTruthy());
+    fireEvent.mouseUp(window, { clientX: 200, clientY: 20 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith('n:0', 'n:1', { type: 'bottom' });
   });
 
   it('dragging a node into empty space fires onMoveParticipant (reorder)', async () => {
@@ -1162,7 +1330,7 @@ describe('DiagramViewer flowchart node drag', () => {
     expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2'); // move A before C
   });
 
-  it('releasing a node drag over the same node does not create a connection', async () => {
+  it('releasing a connect drag over the source node cancels (no self-edge)', async () => {
     const onCreateMessageDrag = vi.fn();
     const onMoveParticipant = vi.fn();
     const { container } = render(
@@ -1174,11 +1342,38 @@ describe('DiagramViewer flowchart node drag', () => {
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockFlowScreenRects(container);
 
-    // Press A, drag a little — still within A's own (padded) box: no connect target
-    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
-    fireEvent.mouseMove(window, { clientX: 70, clientY: 40 });
-    fireEvent.mouseUp(window, { clientX: 70, clientY: 40 });
+    // Press A's right-edge connect handle, drag back over A itself — the
+    // source node is excluded from the drop targets, so the drag cancels.
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 100, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 30 });
+    fireEvent.mouseUp(window, { clientX: 50, clientY: 30 });
     expect(onCreateMessageDrag).not.toHaveBeenCalled();
+    expect(onMoveParticipant).not.toHaveBeenCalled();
+  });
+
+  it('releasing a connect drag over empty space cancels', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    // Press A's right-edge connect handle, drag to empty space below the nodes
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 100, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 300 });
+    await waitFor(() => expect(container.querySelector('[data-testid="message-drag-line"]')).toBeTruthy());
+    // no target: the line is grey and there is no snap highlight
+    const line = container.querySelector('[data-testid="message-drag-line"]')!;
+    expect(line.getAttribute('stroke')).toBe('#9ca3af');
+    expect(container.querySelector('[data-testid="target-lifeline-snap-rect"]')).toBeNull();
+    fireEvent.mouseUp(window, { clientX: 200, clientY: 300 });
+    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+    expect(onMoveParticipant).not.toHaveBeenCalled();
   });
 
   it('a plain click on a node (no drag) does not fire drag callbacks', async () => {
@@ -1219,6 +1414,48 @@ describe('DiagramViewer flowchart node drag', () => {
 
     // The transform should not have changed — panning was excluded
     expect(component.style.transform).toBe(initialTransform);
+  });
+
+  it('hovering a node reveals four connect handles at the box edge midpoints', async () => {
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    const diagramContainer = container.querySelector('#diagram-container') as HTMLElement;
+    // Hover node A's body (0,10,100,40)
+    fireEvent.mouseMove(diagramContainer, { clientX: 50, clientY: 30 });
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-testid="node-connect-handle"]')).toHaveLength(4)
+    );
+    const transforms = Array.from(container.querySelectorAll('[data-testid="node-connect-handle"]'))
+      .map(el => el.getAttribute('transform'));
+    expect(transforms).toEqual([
+      'translate(50, 10)',  // top
+      'translate(100, 30)', // right
+      'translate(50, 50)',  // bottom
+      'translate(0, 30)',   // left
+    ]);
+    // the node body is a move zone → grab cursor
+    expect(diagramContainer.style.cursor).toBe('grab');
+
+    // Hovering a handle itself switches to a crosshair
+    fireEvent.mouseMove(diagramContainer, { clientX: 100, clientY: 30 });
+    await waitFor(() => expect(diagramContainer.style.cursor).toBe('crosshair'));
+  });
+
+  it('hovering empty space far from any node shows no connect handles', async () => {
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowScreenRects(container);
+
+    const diagramContainer = container.querySelector('#diagram-container') as HTMLElement;
+    fireEvent.mouseMove(diagramContainer, { clientX: 250, clientY: 300 });
+    expect(container.querySelector('[data-testid="node-connect-handle"]')).toBeNull();
+    expect(diagramContainer.style.cursor).toBe('');
   });
 });
 

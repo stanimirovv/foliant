@@ -56,6 +56,8 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Add a second tag, then remove one → the By Key list updates immediately.
 - [ ] Add Participant (toolbar) → a new actor appears at the right end with a default label; rename it and send it a message.
 - [ ] Drag an actor box horizontally → a dashed line shows the target insertion position; releasing reorders the participant and keeps it selected.
+- [ ] Hover an actor box or its lifeline → a connect handle (dot with a plus) appears on the lifeline just below the top actor box; the cursor is a grab over the column and a crosshair over the handle.
+- [ ] Drag the lifeline (the connector between the top and bottom boxes) horizontally → reorders the participant; releasing over another participant never creates a message.
 - [ ] Delete a participant that has messages → a confirm dialog lists the messages/notes that will also be removed; cancelling changes nothing; confirming removes all of them.
 - [ ] Delete a participant with no messages → removed immediately, no dialog.
 
@@ -72,7 +74,9 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Combine color + width + dash on one arrow → all three apply together.
 - [ ] Reset an arrow's style → it returns to default rendering.
 - [ ] Add Message (toolbar) → a new message appears; with a message selected it is inserted after it; with a participant selected, that participant is the sender.
-- [ ] Drag between lifelines (press on a lifeline and drag to another participant) → a new message connects them; the horizontal line shows the insertion position; the message is selected.
+- [ ] Drag from an actor's connect handle (the dot shown on hover, just below the actor box) to another participant's lifeline → a new message connects them; the horizontal line shows the insertion position; the message is selected.
+- [ ] On a small diagram where the first message's tail sits close to the connect handle: pressing the handle still creates a message (the handle wins within its grab radius); grabbing the endpoint just outside the handle's zone still retargets/reorders the message.
+- [ ] Press empty space near a lifeline and drag → nothing happens (message creation starts only from the connect handle); a plain click still deselects.
 - [ ] Drag an arrow head (`to`) onto another participant → reconnects the recipient; styles and tags follow.
 - [ ] Drag an arrow tail (`from`) onto another participant → reconnects the origin; styles and tags follow.
 - [ ] Delete a message → it disappears; undo brings it back.
@@ -102,7 +106,11 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Select an edge → the panel shows Label / Type / Color / Width / Dash / Delete.
 - [ ] Edit an edge label; change Type (`---`, `-->`, `==>`, `-.->`, `<-->`), Color, Width, Dash → all apply to the rendered edge.
 - [ ] Add a node and an edge via the toolbar.
-- [ ] Drag a node onto another node → connects them with an edge.
+- [ ] Hover a node → four connect handles (dots with a plus) appear at the box's edge midpoints; the cursor is a grab over the node body and a crosshair over a handle.
+- [ ] Drag from a node's connect handle onto another node → connects them with an edge; a snap rect highlights the target node while dragging.
+- [ ] Drag from a node's connect handle and release over empty space or the source node → nothing happens (cancelled).
+- [ ] Drag a node body (not a handle) and release over another node → the node moves (dashed indicator shows the insertion position); no edge is created.
+- [ ] On a small node whose handles reach near its center: pressing the node's center still moves it (the handle grab radius shrinks to fit the box); pressing right at an edge midpoint still connects.
 - [ ] Drag a node into empty space → a dashed indicator shows the target insertion position; releasing moves the node along the layout axis.
 - [ ] Delete a node that has edges → the cascade confirm lists the edges → confirming removes them; the surviving nodes keep their labels (check the `.mmd` file: surviving endpoint declarations are kept, not eaten).
 

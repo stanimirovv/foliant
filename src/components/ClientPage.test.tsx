@@ -546,7 +546,8 @@ sequenceDiagram
 
   it('shows drag hints per diagram type', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
-    expect(await screen.findByText(/Drag an actor box to reorder it/)).toBeTruthy();
+    expect(await screen.findByText(/Drag an actor box or lifeline to reorder it/)).toBeTruthy();
+    expect(screen.getByText(/drag from the handle below the actor box to add a message/)).toBeTruthy();
 
     cleanup();
 
@@ -554,7 +555,8 @@ sequenceDiagram
     A[Alice] --> B[Bob]
     B -->|Reply| C[Charlie]`;
     await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
-    expect(await screen.findByText(/Drag a node onto another node to connect them/)).toBeTruthy();
+    expect(await screen.findByText(/Drag a node into empty space to move it/)).toBeTruthy();
+    expect(screen.getByText(/drag from a handle on its edge to connect it to another node/)).toBeTruthy();
   });
 
   it('Add Message with a selected message inserts after it', async () => {

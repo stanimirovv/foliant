@@ -9,6 +9,9 @@ import {
   elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf,
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
   nearestParticipantAtX, nearestMessageKeyAt,
+  sequenceConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
+  nearestNodeAtPoint, nearestNodeHandleAt,
+  CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo,
 } from '@/lib/svgmap';
 import { DiagramConfig, StickyNote as StickyNoteType } from '@/lib/views';
@@ -45,8 +48,9 @@ interface DiagramViewerProps {
 // Minimum mouse movement (px) before a press becomes a drag.
 const DRAG_THRESHOLD = 5;
 
-// How close (px) the cursor must be to a participant's center X to grab its
-// lifeline from empty space (the rendered lifeline stroke is only 1–2 px).
+// How close (px) the cursor must be to a participant's center X to count as
+// hovering its column (the rendered lifeline stroke is only 1–2 px). Hovering
+// the column reveals the connect handle on the lifeline.
 const LIFELINE_HIT_THRESHOLD = 20;
 
 // How close (px) the cursor must be to a message's arrow head or tail to grab
@@ -77,7 +81,7 @@ export const DIAGRAM_PAN_EXCLUSIONS = [PAN_EXCLUDE_CLASS];
 export const STICKY_PAN_EXCLUSIONS = ['sticky-note-card', 'sticky-note-handle'];
 
 interface DragState {
-  type: 'reorder' | 'message' | 'node' | 'endpoint';
+  type: 'reorder' | 'message' | 'node' | 'endpoint' | 'connect';
   participantKey: string;   // processed key of the dragged participant/node
   participantId: string;
   startX: number;
@@ -85,15 +89,15 @@ interface DragState {
   isDragging: boolean;
   currentX: number;
   currentY: number;
-  // Reorder: the participant before which to insert (null = move to end).
+  // Rubber-band start: the grabbed connect handle (message/connect drags).
+  anchorX: number;
+  anchorY: number;
+  // Reorder/node move: the participant before which to insert (null = move to end).
   targetBeforeKey: string | null;
-  // Message: the participant under the cursor (null = no target).
+  // Message/connect: the participant/node under the cursor (null = no target).
   toParticipantKey: string | null;
   toParticipantId: string | null;
   insertPosition: MessageInsertPosition | null;
-  // Flowchart node drags: 'connect' while the cursor is over another node
-  // (drop creates an edge), 'move' otherwise (drop reorders the node).
-  flowMode: 'move' | 'connect' | null;
   // Endpoint drag (sequence messages): retarget a message's origin ('from')
   // or recipient ('to') onto another participant.
   messageKey: string | null;         // processed key of the message
@@ -114,7 +118,8 @@ interface DragOverlay {
   reorderY: number | null;
   reorderX1: number;
   reorderX2: number;
-  // Message: drag line from source to cursor + horizontal insertion indicator.
+  // Message/connect: drag line from the grabbed handle to the cursor (+ a
+  // horizontal insertion indicator for sequence messages).
   // Endpoint: drag line from the fixed endpoint to the cursor.
   lineX1: number;
   lineY1: number;
@@ -386,7 +391,14 @@ export default function DiagramViewer({
   const [svgStr, setSvgStr] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [dragOverlay, setDragOverlay] = useState<DragOverlay | null>(null);
-  const [hoverLifeline, setHoverLifeline] = useState<{ x: number; y: number; participantKey: string; participantId: string } | null>(null);
+  // Hover affordances ("handles connect, body moves"): the sequence connect
+  // handle (fixed, on the lifeline just below the top actor box) for the
+  // hovered participant column, and the four connect handles for the hovered
+  // flowchart node. The cursor hint mirrors the hovered zone: crosshair on a
+  // connect handle, grab on a movable body.
+  const [hoverConnectHandle, setHoverConnectHandle] = useState<{ x: number; y: number; participantKey: string; participantId: string } | null>(null);
+  const [hoverNode, setHoverNode] = useState<ParticipantScreenInfo | null>(null);
+  const [cursorHint, setCursorHint] = useState<'grab' | 'crosshair' | null>(null);
 
   // In edit mode, dragging a participant (sequence) or a node (flowchart)
   // must not pan the screen — exclude those elements from TransformWrapper
@@ -561,29 +573,38 @@ export default function DiagramViewer({
     }
   }, [svgStr, selectedProcessedKeys, editMode, code]);
 
-  // --- Drag interactions (sequence diagrams, edit mode) -------------------
-  // Spatial separation — the drag type is determined by WHERE the mouse is,
-  // not by selection state:
-  //   - Actor box (top g[data-et="participant"], bottom rect.actor / g.actor-man)
-  //     → reorder: drag horizontally to change participant order. The space
-  //     between any two actors, before the first, and after the last are all
-  //     valid drop positions (a vertical dashed indicator shows the target).
-  //   - Lifeline (line.actor-line, or empty space within LIFELINE_HIT_THRESHOLD
-  //     px of a participant's center X, below the top actor box) → create
-  //     message: drag to another participant and release to connect. A drag
-  //     line follows the cursor and a green horizontal indicator shows the
-  //     vertical insertion point (top / between messages / bottom).
+  // --- Drag interactions (edit mode) -------------------
+  // "Handles connect, body moves" — every region of an element does exactly
+  // one thing, and every action has a visible handle. The drag type is
+  // determined by WHERE the mouse is pressed, not by selection state:
+  // Sequence diagrams:
+  //   - Connect handle (the dot shown on hover, on the lifeline just below the
+  //     top actor box) → create message: drag to another participant and
+  //     release to connect. A drag line follows the cursor and a green
+  //     horizontal indicator shows the vertical insertion point (top /
+  //     between messages / bottom). This is the ONLY way to start a message
+  //     drag, and within its grab radius it wins over endpoint grab zones —
+  //     pressing the dot must always create a message (on small renderings
+  //     the first message's tail sits close to the handle).
+  //   - Actor box (top g[data-et="participant"], bottom rect.actor /
+  //     g.actor-man) or the lifeline (line.actor-line) → reorder: drag
+  //     horizontally to change participant order. The space between any two
+  //     actors, before the first, and after the last are all valid drop
+  //     positions (a vertical dashed indicator shows the target).
   //   - Message arrow head / tail (within ENDPOINT_GRAB_RADIUS px of the
   //     endpoint — ENDPOINT_GRAB_RADIUS_SELECTED px when that message is
   //     selected) → retarget: drag the head to change the recipient, the tail
-  //     to change the origin. The unselected grab zones are small and sit on
-  //     the lifelines, so lifeline presses away from an endpoint still create
-  //     a message. Takes precedence over a lifeline press at the same point.
+  //     to change the origin. Loses to the connect handle within its grab
+  //     radius; everywhere else the zones coexist.
   // Flowchart diagrams:
-  //   - Node box (g.node) → node drag: release over another node to connect
-  //     them (a drag line follows the cursor), release over empty space to
-  //     move the node (a dashed indicator shows the insertion position along
-  //     the layout axis — horizontal for TD/BT, vertical for LR/RL).
+  //   - Connect handles (four dots shown on hover, at the node box's edge
+  //     midpoints) → create edge: drag to another node and release. A drag
+  //     line follows the cursor and a snap rect highlights the target node.
+  //     Releasing anywhere else cancels. This is the ONLY way to start an
+  //     edge drag.
+  //   - Node box (g.node) → move: drag and release over empty space to
+  //     reorder the node (a dashed indicator shows the insertion position
+  //     along the layout axis — horizontal for TD/BT, vertical for LR/RL).
 
   const getSvgAndModel = () => {
     const container = document.getElementById('diagram-container');
@@ -592,37 +613,64 @@ export default function DiagramViewer({
     return { svgRoot, model: parseModel(code) };
   };
 
+  // Hover affordances: hovering an actor column (sequence) or a node
+  // (flowchart) reveals its connect handle(s) and sets the cursor hint —
+  // crosshair on a connect handle, grab on a movable body.
   const handleContainerMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (!editMode || isVisualLocked || !isSequenceDiagram || dragRef.current?.isDragging) {
-      if (hoverLifeline) setHoverLifeline(null);
+    if (!editMode || isVisualLocked || dragRef.current?.isDragging) {
+      if (hoverConnectHandle) setHoverConnectHandle(null);
+      if (hoverNode) setHoverNode(null);
+      if (cursorHint) setCursorHint(null);
       return;
     }
     const ctx = getSvgAndModel();
-    if (!ctx || ctx.model.type !== 'sequence') return;
-    const participants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
-    const nearest = nearestParticipantAtX(participants, e.clientX);
-    if (
-      nearest &&
-      Math.abs(nearest.centerX - e.clientX) < LIFELINE_HIT_THRESHOLD &&
-      e.clientY > nearest.bottom
-    ) {
-      const svgRect = ctx.svgRoot.getBoundingClientRect();
-      if (e.clientY < svgRect.bottom) {
-        const pEl = ctx.model.elements.find(
-          e2 => e2.kind === 'participant' && (e2 as ParticipantElement).id === nearest.id
-        );
-        if (pEl) {
-          setHoverLifeline({
-            x: nearest.centerX,
-            y: e.clientY,
-            participantKey: pEl.key,
-            participantId: nearest.id,
-          });
-          return;
+    if (!ctx) return;
+
+    if (ctx.model.type === 'sequence') {
+      const participants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
+      const nearest = nearestParticipantAtX(participants, e.clientX);
+      if (nearest) {
+        const svgRect = ctx.svgRoot.getBoundingClientRect();
+        const overTopBox =
+          e.clientX >= nearest.left && e.clientX <= nearest.right &&
+          e.clientY >= nearest.top && e.clientY <= nearest.bottom;
+        const nearLifeline =
+          Math.abs(nearest.centerX - e.clientX) < LIFELINE_HIT_THRESHOLD &&
+          e.clientY > nearest.bottom &&
+          e.clientY < svgRect.bottom;
+        if (overTopBox || nearLifeline) {
+          const pEl = ctx.model.elements.find(
+            e2 => e2.kind === 'participant' && (e2 as ParticipantElement).id === nearest.id
+          );
+          if (pEl) {
+            const handle = sequenceConnectHandlePos(nearest);
+            setHoverConnectHandle({
+              x: handle.x,
+              y: handle.y,
+              participantKey: pEl.key,
+              participantId: nearest.id,
+            });
+            const nearHandle =
+              Math.hypot(handle.x - e.clientX, handle.y - e.clientY) <= CONNECT_HANDLE_GRAB_RADIUS;
+            setCursorHint(nearHandle ? 'crosshair' : 'grab');
+            return;
+          }
         }
       }
+    } else if (ctx.model.type === 'flowchart') {
+      const nodes = getNodeScreenInfo(ctx.svgRoot, ctx.model);
+      const hovered = nearestNodeAtPoint(nodes, e.clientX, e.clientY, null, NODE_HOVER_PAD);
+      if (hovered) {
+        setHoverNode(hovered);
+        const nearHandle = nearestNodeHandleAt(hovered, e.clientX, e.clientY) !== null;
+        setCursorHint(nearHandle ? 'crosshair' : 'grab');
+        return;
+      }
     }
-    if (hoverLifeline) setHoverLifeline(null);
+
+    if (hoverConnectHandle) setHoverConnectHandle(null);
+    if (hoverNode) setHoverNode(null);
+    if (cursorHint) setCursorHint(null);
   };
 
   // Capture phase: stopPropagation prevents TransformWrapper from starting a
@@ -655,14 +703,18 @@ export default function DiagramViewer({
       );
     }
 
-    let dragType: 'reorder' | 'message' | 'node' | 'endpoint' | null = null;
+    let dragType: 'reorder' | 'message' | 'node' | 'endpoint' | 'connect' | null = null;
     let participantKey: string | null = null;
     let cachedParticipants: ParticipantScreenInfo[] | null = null;
+    // Rubber-band start: the grabbed connect handle (message/connect drags).
+    let anchorX = 0;
+    let anchorY = 0;
     // Endpoint drag (sequence): grabbing a message's arrow head or tail.
     let endpointHit: { key: string; end: 'from' | 'to'; fixedX: number; fixedY: number } | null = null;
     let endpointCurrentId: string | null = null;
 
     if (ctx.model.type === 'sequence') {
+      cachedParticipants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
       endpointHit = endpointHitAt(
         getMessageEndpointScreenInfo(ctx.svgRoot, ctx.model),
         e.clientX,
@@ -677,47 +729,59 @@ export default function DiagramViewer({
       }
     }
 
-    if (endpointHit) {
-      // Precise grab zones around the endpoints win over a lifeline press at
-      // the same point; message creation keeps the rest of the lifeline.
-      dragType = 'endpoint';
-      participantKey = endpointHit.key;
-      cachedParticipants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
-    } else if (key) {
-      const el = ctx.model.elements.find(e2 => e2.key === key);
-      if (el?.kind === 'participant') {
-        // Actor box → reorder; lifeline → message.
-        const isLifeline = target.closest('line.actor-line') !== null;
-        dragType = isLifeline ? 'message' : 'reorder';
-        participantKey = key;
-      } else if (el?.kind === 'node') {
-        // Flowchart node box → node drag (connect or move).
-        dragType = 'node';
-        participantKey = key;
-      } else if (el?.kind === 'message') {
-        // Message press: select message immediately and prevent canvas pan from hijacking the click.
-        e.stopPropagation();
-        e.preventDefault();
-        onSelect(key);
-        return;
-      }
-      // Edges / notes: no drag — the click handler manages selection.
-    } else if (ctx.model.type === 'sequence') {
-      // Empty space: check proximity to a lifeline for a message drag.
-      cachedParticipants = getParticipantScreenInfo(ctx.svgRoot, ctx.model);
-      const nearest = nearestParticipantAtX(cachedParticipants, e.clientX);
-      if (
-        nearest &&
-        Math.abs(nearest.centerX - e.clientX) < LIFELINE_HIT_THRESHOLD &&
-        e.clientY > nearest.bottom // below the top actor box
-      ) {
-        const pEl = ctx.model.elements.find(
-          e2 => e2.kind === 'participant' && (e2 as ParticipantElement).id === nearest.id
-        );
-        if (pEl) {
-          dragType = 'message';
-          participantKey = pEl.key;
+    if (ctx.model.type === 'sequence') {
+      // The connect handle (the dot shown on hover, just below the top actor
+      // box) is the only way to start a message-creation drag — and it wins
+      // over endpoint grab zones that overlap it: on small renderings the
+      // first message's tail sits close to the handle, and pressing the
+      // visible dot must always create a message. Endpoints stay grabbable
+      // everywhere outside the handle's grab radius.
+      const handleHit = nearestConnectHandleAt(cachedParticipants ?? [], e.clientX, e.clientY);
+      if (handleHit) {
+        dragType = 'message';
+        participantKey = handleHit.participant.key;
+        anchorX = handleHit.handle.x;
+        anchorY = handleHit.handle.y;
+      } else if (endpointHit) {
+        // Precise grab zones around the message endpoints retarget/reorder.
+        dragType = 'endpoint';
+        participantKey = endpointHit.key;
+      } else if (key) {
+        const el = ctx.model.elements.find(e2 => e2.key === key);
+        if (el?.kind === 'participant') {
+          // Actor box or lifeline → reorder.
+          dragType = 'reorder';
+          participantKey = key;
+        } else if (el?.kind === 'message') {
+          // Message press: select message immediately and prevent canvas pan from hijacking the click.
+          e.stopPropagation();
+          e.preventDefault();
+          onSelect(key);
+          return;
         }
+        // Notes: no drag — the click handler manages selection.
+      }
+      // Empty space near a lifeline: no drag — message creation starts from
+      // the connect handle only.
+    } else {
+      // Flowchart: the connect handles (shown on hover at the node box's edge
+      // midpoints) start an edge-creation drag; the node body moves.
+      cachedParticipants = getNodeScreenInfo(ctx.svgRoot, ctx.model);
+      const hovered = nearestNodeAtPoint(cachedParticipants, e.clientX, e.clientY, null, NODE_HOVER_PAD);
+      const handleHit = hovered ? nearestNodeHandleAt(hovered, e.clientX, e.clientY) : null;
+      if (hovered && handleHit) {
+        dragType = 'connect';
+        participantKey = hovered.key;
+        anchorX = handleHit.x;
+        anchorY = handleHit.y;
+      } else if (key) {
+        const el = ctx.model.elements.find(e2 => e2.key === key);
+        if (el?.kind === 'node') {
+          // Node box → move (reorder along the layout axis).
+          dragType = 'node';
+          participantKey = key;
+        }
+        // Edges: no drag — the click handler manages selection.
       }
     }
 
@@ -753,11 +817,12 @@ export default function DiagramViewer({
       isDragging: false,
       currentX: e.clientX,
       currentY: e.clientY,
+      anchorX,
+      anchorY,
       targetBeforeKey: null,
       toParticipantKey: null,
       toParticipantId: null,
       insertPosition: null,
-      flowMode: null,
       messageKey: endpointHit ? endpointHit.key : null,
       endpointEnd: endpointHit ? endpointHit.end : null,
       endpointCurrentId,
@@ -765,7 +830,9 @@ export default function DiagramViewer({
       endpointFixedY: endpointHit ? endpointHit.fixedY : 0,
     };
     suppressClickRef.current = false;
-    setHoverLifeline(null);
+    setHoverConnectHandle(null);
+    setHoverNode(null);
+    setCursorHint(null);
 
     // Select the participant/node (or the grabbed message) on press.
     onSelect(participantKey);
@@ -892,41 +959,49 @@ export default function DiagramViewer({
       };
     }
 
+    if (drag.type === 'connect') {
+      // Edge creation (flowchart): rubber band from the grabbed connect
+      // handle to the cursor. Releasing over another node creates the edge;
+      // releasing anywhere else (empty space, the source node) cancels. The
+      // drop target is the nearest node whose padded box contains the cursor
+      // — not the first in model order.
+      const connectTarget = nearestNodeAtPoint(
+        cache.participants, drag.currentX, drag.currentY, drag.participantKey, NODE_DROP_PAD
+      );
+      drag.toParticipantKey = connectTarget ? connectTarget.key : null;
+      drag.toParticipantId = connectTarget ? connectTarget.id : null;
+      drag.insertPosition = null;
+      return {
+        type: 'message',
+        reorderX: null,
+        reorderY1: 0,
+        reorderY2: 0,
+        reorderY: null,
+        reorderX1: 0,
+        reorderX2: 0,
+        lineX1: drag.anchorX,
+        lineY1: drag.anchorY,
+        lineX2: drag.currentX,
+        lineY2: drag.currentY,
+        insertY: null,
+        insertX1: 0,
+        insertX2: 0,
+        hasTarget: connectTarget !== null,
+        targetRect: connectTarget ? {
+          left: connectTarget.left - 4,
+          top: connectTarget.top - 4,
+          width: connectTarget.right - connectTarget.left + 8,
+          height: connectTarget.bottom - connectTarget.top + 8,
+        } : null,
+      };
+    }
+
     if (drag.type === 'node') {
+      // Node move: dashed insertion indicator along the layout axis. Edge
+      // creation is only possible from a node's connect handles (drag.type
+      // 'connect'), so a body drag can never create an edge by accident.
       const axis = flowAxisOf(code);
       const cursorCoord = axis === 'x' ? drag.currentX : drag.currentY;
-      // Connect: the cursor is over another node (padded hit area).
-      const connectTarget = cache.participants.find(p =>
-        p.key !== drag.participantKey &&
-        drag.currentX >= p.left - 20 && drag.currentX <= p.right + 20 &&
-        drag.currentY >= p.top - 20 && drag.currentY <= p.bottom + 20
-      ) ?? null;
-      if (connectTarget) {
-        drag.flowMode = 'connect';
-        drag.toParticipantKey = connectTarget.key;
-        drag.toParticipantId = connectTarget.id;
-        drag.targetBeforeKey = null;
-        return {
-          type: 'message',
-          reorderX: null,
-          reorderY1: 0,
-          reorderY2: 0,
-          reorderY: null,
-          reorderX1: 0,
-          reorderX2: 0,
-          lineX1: source.centerX,
-          lineY1: source.centerY,
-          lineX2: drag.currentX,
-          lineY2: drag.currentY,
-          insertY: null,
-          insertX1: 0,
-          insertX2: 0,
-          hasTarget: true,
-          targetRect: null,
-        };
-      }
-      // Move: dashed insertion indicator along the layout axis.
-      drag.flowMode = 'move';
       drag.toParticipantKey = null;
       drag.toParticipantId = null;
       const { beforeKey, indicator } = computeReorderDrop(
@@ -970,7 +1045,8 @@ export default function DiagramViewer({
       };
     }
 
-    // Message drag: line from source to cursor + horizontal insertion indicator.
+    // Message drag (sequence): line from the grabbed connect handle to the
+    // cursor + horizontal insertion indicator.
     const target = nearestParticipantAtX(cache.participants, drag.currentX);
     const validTarget = target && target.key !== drag.participantKey ? target : null;
     drag.toParticipantKey = validTarget ? validTarget.key : null;
@@ -1008,8 +1084,9 @@ export default function DiagramViewer({
       drag.insertPosition = null;
     }
 
-    const x1 = source.centerX;
-    const y1 = source.centerY;
+    // The drag line starts where the connect handle was grabbed.
+    const x1 = drag.anchorX;
+    const y1 = drag.anchorY;
     const x2 = drag.currentX;
     const y2 = drag.currentY;
     const insX1 = validTarget ? Math.min(source.centerX, validTarget.centerX) : 0;
@@ -1063,7 +1140,8 @@ export default function DiagramViewer({
       dragRef.current = null;
       screenCacheRef.current = null;
       setDragOverlay(null);
-      setHoverLifeline(null);
+      setHoverConnectHandle(null);
+      setHoverNode(null);
       if (!drag.isDragging) {
         // A plain click: let the click handler manage selection.
         return;
@@ -1076,18 +1154,17 @@ export default function DiagramViewer({
           // handles no-ops (e.g. already at end).
           onMoveParticipant(drag.participantKey, drag.targetBeforeKey);
         }
+      } else if (drag.type === 'connect') {
+        // Released over another node: create an edge between them. Released
+        // anywhere else (empty space, the source node itself): cancel.
+        if (onCreateMessageDrag && drag.toParticipantKey) {
+          onCreateMessageDrag(drag.participantKey, drag.toParticipantKey, { type: 'bottom' });
+        }
       } else if (drag.type === 'node') {
-        if (drag.flowMode === 'connect') {
-          // Released over another node: create an edge between them.
-          if (onCreateMessageDrag && drag.toParticipantKey) {
-            onCreateMessageDrag(drag.participantKey, drag.toParticipantKey, { type: 'bottom' });
-          }
-        } else if (drag.flowMode === 'move') {
-          // Released over empty space: reorder the node. targetBeforeKey ===
-          // null means "move to end"; the transform handles no-ops.
-          if (onMoveParticipant && drag.targetBeforeKey !== undefined) {
-            onMoveParticipant(drag.participantKey, drag.targetBeforeKey);
-          }
+        // Node move: reorder the node. targetBeforeKey === null means "move
+        // to end"; the transform handles no-ops.
+        if (onMoveParticipant && drag.targetBeforeKey !== undefined) {
+          onMoveParticipant(drag.participantKey, drag.targetBeforeKey);
         }
       } else if (drag.type === 'endpoint') {
         // Retarget the message's endpoint when released over a different participant.
@@ -1173,10 +1250,15 @@ export default function DiagramViewer({
       <div
         id="diagram-container"
         className={`w-full h-full select-none ${editMode ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
+        style={cursorHint ? { cursor: cursorHint } : undefined}
         onClick={handleDiagramClick}
         onMouseDownCapture={handleMouseDownCapture}
         onMouseMove={handleContainerMouseMove}
-        onMouseLeave={() => setHoverLifeline(null)}
+        onMouseLeave={() => {
+          setHoverConnectHandle(null);
+          setHoverNode(null);
+          setCursorHint(null);
+        }}
       >
         <TransformWrapper
           panning={{ excluded: panExclusions }}
@@ -1214,22 +1296,37 @@ export default function DiagramViewer({
           </TransformComponent>
         </TransformWrapper>
       </div>
-      {hoverLifeline && !dragOverlay && (
+      {hoverConnectHandle && !dragOverlay && (
         <svg
-          data-testid="lifeline-hover-overlay"
+          data-testid="connect-handle-overlay"
           className="fixed inset-0 pointer-events-none z-30"
           style={{ width: '100vw', height: '100vh', overflow: 'visible' }}
         >
-          <circle
-            data-testid="lifeline-hover-handle"
-            cx={hoverLifeline.x}
-            cy={hoverLifeline.y}
-            r={6}
-            fill="#3b82f6"
-            stroke="#ffffff"
-            strokeWidth={2}
-            className="drop-shadow-md animate-pulse"
-          />
+          <g
+            data-testid="sequence-connect-handle"
+            transform={`translate(${hoverConnectHandle.x}, ${hoverConnectHandle.y})`}
+          >
+            <circle r={12} fill="#3b82f6" stroke="#ffffff" strokeWidth={2} className="drop-shadow-md" />
+            <path d="M -5 0 H 5 M 0 -5 V 5" stroke="#ffffff" strokeWidth={2} strokeLinecap="round" />
+          </g>
+        </svg>
+      )}
+      {hoverNode && !dragOverlay && (
+        <svg
+          data-testid="node-connect-handles-overlay"
+          className="fixed inset-0 pointer-events-none z-30"
+          style={{ width: '100vw', height: '100vh', overflow: 'visible' }}
+        >
+          {nodeConnectHandlePositions(hoverNode).map((h, i) => (
+            <g
+              key={i}
+              data-testid="node-connect-handle"
+              transform={`translate(${h.x}, ${h.y})`}
+            >
+              <circle r={7} fill="#3b82f6" stroke="#ffffff" strokeWidth={2} className="drop-shadow-md" />
+              <path d="M -3 0 H 3 M 0 -3 V 3" stroke="#ffffff" strokeWidth={1.6} strokeLinecap="round" />
+            </g>
+          ))}
         </svg>
       )}
       {selectedEndpoints && !dragOverlay && (

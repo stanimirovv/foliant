@@ -42,14 +42,18 @@ Placed directly adjacent to the **Undo / Redo** controls:
 
 ### 3.2 Lifeline Hover & Message Dragging
 1. **Hover Target**:
-   - Moving the cursor near any participant's vertical lifeline (within 20px hit radius) displays a floating circular drag handle (`●`) at the cursor Y level.
+   - Moving the cursor near any participant's vertical lifeline (within 20px hit radius) — or over its top actor box — displays a circular connect handle (`●` with a plus) at a FIXED point on the lifeline, just below the top actor box.
+   - The handle is fixed (not cursor-following) so that pressing the bare lifeline has a different, unambiguous meaning (reorder). This refines the original "handle at the cursor Y level" sketch: a cursor-following handle is always under the cursor, which made "press the lifeline" ambiguous between creating a message and reordering the participant.
+   - On small renderings the first message's tail endpoint can sit close to the handle (inside its grab radius). The handle wins over endpoint grab zones within its grab radius — pressing the visible dot must always create a message — while the endpoint stays grabbable everywhere outside it (and gets a much larger zone once its message is selected).
 2. **Dragging Action**:
-   - Pressing and dragging from the handle draws a live rubberband connection line to the cursor (`x1, y1` to `x2, y2`).
+   - Pressing and dragging from the handle draws a live rubberband connection line to the cursor (`x1, y1` to `x2, y2`); the line starts at the handle.
    - As the cursor approaches another lifeline, a magnetic snap rect highlights the target lifeline.
 3. **Drop Slot Indicator**:
    - A green horizontal indicator line (`#22c55e`, stroke-width 3) displays between the two messages where the new message will be inserted.
 4. **Insertion**:
    - Releasing the mouse commits the edit, parses syntax, auto-selects the new message in the properties panel, and triggers the rebalance animation.
+5. **Reorder from the lifeline body**:
+   - Pressing the lifeline itself (or either actor box) and dragging horizontally reorders the participant — the dashed insertion indicator shows the target. This is what makes the actor column the natural grab target for reordering without risking an accidental message.
 
 ### 3.3 Message Endpoint Retargeting & Vertical Reordering
 - **Head & Tail Handles**: The selected message displays distinct circular handles on its origin and destination.

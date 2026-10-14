@@ -182,8 +182,8 @@ export default function EditorPanel({
           </p>
           <p className="text-xs text-gray-400 dark:text-slate-500 italic mt-1">
             {diagramType === 'flowchart'
-              ? 'Drag a node onto another node to connect them, or drag it into empty space to move it.'
-              : 'Drag an actor box to reorder it, or drag between lifelines to add a message.'}
+              ? 'Drag a node into empty space to move it, or drag from a handle on its edge to connect it to another node.'
+              : 'Drag an actor box or lifeline to reorder it, or drag from the handle below the actor box to add a message.'}
           </p>
         </>
       )}
