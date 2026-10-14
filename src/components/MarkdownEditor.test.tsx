@@ -1,0 +1,173 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import MarkdownEditor from './MarkdownEditor';
+import mermaid from 'mermaid';
+
+// Both arguments stay declared (and recorded on mock.calls) so tests can
+// assert which block source was rendered.
+const renderMock = vi.fn((id: string, code: string) => ({
+  svg: `<svg data-testid="mock-mermaid-svg" data-render-id="${id}" data-code-length="${code.length}"><text>mock diagram</text></svg>`,
+}));
+
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    render: (id: string, code: string) => renderMock(id, code),
+  },
+}));
+
+const MD = `# Architecture Notes
+
+Intro prose with **bold** text.
+
+\`\`\`mermaid
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: First diagram
+\`\`\`
+
+Middle prose.
+
+\`\`\`mermaid
+flowchart TD
+    A --> B
+\`\`\`
+
+\`\`\`js
+console.log("not a diagram");
+\`\`\`
+
+Trailing prose.
+`;
+
+const renderEditor = (overrides?: Partial<Parameters<typeof MarkdownEditor>[0]>) => {
+  const props = {
+    code: MD,
+    theme: 'default' as const,
+    fileName: 'notes.md',
+    onCodeChange: vi.fn(),
+    onSelectDiagram: vi.fn(),
+    ...overrides,
+  };
+  render(<MarkdownEditor {...props} />);
+  return props;
+};
+
+describe('MarkdownEditor', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('shows the markdown source in the editor and the rendered preview (split view by default)', async () => {
+    renderEditor();
+
+    // source pane: the raw markdown (Monaco mock textarea)
+    const source = await screen.findByTestId('markdown-source-pane');
+    expect(source.querySelector('[data-testid="monaco-editor-textarea"]')).toBeTruthy();
+
+    // preview pane: rendered rich text
+    const preview = await screen.findByTestId('markdown-preview');
+    expect(within(preview).getByText('Architecture Notes').tagName).toBe('H1');
+    expect(within(preview).getByText('bold')).toBeTruthy();
+    expect(within(preview).getByText('Trailing prose.')).toBeTruthy();
+    // the non-mermaid fenced block renders as code, not as a diagram
+    expect(within(preview).getByText('console.log("not a diagram");')).toBeTruthy();
+  });
+
+  it('renders each embedded mermaid block through mermaid.render with the app theme', async () => {
+    renderEditor({ theme: 'dark' });
+
+    const svg0 = await screen.findByTestId('md-mermaid-svg-0');
+    expect(svg0.querySelector('svg')).toBeTruthy();
+    await screen.findByTestId('md-mermaid-svg-1');
+
+    expect(renderMock).toHaveBeenCalledTimes(2);
+    expect(renderMock.mock.calls[0][1]).toContain('A->>B: First diagram');
+    expect(renderMock.mock.calls[1][1]).toContain('flowchart TD');
+    // the app theme is applied (dark theme variables, like the diagram viewer)
+    expect(mermaid.initialize).toHaveBeenCalledWith(
+      expect.objectContaining({ theme: 'dark', themeVariables: expect.objectContaining({ darkMode: true }) }),
+    );
+  });
+
+  it('marks mermaid blocks with title, line range and an edit affordance', async () => {
+    renderEditor();
+
+    const block = await screen.findByTestId('md-mermaid-block-0');
+    expect(block.textContent).toContain('sequenceDiagram');
+    expect(block.textContent).toContain('Diagram 1');
+    expect(block.textContent).toContain('Click to edit');
+  });
+
+  it('selecting a mermaid block in the preview opens that diagram for editing', async () => {
+    const props = renderEditor();
+
+    const block = await screen.findByTestId('md-mermaid-block-1');
+    fireEvent.click(block);
+    expect(props.onSelectDiagram).toHaveBeenCalledWith(1);
+
+    fireEvent.click(screen.getByTestId('md-mermaid-block-0'));
+    expect(props.onSelectDiagram).toHaveBeenCalledWith(0);
+  });
+
+  it('switches between edit, split and preview modes', async () => {
+    renderEditor();
+
+    // split (default): both panes
+    expect(screen.getByTestId('markdown-source-pane')).toBeTruthy();
+    expect(screen.getByTestId('markdown-preview-pane')).toBeTruthy();
+
+    // preview only
+    fireEvent.click(screen.getByTestId('markdown-mode-preview'));
+    expect(screen.queryByTestId('markdown-source-pane')).toBeNull();
+    expect(screen.getByTestId('markdown-preview-pane')).toBeTruthy();
+
+    // edit only
+    fireEvent.click(screen.getByTestId('markdown-mode-edit'));
+    expect(screen.getByTestId('markdown-source-pane')).toBeTruthy();
+    expect(screen.queryByTestId('markdown-preview-pane')).toBeNull();
+
+    // back to split
+    fireEvent.click(screen.getByTestId('markdown-mode-split'));
+    expect(screen.getByTestId('markdown-source-pane')).toBeTruthy();
+    expect(screen.getByTestId('markdown-preview-pane')).toBeTruthy();
+  });
+
+  it('reports source edits through onCodeChange', async () => {
+    const props = renderEditor();
+
+    const textarea = await screen.findByTestId('monaco-editor-textarea');
+    fireEvent.change(textarea, { target: { value: '# Changed\n' } });
+    expect(props.onCodeChange).toHaveBeenCalledWith('# Changed\n');
+  });
+
+  it('shows the raw source with an error note when a mermaid block fails to render', async () => {
+    renderMock.mockImplementationOnce(() => {
+      throw new Error('Parse error on line 2');
+    });
+    renderEditor();
+
+    const error = await screen.findByTestId('md-mermaid-error-0');
+    expect(error.textContent).toContain('Parse error on line 2');
+    expect(error.textContent).toContain('A->>B: First diagram');
+    // the other block still renders
+    await screen.findByTestId('md-mermaid-svg-1');
+  });
+
+  it('shows an empty-diagram hint for a mermaid block without content', async () => {
+    renderEditor({ code: '```mermaid\n```\n' });
+    const empty = await screen.findByTestId('md-mermaid-empty-0');
+    expect(empty.textContent).toContain('empty diagram');
+    expect(renderMock).not.toHaveBeenCalled();
+  });
+
+  it('shows an empty-file note when the document has no content', () => {
+    renderEditor({ code: '' });
+    expect(screen.getByTestId('markdown-preview').textContent).toContain('(empty file)');
+  });
+});

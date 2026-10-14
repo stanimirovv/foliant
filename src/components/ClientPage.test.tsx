@@ -135,6 +135,39 @@ vi.mock('./DiagramViewer', () => ({
   ),
 }));
 
+// The MarkdownEditor stub records the document it received and lets tests
+// drive text edits (onCodeChange) and diagram selection (onSelectDiagram).
+vi.mock('./MarkdownEditor', () => ({
+  __esModule: true,
+  default: (props: {
+    code: string;
+    fileName: string;
+    onCodeChange: (newCode: string) => void;
+    onSelectDiagram: (index: number) => void;
+  }) => (
+    <div
+      data-testid="markdown-editor"
+      data-code={props.code}
+      data-file={props.fileName}
+    >
+      <textarea
+        data-testid="markdown-editor-source"
+        value={props.code}
+        onChange={(e) => props.onCodeChange(e.target.value)}
+      />
+      {[0, 1].map(i => (
+        <button
+          key={i}
+          data-testid={`markdown-select-diagram-${i}`}
+          onClick={() => props.onSelectDiagram(i)}
+        >
+          select diagram {i}
+        </button>
+      ))}
+    </div>
+  ),
+}));
+
 global.fetch = vi.fn();
 
 // Stateful file mock: POST persists the body (like the real API) and GET
@@ -2336,18 +2369,106 @@ sequenceDiagram
       });
     });
 
-    it('shows a placeholder when a markdown file is selected without a diagram', async () => {
+    // A markdown file selected without a diagram opens the whole document in
+    // the rich markdown editor: GET /api/file/<name> returns the full content,
+    // and POST /api/file/<name> writes it back (whole-file save).
+    const MD_DOC = [
+      '# Notes',
+      '',
+      'Some prose.',
+      '',
+      '```mermaid',
+      'sequenceDiagram',
+      '    A->>B: First',
+      '```',
+      '',
+    ].join('\n');
+
+    const mockMarkdownDocFetch = (doc: string) => {
+      const mockFetch = global.fetch as import('vitest').Mock;
+      const filePosts: string[] = [];
+      mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
+        const u = String(url);
+        if (init?.method === 'POST' && u.startsWith('/api/file/notes.md')) {
+          filePosts.push(JSON.parse(init.body ?? '{}').content ?? '');
+          return { ok: true, json: async () => ({}) };
+        }
+        if (u.startsWith('/api/markdown/diagrams')) {
+          return {
+            ok: true,
+            json: async () => ({
+              file: 'notes.md',
+              diagrams: [{ index: 0, title: 'sequenceDiagram', startLine: 5, endLine: 7 }],
+            }),
+          };
+        }
+        if (u.startsWith('/api/files')) {
+          return { ok: true, json: async () => ({ files: ['demo.mmd'], markdownFiles: ['notes.md'] }) };
+        }
+        if (u.startsWith('/api/file/notes.md')) {
+          return { ok: true, json: async () => ({ content: doc }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+      return { filePosts };
+    };
+
+    it('opens a markdown file in the rich markdown editor (whole document loaded)', async () => {
       mockParams({ file: 'notes.md' });
-      mockMarkdownFetch();
+      mockMarkdownDocFetch(MD_DOC);
       render(<ClientPage />);
 
-      const placeholder = await screen.findByTestId('markdown-placeholder');
-      expect(placeholder.textContent).toContain('notes.md');
-      expect(placeholder.textContent).toContain('Select one of its mermaid diagrams');
+      const editor = await screen.findByTestId('markdown-editor');
+      await waitFor(() => {
+        expect(editor.getAttribute('data-code')).toBe(MD_DOC);
+      });
+      expect(editor.getAttribute('data-file')).toBe('notes.md');
       expect(screen.queryByTestId('diagram-viewer')).toBeNull();
-      // no diagram content is fetched for the placeholder
+      // the whole file is loaded; no embedded diagram block is fetched
       const mockFetch = global.fetch as import('vitest').Mock;
+      expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/file/notes.md'))).toBe(true);
       expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/markdown/diagram?'))).toBe(false);
+      // the toolbar shows the markdown file badge instead of the diagram search
+      expect(screen.getByTestId('markdown-file-badge').textContent).toContain('notes.md');
+      expect(screen.queryByPlaceholderText('Search diagram...')).toBeNull();
+    });
+
+    it('auto-saves markdown edits to the .md file (whole-file POST)', async () => {
+      mockParams({ file: 'notes.md' });
+      const { filePosts } = mockMarkdownDocFetch(MD_DOC);
+      render(<ClientPage />);
+
+      const editor = await screen.findByTestId('markdown-editor');
+      await waitFor(() => {
+        expect(editor.getAttribute('data-code')).toBe(MD_DOC);
+      });
+
+      const edited = `${MD_DOC}More prose.\n`;
+      fireEvent.change(screen.getByTestId('markdown-editor-source'), { target: { value: edited } });
+
+      // the debounced auto-save writes the whole markdown file
+      await waitFor(() => {
+        expect(filePosts.length).toBeGreaterThan(0);
+      }, { timeout: 5000 });
+      expect(filePosts[0]).toBe(edited);
+      await waitFor(() => {
+        expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+      }, { timeout: 5000 });
+    }, 10000);
+
+    it('selecting a diagram in the markdown editor opens that diagram for editing', async () => {
+      mockParams({ file: 'notes.md' });
+      mockMarkdownDocFetch(MD_DOC);
+      render(<ClientPage />);
+
+      await screen.findByTestId('markdown-editor');
+      mockReplace.mockClear();
+      fireEvent.click(screen.getByTestId('markdown-select-diagram-1'));
+      await waitFor(() => {
+        const url = mockReplace.mock.calls.at(-1)?.[0] as string;
+        expect(url).toContain('file=notes.md');
+        expect(url).toContain('diagram=1');
+      });
     });
 
     it('clicking a markdown file clears the diagram param', async () => {

@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
+import MarkdownEditor from './MarkdownEditor';
 import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
@@ -190,13 +191,14 @@ export default function ClientPage() {
   const dirParam = searchParams.get('dir') || '';
 
   // A markdown file selected with a `diagram` index opens that embedded
-  // diagram (0-based among the ```mermaid blocks of the file) instead of the
-  // file itself; a markdown file without the index shows a placeholder.
+  // diagram (0-based among the ```mermaid blocks of the file) in the diagram
+  // editor; a markdown file without the index opens the whole document in the
+  // rich markdown editor (MarkdownEditor).
   const diagramParam = searchParams.get('diagram');
   const diagramIndex = diagramParam !== null && /^\d+$/.test(diagramParam) ? parseInt(diagramParam, 10) : null;
   const isMarkdownFile = Boolean(currentFile && /\.(md|markdown)$/i.test(currentFile));
   const isEmbeddedDiagram = Boolean(isMarkdownFile && diagramIndex !== null);
-  const isMarkdownPlaceholder = Boolean(isMarkdownFile && diagramIndex === null);
+  const isMarkdownDoc = Boolean(isMarkdownFile && diagramIndex === null);
   
   const [customDirInput, setCustomDirInput] = useState(dirParam);
   const [recentDirs, setRecentDirs] = useState<string[]>([]);
@@ -240,8 +242,8 @@ export default function ClientPage() {
     }
   };
 
-  // Select a markdown file (no diagram -> placeholder) or one of its embedded
-  // diagrams (?file=notes.md&diagram=N).
+  // Select a markdown file (no diagram -> the rich markdown editor) or one of
+  // its embedded diagrams (?file=notes.md&diagram=N).
   const selectMarkdownFile = (filename: string) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set('file', filename);
@@ -519,16 +521,10 @@ export default function ClientPage() {
 
   useEffect(() => {
     if (currentFile) {
-      if (isMarkdownPlaceholder) {
-        // A markdown file without a diagram selection: there is nothing to
-        // edit; the main area shows a placeholder.
-        lastWrittenRef.current = '';
-        rawCodeFileRef.current = currentFile;
-        rawCodeDiagramRef.current = null;
-        setRawCode('');
-      } else {
-        loadFile(currentFile, diagramIndex);
-      }
+      // A markdown file without a diagram selection loads the whole document
+      // into the rich markdown editor; a diagram selection loads just that
+      // embedded block.
+      loadFile(currentFile, diagramIndex);
       setSelection(null);
       setPendingDelete(null);
     } else {
@@ -550,14 +546,13 @@ export default function ClientPage() {
     }
     setChangedLines([]);
     setSourceValidationError(null);
-  }, [currentFile, diagramIndex, isMarkdownPlaceholder, loadFile]);
+  }, [currentFile, diagramIndex, loadFile]);
 
   useEffect(() => {
     const evtSource = new EventSource(`/api/events${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
     evtSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (!currentFile || data.file !== currentFile) return;
-      if (isMarkdownPlaceholder) return; // no diagram loaded: nothing to reload
       // Refetch and route through the last-written comparison (Section 4.10):
       // identical content is our own write echoed back — ignore it; anything
       // else is an external change — adopt it, do not clobber it.
@@ -572,7 +567,7 @@ export default function ClientPage() {
       });
     };
     return () => evtSource.close();
-  }, [currentFile, fetchCurrentContent, dirParam, diagramIndex, isMarkdownPlaceholder]);
+  }, [currentFile, fetchCurrentContent, dirParam, diagramIndex]);
 
   // The "Reloaded from disk" notice auto-dismisses.
   useEffect(() => {
@@ -601,12 +596,13 @@ export default function ClientPage() {
   // belongs to another file (a switch discarded it), or when it is already
   // the last successfully written content (initial load, own SSE echo, or an
   // undo back to the saved state). Diagrams embedded in a markdown file save
-  // through the background job queue instead of a direct POST.
+  // through the background job queue instead of a direct POST; a markdown
+  // document selected without a diagram saves the whole file with a direct
+  // POST.
   useEffect(() => {
     if (!currentFile) return;
     if (rawCodeFileRef.current !== currentFile) return;
     if (rawCode === lastWrittenRef.current) return;
-    if (isMarkdownPlaceholder) return;
     setSaveStatus('saving');
     setSaveConflict(null);
     const seq = ++saveSeqRef.current;
@@ -652,7 +648,7 @@ export default function ClientPage() {
       }
     }, 800);
     return () => clearTimeout(timer);
-  }, [rawCode, currentFile, postFile, isEmbeddedDiagram, isMarkdownPlaceholder, diagramIndex, saveEmbeddedDiagram, fetchCurrentContent]);
+  }, [rawCode, currentFile, postFile, isEmbeddedDiagram, diagramIndex, saveEmbeddedDiagram, fetchCurrentContent]);
 
   const regionRoots = useMemo(() => extractRegions(debouncedCode), [debouncedCode]);
 
@@ -732,7 +728,9 @@ export default function ClientPage() {
   const editSupported = rawModel.type !== 'unknown';  // R-01: sequence + flowchart only
   // Edit mode is ON by default when a diagram is opened; `edit=0` opts out
   // (the toolbar toggle flips between the two). `edit=1` still works.
-  const editMode = editSupported && searchParams.get('edit') !== '0';
+  // A markdown document is never in diagram edit mode — its mermaid blocks are
+  // edited by selecting them (which opens the diagram editor).
+  const editMode = !isMarkdownDoc && editSupported && searchParams.get('edit') !== '0';
   const isVisualLocked = editMode && editModeKind === 'code';
 
   const selectionMap = useMemo(
@@ -946,6 +944,12 @@ export default function ClientPage() {
       setSourceValidationError(msg);
     }
   }, [rawCode, actorOptions, hiddenPaths, commitEdit, updateChangedLines]);
+
+  // Markdown source edits (MarkdownEditor): no diagram validation — the text
+  // is saved as-is through the regular auto-save path.
+  const handleMarkdownChange = useCallback((newCode: string) => {
+    setRawCode(newCode);
+  }, []);
 
   const applyEditResult = (result: EditResult) => {
     if (result.warning) {
@@ -1794,6 +1798,16 @@ export default function ClientPage() {
           isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
         }`}>
           <div className="flex items-center space-x-2">
+            {isMarkdownDoc ? (
+              <span
+                data-testid="markdown-file-badge"
+                className={`flex items-center space-x-1.5 px-2 py-1 text-xs rounded border ${isDark ? 'border-slate-700 text-slate-200 bg-slate-800/60' : 'border-gray-200 text-gray-700 bg-gray-50'}`}
+              >
+                <FileText size={13} />
+                <span className="font-medium">{currentFile}</span>
+              </span>
+            ) : (
+            <>
             <div className="relative w-64">
               <Search className={`absolute left-2 top-1/2 -translate-y-1/2 ${isDark ? 'text-slate-400' : 'text-gray-400'}`} size={16} />
               <input
@@ -1828,6 +1842,8 @@ export default function ClientPage() {
             >
               <Pencil size={16} />
             </button>
+            </>
+            )}
             {editMode && (
               <>
                 <button
@@ -1962,6 +1978,7 @@ export default function ClientPage() {
                 </button>
               </>
             )}
+            {!isMarkdownDoc && (
             <button
               onClick={handleExportSvg}
               disabled={!rawCode}
@@ -1976,6 +1993,7 @@ export default function ClientPage() {
               <Download size={14} />
               <span>Export SVG</span>
             </button>
+            )}
           </div>
           <div className="flex items-center space-x-3">
             {isEmbeddedDiagram && diagramIndex !== null && (
@@ -2051,17 +2069,16 @@ export default function ClientPage() {
 
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 p-4 overflow-hidden relative min-w-0">
-            {isMarkdownPlaceholder ? (
-              <div
-                data-testid="markdown-placeholder"
-                className={`h-full flex flex-col items-center justify-center text-center space-y-2 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}
-              >
-                <FileText size={32} className="opacity-40" />
-                <p className="text-sm font-medium">{currentFile}</p>
-                <p className="text-xs opacity-70 max-w-xs">
-                  This is a markdown file. Select one of its mermaid diagrams in the Files menu to view and edit it — the markdown text itself is not edited here.
-                </p>
-              </div>
+            {isMarkdownDoc ? (
+              <MarkdownEditor
+                code={rawCode}
+                theme={theme}
+                fileName={currentFile ?? ''}
+                onCodeChange={handleMarkdownChange}
+                onSelectDiagram={(index) => {
+                  if (currentFile) selectMarkdownDiagram(currentFile, index);
+                }}
+              />
             ) : (
               <DiagramViewer
                 code={processedCode}
@@ -2083,7 +2100,7 @@ export default function ClientPage() {
                 onDeleteNote={handleDeleteNote}
               />
             )}
-            {!isVisualLocked && !isMarkdownPlaceholder && (
+            {!isVisualLocked && !isMarkdownDoc && (
               <BottomAnimatedArrowBar
                 currentAnimation={selectedArrowStyle?.animation}
                 currentColor={selectedArrowStyle?.color}

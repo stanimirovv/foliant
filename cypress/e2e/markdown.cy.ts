@@ -82,10 +82,11 @@ describe('Markdown embedded diagrams (e2e)', () => {
         cy.get('[data-testid="md-diagram-notes.md-0"]').should('be.visible').and('contain.text', 'Diagram 1');
         cy.get('[data-testid="md-diagram-notes.md-1"]').should('be.visible').and('contain.text', 'Diagram 2');
 
-        // with no .mmd files the first .md file is auto-selected: placeholder
-        cy.get('[data-testid="markdown-placeholder"]', { timeout: 10000 })
-          .should('be.visible')
-          .and('contain.text', 'notes.md');
+        // with no .mmd files the first .md file is auto-selected: the rich
+        // markdown editor opens on the whole document
+        cy.get('[data-testid="markdown-editor"]', { timeout: 10000 })
+          .should('be.visible');
+        cy.get('[data-testid="markdown-file-badge"]').should('contain.text', 'notes.md');
 
         // select the second embedded diagram
         cy.get('[data-testid="md-diagram-notes.md-1"]').click();
@@ -100,6 +101,42 @@ describe('Markdown embedded diagrams (e2e)', () => {
         cy.url().should('include', 'diagram=0');
         cy.get('#diagram-container').contains('First diagram').should('exist');
         cy.get('#diagram-container').contains('Second diagram').should('not.exist');
+      });
+  });
+
+  it('visualizes the markdown document and opens a diagram by selecting it in the preview', () => {
+    let dir = '';
+    cy.task<string>('createTempDiagramDir')
+      .then(d => {
+        dir = d;
+        return cy.request('POST', mdFileApi('notes.md', dir), { content: MD_CONTENT });
+      })
+      .then(() => {
+        cy.visit(mdAppUrl(dir, { file: 'notes.md' }));
+
+        // the rich markdown editor shows the whole document
+        cy.get('[data-testid="markdown-editor"]', { timeout: 10000 }).should('be.visible');
+        cy.get('[data-testid="markdown-file-badge"]').should('contain.text', 'notes.md');
+
+        // prose renders as rich text
+        const preview = cy.get('[data-testid="markdown-preview"]');
+        preview.contains('Architecture Notes').should('exist');
+        preview.contains('bold').should('exist');
+        // the non-mermaid fenced block renders as code
+        preview.contains('console.log("not a diagram")').should('exist');
+
+        // both embedded mermaid diagrams render as SVGs
+        cy.get('[data-testid="md-mermaid-svg-0"] svg', { timeout: 10000 }).should('exist');
+        cy.get('[data-testid="md-mermaid-svg-1"] svg', { timeout: 10000 }).should('exist');
+
+        // selecting a diagram in the preview opens it in the diagram editor
+        // (the same select-to-edit flow as the Files menu)
+        cy.get('[data-testid="md-mermaid-block-1"]').click();
+        cy.url().should('include', 'file=notes.md');
+        cy.url().should('include', 'diagram=1');
+        cy.get('#diagram-container svg').should('exist');
+        cy.get('#diagram-container').contains('Second diagram').should('exist');
+        cy.get('[data-testid="embedded-diagram-badge"]').should('contain.text', 'Diagram 2');
       });
   });
 
