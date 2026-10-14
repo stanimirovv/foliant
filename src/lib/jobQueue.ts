@@ -77,8 +77,12 @@ export function createJobQueue(maxRecords: number = DEFAULT_MAX_RECORDS): JobQue
         } catch (err) {
           record.status = 'failed';
           record.error = err instanceof Error ? err.message : String(err);
-          if (err instanceof JobError) {
-            record.code = err.code;
+          // Duck-type on `code` instead of `instanceof JobError`: in Next.js
+          // dev each route is its own bundle, so the JobError class that threw
+          // (save route) can differ from the one referenced here (the bundle
+          // that created the shared queue).
+          if (err && typeof err === 'object' && typeof (err as { code?: unknown }).code === 'string') {
+            record.code = (err as { code: string }).code;
           }
         }
         record.updatedAt = Date.now();
@@ -98,5 +102,12 @@ export function createJobQueue(maxRecords: number = DEFAULT_MAX_RECORDS): JobQue
   };
 }
 
-// Shared queue for the API routes.
-export const defaultJobQueue = createJobQueue();
+// Shared queue for the API routes. Kept on globalThis so every route bundle
+// shares one instance: Next.js dev compiles each route into its own bundle,
+// and per-bundle module state would give the save route and the job-poll
+// route two different queues (the first job after a cold start would 404
+// until both bundles happened to share a chunk).
+const GLOBAL_KEY = '__mermaidSequenceViewerJobQueue__';
+const globalStore = globalThis as typeof globalThis & { [GLOBAL_KEY]?: JobQueue };
+export const defaultJobQueue: JobQueue =
+  globalStore[GLOBAL_KEY] ?? (globalStore[GLOBAL_KEY] = createJobQueue());

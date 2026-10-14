@@ -118,12 +118,12 @@ describe('Markdown embedded diagrams (e2e)', () => {
         cy.get('[data-testid="markdown-editor"]', { timeout: 10000 }).should('be.visible');
         cy.get('[data-testid="markdown-file-badge"]').should('contain.text', 'notes.md');
 
-        // prose renders as rich text
-        const preview = cy.get('[data-testid="markdown-preview"]');
-        preview.contains('Architecture Notes').should('exist');
-        preview.contains('bold').should('exist');
+        // prose renders as rich text (retry-safe assertions: the preview
+        // re-renders asynchronously while the mermaid blocks mount)
+        cy.get('[data-testid="markdown-preview"]', { timeout: 10000 }).should('contain.text', 'Architecture Notes');
+        cy.get('[data-testid="markdown-preview"]').should('contain.text', 'bold');
         // the non-mermaid fenced block renders as code
-        preview.contains('console.log("not a diagram")').should('exist');
+        cy.get('[data-testid="markdown-preview"]').should('contain.text', 'console.log("not a diagram")');
 
         // both embedded mermaid diagrams render as SVGs
         cy.get('[data-testid="md-mermaid-svg-0"] svg', { timeout: 10000 }).should('exist');
@@ -137,6 +137,46 @@ describe('Markdown embedded diagrams (e2e)', () => {
         cy.get('#diagram-container svg').should('exist');
         cy.get('#diagram-container').contains('Second diagram').should('exist');
         cy.get('[data-testid="embedded-diagram-badge"]').should('contain.text', 'Diagram 2');
+      });
+  });
+
+  it('keeps the last good render when a diagram becomes invalid, and leaks no stray error diagrams', () => {
+    let dir = '';
+    cy.task<string>('createTempDiagramDir')
+      .then(d => {
+        dir = d;
+        return cy.request('POST', mdFileApi('notes.md', dir), { content: MD_CONTENT });
+      })
+      .then(() => {
+        cy.visit(mdAppUrl(dir, { file: 'notes.md' }));
+
+        // both diagrams render
+        cy.get('[data-testid="md-mermaid-svg-0"] svg', { timeout: 10000 }).should('exist');
+        cy.get('[data-testid="md-mermaid-svg-1"] svg', { timeout: 10000 }).should('exist');
+        cy.get('[data-testid="md-mermaid-error-chip-0"]').should('not.exist');
+
+        // the file changes on disk to an invalid diagram (SSE reload, like
+        // a transient state while typing): the last good render stays on
+        // screen, marked with a syntax-error chip — no destructive error
+        // box, and no stray mermaid error diagram leaked into the page
+        const broken = MD_CONTENT.replace(
+          'sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: First diagram',
+          'this is not a diagram',
+        );
+        return cy.request('POST', mdFileApi('notes.md', dir), { content: broken }).then(() => {
+          cy.get('[data-testid="md-mermaid-error-chip-0"]', { timeout: 10000 }).should('contain.text', 'Syntax error');
+          cy.get('[data-testid="md-mermaid-svg-0"] svg').should('exist');
+          cy.get('[data-testid="md-mermaid-error-0"]').should('not.exist');
+          cy.get('body').then($body => {
+            expect($body.find('div[id^="dmd-mermaid-"]').length).to.eq(0);
+          });
+
+          // the file recovers: the chip clears and the diagram re-renders
+          return cy.request('POST', mdFileApi('notes.md', dir), { content: MD_CONTENT });
+        }).then(() => {
+          cy.get('[data-testid="md-mermaid-error-chip-0"]', { timeout: 10000 }).should('not.exist');
+          cy.get('[data-testid="md-mermaid-svg-0"] svg').should('exist');
+        });
       });
   });
 

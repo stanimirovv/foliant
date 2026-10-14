@@ -12,9 +12,13 @@ const dirs = new Map<string, DirState>();
 function getOrCreateDirState(dir: string): DirState {
   if (!dirs.has(dir)) {
     const clients = new Set<ReadableStreamDefaultController>();
-    const watcher = chokidar.watch(['*.mmd', '*.md', '*.markdown'], { cwd: dir, ignoreInitial: true });
-    
+    // chokidar v4+ removed glob support: watching ['*.mmd', '*.md', ...] would
+    // watch literal files with those names and never fire. Watch the
+    // directory's top level instead and filter by extension here.
+    const watcher = chokidar.watch('.', { cwd: dir, ignoreInitial: true, depth: 0 });
+
     watcher.on('all', (event: string, file: string) => {
+      if (!/\.(mmd|md|markdown)$/i.test(file)) return;
       const data = `data: ${JSON.stringify({ event, file })}\n\n`;
       clients.forEach(client => {
         try {

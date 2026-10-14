@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import MarkdownEditor from './MarkdownEditor';
 import mermaid from 'mermaid';
 
 // Both arguments stay declared (and recorded on mock.calls) so tests can
 // assert which block source was rendered.
-const renderMock = vi.fn((id: string, code: string) => ({
+const baseRender = (id: string, code: string) => ({
   svg: `<svg data-testid="mock-mermaid-svg" data-render-id="${id}" data-code-length="${code.length}"><text>mock diagram</text></svg>`,
-}));
+});
+const renderMock = vi.fn(baseRender);
 
 vi.mock('mermaid', () => ({
   default: {
@@ -50,8 +51,8 @@ const renderEditor = (overrides?: Partial<Parameters<typeof MarkdownEditor>[0]>)
     onSelectDiagram: vi.fn(),
     ...overrides,
   };
-  render(<MarkdownEditor {...props} />);
-  return props;
+  const result = render(<MarkdownEditor {...props} />);
+  return { props, ...result };
 };
 
 describe('MarkdownEditor', () => {
@@ -61,6 +62,7 @@ describe('MarkdownEditor', () => {
   });
   afterEach(() => {
     cleanup();
+    renderMock.mockImplementation(baseRender);
   });
 
   it('shows the markdown source in the editor and the rendered preview (split view by default)', async () => {
@@ -105,7 +107,7 @@ describe('MarkdownEditor', () => {
   });
 
   it('selecting a mermaid block in the preview opens that diagram for editing', async () => {
-    const props = renderEditor();
+    const { props } = renderEditor();
 
     const block = await screen.findByTestId('md-mermaid-block-1');
     fireEvent.click(block);
@@ -139,7 +141,7 @@ describe('MarkdownEditor', () => {
   });
 
   it('reports source edits through onCodeChange', async () => {
-    const props = renderEditor();
+    const { props } = renderEditor();
 
     const textarea = await screen.findByTestId('monaco-editor-textarea');
     fireEvent.change(textarea, { target: { value: '# Changed\n' } });
@@ -157,6 +159,53 @@ describe('MarkdownEditor', () => {
     expect(error.textContent).toContain('A->>B: First diagram');
     // the other block still renders
     await screen.findByTestId('md-mermaid-svg-1');
+  });
+
+  it('keeps the last good render with a syntax-error chip when a block becomes invalid, and recovers', async () => {
+    renderMock.mockImplementation((id: string, code: string) => {
+      if (code.includes('this is not a diagram')) {
+        throw new Error('No diagram type detected matching given configuration');
+      }
+      return baseRender(id, code);
+    });
+    const { props, rerender } = renderEditor();
+
+    // initial good render
+    await screen.findByTestId('md-mermaid-svg-0');
+    expect(screen.queryByTestId('md-mermaid-error-chip-0')).toBeNull();
+
+    // the block becomes invalid (e.g. mid-typing): the last good render
+    // stays on screen and a small chip marks the syntax error — the diagram
+    // is not replaced by a destructive error box
+    rerender(<MarkdownEditor {...props} code={MD.replace('sequenceDiagram', 'this is not a diagram')} />);
+    const chip = await screen.findByTestId('md-mermaid-error-chip-0');
+    expect(chip.textContent).toContain('Syntax error');
+    expect(chip.title).toContain('No diagram type detected');
+    expect(screen.getByTestId('md-mermaid-svg-0')).toBeTruthy();
+    expect(screen.queryByTestId('md-mermaid-error-0')).toBeNull();
+
+    // the block becomes valid again: the chip clears and the diagram re-renders
+    rerender(<MarkdownEditor {...props} code={MD} />);
+    await waitFor(() => {
+      expect(screen.queryByTestId('md-mermaid-error-chip-0')).toBeNull();
+    });
+    expect(screen.getByTestId('md-mermaid-svg-0')).toBeTruthy();
+  });
+
+  it('removes the temp element mermaid leaves in the DOM when a render fails', async () => {
+    renderMock.mockImplementation((id: string) => {
+      // mermaid 12 appends its temp element (#d<id>) to document.body and
+      // only removes it on success — simulate the leak, then fail.
+      const leak = document.createElement('div');
+      leak.id = `d${id}`;
+      leak.textContent = 'leaked error diagram';
+      document.body.appendChild(leak);
+      throw new Error('Parse error on line 1');
+    });
+    renderEditor({ code: '```mermaid\nthis is not a diagram\n```\n' });
+
+    await screen.findByTestId('md-mermaid-error-0');
+    expect(document.querySelector('div[id^="dmd-mermaid-"]')).toBeNull();
   });
 
   it('shows an empty-diagram hint for a mermaid block without content', async () => {

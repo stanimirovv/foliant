@@ -410,6 +410,19 @@ body {
 
 .markdown-body .md-mermaid-block-bar > :first-child { flex: 1; min-width: 0; }
 
+.markdown-body .md-mermaid-error-chip {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  border-radius: 9999px;
+  padding: 0.1em 0.6em;
+  cursor: help;
+  white-space: nowrap;
+}
+
 .markdown-body .md-mermaid-edit-chip {
   display: inline-flex;
   align-items: center;
@@ -478,6 +491,7 @@ body {
 .theme-dark .markdown-body .md-mermaid-block-bar { border-color: #334155; }
 .theme-dark .markdown-body .md-mermaid-error-message { color: #f87171; }
 .theme-dark .markdown-body .md-mermaid-error-source { background: rgba(127, 29, 29, 0.25); border-color: #7f1d1d; color: #fecaca; }
+.theme-dark .markdown-body .md-mermaid-error-chip { color: #f87171; background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.4); }
 
 /* Default Mermaid Actor styling for Dark Mode to match main blue and dark background */
 .theme-dark rect.actor:not([data-colored="true"]) {

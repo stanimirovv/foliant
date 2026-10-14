@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 import { Pencil } from 'lucide-react';
 
@@ -21,6 +21,13 @@ export interface MermaidBlockPreviewProps {
 // the Files menu), which opens it in the diagram editor. Render is debounced
 // so typing in the markdown source does not re-render the SVG on every
 // keystroke.
+//
+// Failure handling: while the user types, a block is often transiently
+// invalid mermaid. A failed render therefore never replaces the diagram —
+// the last successful render stays on screen with a small syntax-error chip
+// (the error message is on the chip's tooltip). Only a block that has NEVER
+// rendered successfully shows the full error box with the raw source, so a
+// genuinely broken block is still diagnosable.
 export default function MermaidBlockPreview({
   content,
   index,
@@ -32,6 +39,8 @@ export default function MermaidBlockPreview({
 }: MermaidBlockPreviewProps) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Last successful render for the current block, kept across failed renders.
+  const lastGoodRef = useRef<string | null>(null);
 
   const isDark = theme === 'dark';
   const isEmpty = content.trim().length === 0;
@@ -74,23 +83,35 @@ export default function MermaidBlockPreview({
     if (isEmpty) {
       setSvg(null);
       setError(null);
+      lastGoodRef.current = null;
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
       (async () => {
+        const id = `md-mermaid-${index}-${Math.random().toString(36).substr(2, 9)}`;
         try {
-          const id = `md-mermaid-${index}-${Math.random().toString(36).substr(2, 9)}`;
           const { svg } = await mermaid.render(id, content);
-          if (!cancelled) {
-            setSvg(svg);
-            setError(null);
-          }
+          if (cancelled) return;
+          lastGoodRef.current = svg;
+          setSvg(svg);
+          setError(null);
         } catch (err: unknown) {
-          if (!cancelled) {
-            setSvg(null);
-            setError(err instanceof Error ? err.message : String(err));
+          // mermaid 12 renders parse failures into a temp element
+          // (#d<id>, appended to document.body) and only removes it on
+          // success — remove it here so failed renders during typing do
+          // not accumulate stray error diagrams on the page.
+          if (typeof document !== 'undefined') {
+            document.getElementById(`d${id}`)?.remove();
           }
+          if (cancelled) return;
+          setError(err instanceof Error ? err.message : String(err));
+          if (!lastGoodRef.current) {
+            // Never rendered successfully: drop the diagram so the error
+            // box (with the raw source) is shown instead.
+            setSvg(null);
+          }
+          // Otherwise keep `svg` (the last good render) on screen.
         }
       })();
     }, 250);
@@ -99,6 +120,10 @@ export default function MermaidBlockPreview({
       clearTimeout(timer);
     };
   }, [content, index, theme, isEmpty]);
+
+  // A block that has never rendered successfully gets the full error box;
+  // a transient failure keeps the last good render with a small chip.
+  const showErrorBox = error !== null && lastGoodRef.current === null;
 
   return (
     <div
@@ -114,6 +139,15 @@ export default function MermaidBlockPreview({
       >
         <span className="font-medium truncate">{title}</span>
         <span className="flex-shrink-0">Diagram {index + 1} · lines {startLine}–{endLine}</span>
+        {error !== null && (
+          <span
+            data-testid={`md-mermaid-error-chip-${index}`}
+            className="md-mermaid-error-chip"
+            title={error}
+          >
+            Syntax error{lastGoodRef.current !== null ? ' — showing the last successful render' : ''}
+          </span>
+        )}
         <span
           className={`md-mermaid-edit-chip ${isDark ? 'text-blue-300' : 'text-blue-600'}`}
         >
@@ -128,7 +162,7 @@ export default function MermaidBlockPreview({
         >
           (empty diagram)
         </div>
-      ) : error ? (
+      ) : showErrorBox ? (
         <div data-testid={`md-mermaid-error-${index}`} className="md-mermaid-error">
           <p className="md-mermaid-error-message">Diagram failed to render: {error}</p>
           <pre className="md-mermaid-error-source">{content}</pre>
