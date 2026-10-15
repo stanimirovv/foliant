@@ -1117,7 +1117,7 @@ export default function DiagramViewer({
     // Message drag (sequence): line from the grabbed connect handle to the
     // cursor + horizontal insertion indicator.
     const target = nearestParticipantAtX(cache.participants, drag.currentX);
-    const validTarget = target && target.key !== drag.participantKey ? target : null;
+    const validTarget = target;
     drag.toParticipantKey = validTarget ? validTarget.key : null;
     drag.toParticipantId = validTarget ? validTarget.id : null;
 
@@ -1158,8 +1158,13 @@ export default function DiagramViewer({
     const y1 = drag.anchorY;
     const x2 = drag.currentX;
     const y2 = drag.currentY;
-    const insX1 = validTarget ? Math.min(source.centerX, validTarget.centerX) : 0;
-    const insX2 = validTarget ? Math.max(source.centerX, validTarget.centerX) : 0;
+    const isSelf = validTarget ? validTarget.key === source.key : false;
+    const insX1 = validTarget
+      ? (isSelf ? source.centerX : Math.min(source.centerX, validTarget.centerX))
+      : 0;
+    const insX2 = validTarget
+      ? (isSelf ? Math.max(source.right, source.centerX + 50) : Math.max(source.centerX, validTarget.centerX))
+      : 0;
 
     return {
       type: 'message',
@@ -1244,7 +1249,7 @@ export default function DiagramViewer({
           onMoveMessage(drag.messageKey, drag.insertPosition);
         }
       } else {
-        // Message drag: only create when released over a different participant.
+        // Message drag: create message when released over a participant (another participant or self).
         if (onCreateMessageDrag && drag.toParticipantKey && drag.insertPosition) {
           onCreateMessageDrag(drag.participantKey, drag.toParticipantKey, drag.insertPosition);
         }

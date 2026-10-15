@@ -144,6 +144,36 @@ describe('Connect handles (e2e)', () => {
     });
   });
 
+  it('sequence: dragging connect handle to the line of the same actor creates a self-pointing arrow with placement in order', () => {
+    createAndVisit(SEQ_CONTENT, 'cypress-ch-seq-self').then(({ dir, name }) => {
+      cy.get('g[data-et="participant"][data-id="A"]').then(($box) => {
+        const box = rectOf($box);
+        const handlePt = { x: box.left + box.width / 2, y: box.bottom + 14 };
+
+        cy.get('#diagram-container text.messageText').eq(1).then(($msg) => {
+          const msg = rectOf($msg);
+          // Target point on A's lifeline below the last message
+          const target = { x: handlePt.x, y: msg.top + msg.height / 2 + 25 };
+
+          cy.get('line.actor-line[data-id="A"]').trigger('mousedown', {
+            button: 0, clientX: handlePt.x, clientY: handlePt.y, force: true,
+          });
+          cy.get('body').trigger('mousemove', { clientX: target.x, clientY: target.y });
+
+          cy.get('[data-testid="message-drag-line"]').should('exist');
+          cy.get('[data-testid="message-insert-indicator"]').should('exist');
+          cy.get('[data-testid="target-lifeline-snap-rect"]').should('exist');
+          cy.get('body').trigger('mouseup', { clientX: target.x, clientY: target.y });
+
+          saved();
+          getFileContent(name, dir).then((content) => {
+            expect(content).to.contain('A->>A: New message');
+          });
+        });
+      });
+    });
+  });
+
   it('sequence: dragging the lifeline body reorders the participant and never creates a message', () => {
     createAndVisit(SEQ_CONTENT, 'cypress-ch-seq-reorder').then(({ dir, name }) => {
       cy.get('rect.actor-bottom[name="A"]').then(($bottom) => {

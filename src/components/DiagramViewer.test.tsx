@@ -631,7 +631,7 @@ describe('DiagramViewer drag interactions', () => {
     expect(onMoveParticipant).not.toHaveBeenCalled();
   });
 
-  it('releasing a message drag over the same participant does not create a message', async () => {
+  it('releasing a message drag over the same participant creates a self-pointing message taking placement into account', async () => {
     const onCreateMessageDrag = vi.fn();
     const { container } = render(
       <DiagramViewer
@@ -642,11 +642,53 @@ describe('DiagramViewer drag interactions', () => {
     await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
     mockSeqScreenRects(container);
 
-    // Drag from A's connect handle back to A — no valid target
+    // Drag from A's connect handle down to A's lifeline at Y=180 (between m:1 at 150 and m:2 at 200)
     fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 64 });
     fireEvent.mouseMove(window, { clientX: 50, clientY: 180 });
+    await waitFor(() => expect(container.querySelector('[data-testid="message-drag-line"]')).toBeTruthy());
+    await waitFor(() => expect(container.querySelector('[data-testid="message-insert-indicator"]')).toBeTruthy());
+
+    // Indicator has visible width extending to the right for self-pointing arrow
+    const indicator = container.querySelector('[data-testid="message-insert-indicator"]')!;
+    expect(Number(indicator.getAttribute('x1'))).toBe(50);
+    expect(Number(indicator.getAttribute('x2'))).toBeGreaterThanOrEqual(100);
+
     fireEvent.mouseUp(window, { clientX: 50, clientY: 180 });
-    expect(onCreateMessageDrag).not.toHaveBeenCalled();
+    expect(onCreateMessageDrag).toHaveBeenCalledWith('p:0', 'p:0', { type: 'before', key: 'm:2' });
+  });
+
+  it('dragging connect handle to create self-message at the top inserts before the first message', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 64 });
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 75 });
+    fireEvent.mouseUp(window, { clientX: 50, clientY: 75 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith('p:0', 'p:0', { type: 'before', key: 'm:0' });
+  });
+
+  it('dragging connect handle to create self-message at the bottom inserts after the last message', async () => {
+    const onCreateMessageDrag = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onCreateMessageDrag={onCreateMessageDrag}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    fireEvent.mouseDown(lifelineOf(container, 'A'), { button: 0, clientX: 50, clientY: 64 });
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 350 });
+    fireEvent.mouseUp(window, { clientX: 50, clientY: 350 });
+    expect(onCreateMessageDrag).toHaveBeenCalledWith('p:0', 'p:0', { type: 'after', key: 'm:3' });
   });
 
   it('a plain click on an actor box (no drag) does not fire drag callbacks', async () => {
