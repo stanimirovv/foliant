@@ -69,6 +69,7 @@ export interface StickyNote {
   color?: StickyNoteColor;
   width?: number;
   height?: number;
+  keys?: string[];              // the note's own tags (hide keys)
 }
 
 export interface DiagramConfig {

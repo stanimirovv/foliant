@@ -108,6 +108,22 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Set a note's tag to **Merged** / **Clean** in By Key → the note is unaffected (notes respond to keys as on/off only).
 - [ ] Delete a tagged note → its CONFIG `noteTags` entry is gone.
 
+## Increment 3d — Sticky note selection, tagging & hiding
+
+> Stop here: sticky notes (the floating cards in `%% CONFIG:` under `notes[]`) behave like other elements for selection, shift-select, tagging and by-key hiding. (Distinct from mermaid `Note over` elements, which are Increment 3c.)
+
+- [ ] Click a sticky note card → the card gets a blue selection ring and the panel shows the note: its text (editable), its color dots, and a Tags section.
+- [ ] Double-click a sticky note card → the inline text editor still opens; a plain single click does not open it (it selects instead).
+- [ ] Add a tag (e.g. `legacy`) to the note from the panel → a chip appears and the tag appears in the sidebar under Actors → By Key; persists after F5 in `%% CONFIG:` under `notes[].keys`.
+- [ ] Shift-click a sticky note card and a participant → both join the multi-selection ("Selected Elements (2)"); the note appears under **Tags by Element** (labeled `sticky note: <text>`); **Add tag to all** tags both at once.
+- [ ] Shift-click a selected sticky note card again → it leaves the multi-selection (the remaining element is selected on its own).
+- [ ] Click empty canvas space → the sticky note selection is cleared (ring gone, panel back to the empty state).
+- [ ] With a note tagged `legacy`, set `legacy` to **Off** in By Key → the card disappears from the canvas; set it back **On** → the card returns. (The SVG export respects the same filter.)
+- [ ] Tag a note with two keys → hiding only one in By Key keeps the card; hiding both removes it.
+- [ ] Set a note's tag to **Merged** / **Clean** in By Key → the card is unaffected (sticky notes respond to keys as on/off only, no merging).
+- [ ] Edit the note's text or color from the panel → the card updates and both persist after F5.
+- [ ] Delete a sticky note (the card's trash button) → its CONFIG `notes[]` entry (and its tags) is gone.
+
 ## Increment 4 — Flowchart editing
 
 > Stop here: nodes and edges are editable with the same panel, and cascade delete keeps the diagram valid.

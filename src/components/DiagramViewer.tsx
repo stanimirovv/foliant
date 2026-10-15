@@ -41,6 +41,8 @@ interface DiagramViewerProps {
   // Sticky notes:
   notes?: StickyNoteType[];
   showNotes?: boolean;
+  selectedNoteIds?: string[];   // CONFIG ids of the selected sticky notes (highlight ring)
+  onSelectNote?: (id: string, options?: { shiftKey?: boolean }) => void;
   onUpdateNote?: (id: string, patch: Partial<Omit<StickyNoteType, 'id'>>) => void;
   onDeleteNote?: (id: string) => void;
 }
@@ -385,6 +387,8 @@ export default function DiagramViewer({
   onMoveMessage,
   notes = [],
   showNotes = true,
+  selectedNoteIds,
+  onSelectNote,
   onUpdateNote,
   onDeleteNote,
 }: DiagramViewerProps) {
@@ -1274,6 +1278,8 @@ export default function DiagramViewer({
                         key={note.id}
                         note={note}
                         getZoomScale={zoomScaleOf}
+                        selected={selectedNoteIds?.includes(note.id) ?? false}
+                        onSelect={(shiftKey) => onSelectNote?.(note.id, { shiftKey })}
                         onMove={(id, x, y) => onUpdateNote?.(id, { x, y })}
                         onUpdateText={(id, text) => onUpdateNote?.(id, { text })}
                         onUpdateColor={(id, color) => onUpdateNote?.(id, { color })}

@@ -11,13 +11,13 @@ import { processMermaid, transformActors, ActorTransformOptions, isPathHidden } 
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText } from 'lucide-react';
 import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
-import { parseModel, ModelElement, NodeShape, ParticipantType } from '@/lib/model';
+import { parseModel, ModelElement, NodeShape, ParticipantType, StickyNoteElement } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
 import mermaid from 'mermaid';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  getArrowTags, getNoteTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
+  getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation,
   toggleNumberedSteps, hasNumberedSteps,
@@ -656,6 +656,35 @@ export default function ClientPage() {
     return parseViewsData(rawCode);
   }, [rawCode]);
 
+  const [showNotes, setShowNotes] = useState(true);
+  const stickyNotes = useMemo(() => viewsData?.notes || [], [viewsData]);
+
+  // Sticky notes live in CONFIG, not in the parsed model; wrap them as
+  // pseudo-elements (key `sticky:<id>`) so they join the same
+  // selection/tag/hide pipeline as parsed elements. Their line span is pinned
+  // to the CONFIG header (line 0); no line-surgical transform targets them.
+  const stickyElements = useMemo<StickyNoteElement[]>(() => {
+    return stickyNotes.map(n => ({
+      key: `sticky:${n.id}`,
+      kind: 'sticky',
+      id: n.id,
+      text: n.text,
+      color: n.color,
+      lineStart: 0,
+      lineEnd: 0,
+    }));
+  }, [stickyNotes]);
+
+  // Hiding is on/off only for sticky notes: the card is hidden when ALL of
+  // its tags are Off in the By Key filter (same rule as notes' own keys).
+  const visibleStickyNotes = useMemo(() => {
+    if (hideKeys.size === 0) return stickyNotes;
+    return stickyNotes.filter(n => {
+      const keys = n.keys ?? [];
+      return keys.length === 0 || !keys.every(k => hideKeys.has(k));
+    });
+  }, [stickyNotes, hideKeys]);
+
   const availableKeys = useMemo(() => {
     const keys = new Set<string>();
     if (viewsData?.actors) {
@@ -671,6 +700,12 @@ export default function ClientPage() {
     // Notes carry their own tags as well.
     if (viewsData?.noteTags) {
       for (const n of viewsData.noteTags) {
+        if (n.keys) n.keys.forEach(k => keys.add(k));
+      }
+    }
+    // Sticky notes carry their own tags as well.
+    if (viewsData?.notes) {
+      for (const n of viewsData.notes) {
         if (n.keys) n.keys.forEach(k => keys.add(k));
       }
     }
@@ -758,10 +793,11 @@ export default function ClientPage() {
 
   const selectedRawElements = useMemo(() => {
     const rawMap = new Map(rawModel.elements.map(e => [e.key, e]));
+    const stickyMap = new Map(stickyElements.map(e => [e.key, e]));
     return selectedKeys
-      .map(k => rawMap.get(k))
+      .map(k => rawMap.get(k) ?? stickyMap.get(k))
       .filter((e): e is ModelElement => Boolean(e));
-  }, [selectedKeys, rawModel]);
+  }, [selectedKeys, rawModel, stickyElements]);
 
   const selectedRawElement = selectedRawElements.length === 1 ? selectedRawElements[0] : null;
 
@@ -777,6 +813,8 @@ export default function ClientPage() {
         inheritedTags = info?.inherited ?? [];
       } else if (el.kind === 'note') {
         ownTags = getNoteTags(rawCode, viewsData, el.key);
+      } else if (el.kind === 'sticky') {
+        ownTags = getStickyNoteTags(viewsData, el.key);
       }
       return {
         element: el,
@@ -809,6 +847,31 @@ export default function ClientPage() {
     const raw = selectionMap.get(processedKey);
     setSelectedKeys(raw ? [raw.key] : []);
   };
+
+  // Sticky-note card click: the card reports its CONFIG id; the sticky key
+  // (`sticky:<id>`) is its own raw key, so no selection-map hop is needed.
+  const handleSelectNote = (id: string, options?: { shiftKey?: boolean }) => {
+    const key = `sticky:${id}`;
+    if (options?.shiftKey) {
+      setSelectedKeys(prev => {
+        if (prev.includes(key)) {
+          return prev.filter(k => k !== key);
+        } else {
+          return [...prev, key];
+        }
+      });
+      return;
+    }
+    setSelectedKeys([key]);
+  };
+
+  // CONFIG ids of the selected sticky notes, for the card highlight ring.
+  const selectedNoteIds = useMemo(
+    () => selectedKeys
+      .filter(k => k.startsWith('sticky:'))
+      .map(k => k.slice('sticky:'.length)),
+    [selectedKeys]
+  );
   const resolvedArrowStyles = useMemo(
     () => rewriteArrowStyles(viewsData, effectiveActorOptions),
     [viewsData, effectiveActorOptions]
@@ -972,9 +1035,6 @@ export default function ClientPage() {
     if (result.newKey) setSelection(result.newKey);
   };
 
-  const [showNotes, setShowNotes] = useState(true);
-  const stickyNotes = useMemo(() => viewsData?.notes || [], [viewsData]);
-
   const handleAddNote = () => {
     let x = 120;
     let y = 80;
@@ -1061,12 +1121,12 @@ export default function ClientPage() {
     if (!svg) return;
 
     exportSvgToFile(svg, {
-      notes: stickyNotes,
+      notes: visibleStickyNotes,
       showNotes,
       isDark,
       fileName: currentFile,
     });
-  }, [currentFile, stickyNotes, showNotes, isDark]);
+  }, [currentFile, visibleStickyNotes, showNotes, isDark]);
 
   // Ctrl+Z / Ctrl+Y (Section 4.11). Inside text fields the native input undo
   // wins; the diagram-level shortcut applies everywhere else.
@@ -1109,6 +1169,15 @@ export default function ClientPage() {
   const selectedNoteTags = useMemo(
     () => (selectedNote ? getNoteTags(rawCode, viewsData, selectedNote.key) : null),
     [selectedNote, rawCode, viewsData]
+  );
+
+  const selectedStickyNote = selectedRawElement && selectedRawElement.kind === 'sticky'
+    ? selectedRawElement
+    : null;
+
+  const selectedStickyNoteTags = useMemo(
+    () => (selectedStickyNote ? getStickyNoteTags(viewsData, selectedStickyNote.key) : null),
+    [selectedStickyNote, viewsData]
   );
 
   // Current arrow style as a complete patch (setArrowStyle replaces the whole
@@ -1275,6 +1344,13 @@ export default function ClientPage() {
 
   const handleRequestDelete = () => {
     if (!selectedRawElement) return;
+    // Sticky notes are CONFIG annotations: delete the note entry directly
+    // (no line-surgical transform, no cascaded elements).
+    if (selectedRawElement.kind === 'sticky') {
+      handleDeleteNote(selectedRawElement.id);
+      setSelection(null);
+      return;
+    }
     const result = deleteElement(rawCode, viewsData, selectedRawElement.key);
     if (result.warning) {
       setEditWarning(result.warning);
@@ -2111,8 +2187,10 @@ export default function ClientPage() {
                 onCreateMessageDrag={handleCreateMessageDrag}
                 onMoveMessageEndpoint={handleMoveMessageEndpoint}
                 onMoveMessage={handleMoveMessage}
-                notes={stickyNotes}
+                notes={visibleStickyNotes}
                 showNotes={showNotes}
+                selectedNoteIds={selectedNoteIds}
+                onSelectNote={handleSelectNote}
                 onUpdateNote={handleUpdateNote}
                 onDeleteNote={handleDeleteNote}
               />
@@ -2202,6 +2280,7 @@ export default function ClientPage() {
                         arrowStyle={selectedArrowStyle}
                         arrowTags={selectedArrowTags}
                         noteTags={selectedNoteTags}
+                        stickyNoteTags={selectedStickyNoteTags}
                         warning={editWarning}
                         pendingDelete={pendingDelete}
                         onEditLabel={handleEditLabel}
@@ -2212,6 +2291,7 @@ export default function ClientPage() {
                         onSetAnimation={handleSetAnimation}
                         onAddTag={handleAddTag}
                         onRemoveTag={handleRemoveTag}
+                        onUpdateNote={handleUpdateNote}
                         onSetKeyMode={handleSetArrowKeyMode}
                         onSetParticipantKind={handleSetParticipantKind}
                         onSetNodeShape={handleSetNodeShape}
@@ -2249,6 +2329,7 @@ export default function ClientPage() {
                       arrowStyle={selectedArrowStyle}
                       arrowTags={selectedArrowTags}
                       noteTags={selectedNoteTags}
+                      stickyNoteTags={selectedStickyNoteTags}
                       warning={editWarning}
                       pendingDelete={pendingDelete}
                       onEditLabel={handleEditLabel}
@@ -2259,6 +2340,7 @@ export default function ClientPage() {
                       onSetAnimation={handleSetAnimation}
                       onAddTag={handleAddTag}
                       onRemoveTag={handleRemoveTag}
+                      onUpdateNote={handleUpdateNote}
                       onSetKeyMode={handleSetArrowKeyMode}
                       onSetParticipantKind={handleSetParticipantKind}
                       onSetNodeShape={handleSetNodeShape}

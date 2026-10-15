@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
-  getArrowTags, getNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
+  getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation, insertMessage,
   toggleNumberedSteps, hasNumberedSteps,
@@ -1427,6 +1427,88 @@ sequenceDiagram
     addTag(NOTE_SEQ, config, 'note:1', 'y');
     removeTag(NOTE_SEQ, config, 'note:1', 'x');
     deleteElement(NOTE_SEQ, config, 'note:1');
+    expect(JSON.stringify(config)).toBe(snapshot);
+  });
+});
+
+describe('sticky note tags', () => {
+  // Sticky notes live in CONFIG.notes, keyed by `sticky:<id>`; the tag rides
+  // on the note's own `keys` field. The diagram body must stay byte-identical.
+  const STICKY_SEQ = `%% CONFIG: {"version":1,"notes":[{"id":"note_1","x":120,"y":80,"text":"Remember this","color":"blue"},{"id":"note_2","x":300,"y":200,"text":"Second note"}]}
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    B-->>A: Hi`;
+  const STICKY_SEQ_CFG = parseConfig(STICKY_SEQ);
+
+  it('adds and removes tags on a sticky note via its CONFIG.notes keys, body byte-identical', () => {
+    const added = addTag(STICKY_SEQ, STICKY_SEQ_CFG, 'sticky:note_1', 'edge-case');
+    expect(added.warning).toBeUndefined();
+    expectBodyIdentical(STICKY_SEQ, added.code);
+    expect(added.config?.notes?.[0]).toEqual({ id: 'note_1', x: 120, y: 80, text: 'Remember this', color: 'blue', keys: ['edge-case'] });
+    expect(parseConfig(added.code)?.notes?.[0].keys).toEqual(['edge-case']);
+    // the other note is untouched
+    expect(added.config?.notes?.[1]).toEqual({ id: 'note_2', x: 300, y: 200, text: 'Second note' });
+    // idempotent
+    const again = addTag(added.code, added.config, 'sticky:note_1', 'edge-case');
+    expect(again.config?.notes?.[0].keys).toEqual(['edge-case']);
+    // a second tag, then removals drop the keys field but keep the note
+    const two = addTag(added.code, added.config, 'sticky:note_1', 'beta');
+    expect(two.config?.notes?.[0].keys).toEqual(['edge-case', 'beta']);
+    const one = removeTag(two.code, two.config, 'sticky:note_1', 'edge-case');
+    expect(one.config?.notes?.[0]).toEqual({ id: 'note_1', x: 120, y: 80, text: 'Remember this', color: 'blue', keys: ['beta'] });
+    const none = removeTag(one.code, one.config, 'sticky:note_1', 'beta');
+    expect(none.config?.notes?.[0]).toEqual({ id: 'note_1', x: 120, y: 80, text: 'Remember this', color: 'blue' });
+    // removing a tag the note does not have is a no-op
+    expect(removeTag(STICKY_SEQ, STICKY_SEQ_CFG, 'sticky:note_1', 'nope').code).toBe(STICKY_SEQ);
+  });
+
+  it('tags each sticky note independently (the CONFIG id identifies the note)', () => {
+    const n1 = addTag(STICKY_SEQ, STICKY_SEQ_CFG, 'sticky:note_2', 'lefty');
+    expect(n1.config?.notes?.[1].keys).toEqual(['lefty']);
+    expect(n1.config?.notes?.[0].keys).toBeUndefined();
+    const both = addTag(n1.code, n1.config, 'sticky:note_1', 'shared-key');
+    expect(both.config?.notes?.[0].keys).toEqual(['shared-key']);
+    expect(both.config?.notes?.[1].keys).toEqual(['lefty']);
+  });
+
+  it('tags sticky notes regardless of diagram type (CONFIG-only operation)', () => {
+    const unknown = `not a mermaid diagram at all\n    whatever`;
+    const cfg: DiagramConfig = { version: 1, notes: [{ id: 'n1', x: 0, y: 0, text: 'hi' }] };
+    const added = addTag(unknown, cfg, 'sticky:n1', 'edge-case');
+    expect(added.warning).toBeUndefined();
+    expect(added.config?.notes?.[0].keys).toEqual(['edge-case']);
+    expect(added.code.startsWith('%% CONFIG: ')).toBe(true);
+    expect(added.code.endsWith(unknown)).toBe(true);
+  });
+
+  it('soft-fails on invalid tags and unknown sticky ids', () => {
+    expect(addTag(STICKY_SEQ, STICKY_SEQ_CFG, 'sticky:note_1', 'has space').warning).toBeTruthy();
+    expect(addTag(STICKY_SEQ, STICKY_SEQ_CFG, 'sticky:note_1', '').warning).toBeTruthy();
+    expect(addTag(STICKY_SEQ, STICKY_SEQ_CFG, 'sticky:nope', 'ok').warning).toBeTruthy();
+    expect(removeTag(STICKY_SEQ, STICKY_SEQ_CFG, 'sticky:nope', 'ok').code).toBe(STICKY_SEQ);
+  });
+
+  it('getStickyNoteTags reports the sticky note own tags only', () => {
+    expect(getStickyNoteTags(STICKY_SEQ_CFG, 'sticky:note_1')).toEqual([]);
+    const tagged = addTag(STICKY_SEQ, STICKY_SEQ_CFG, 'sticky:note_1', 'edge-case');
+    expect(getStickyNoteTags(tagged.config, 'sticky:note_1')).toEqual(['edge-case']);
+    // non-sticky keys report no tags
+    expect(getStickyNoteTags(tagged.config, 'p:0')).toEqual([]);
+    expect(getStickyNoteTags(tagged.config, 'note:0')).toEqual([]);
+    expect(getStickyNoteTags(tagged.config, 'sticky:nope')).toEqual([]);
+    expect(getStickyNoteTags(null, 'sticky:note_1')).toEqual([]);
+  });
+
+  it('does not mutate the input config on sticky tag edits', () => {
+    const config: DiagramConfig = {
+      version: 1,
+      notes: [{ id: 'note_1', x: 1, y: 2, text: 'hi', keys: ['x'] }],
+    };
+    const snapshot = JSON.stringify(config);
+    addTag(STICKY_SEQ, config, 'sticky:note_1', 'y');
+    removeTag(STICKY_SEQ, config, 'sticky:note_1', 'x');
     expect(JSON.stringify(config)).toBe(snapshot);
   });
 });

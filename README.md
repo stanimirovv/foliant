@@ -257,6 +257,8 @@ Add sticky notes directly to the diagram canvas to document architectural decisi
 - **6 Pastel Colors**: Choose between Yellow (`amber`), Green (`emerald`), Blue (`sky`), Pink (`rose`), Orange (`orange`), and Purple (`purple`).
 - **Rich Markdown Support**: Double-click to type formatted text supporting `**bold**`, `*italic*`, and inline `` `code` ``.
 - **Interactive Task Checklists**: Supports `- [ ]` and `- [x]` syntax with live clickable checkboxes directly on the note!
+- **Selectable & Taggable**: Click a card to select it — the properties panel shows its text, color and tags. Shift+click to multi-select: notes appear under **Tags by Element** just like actors and messages, and can be tagged as a group.
+- **Filterable by Key**: Notes carry their own tags (persisted under `notes[].keys` in the `%% CONFIG:` header). Set a key to **Off** in the sidebar's By Key filter to hide the note; **On** brings it back (SVG export respects the filter too).
 - **Persistent & Non-Destructive**: Notes persist in the `.mmd` file's `%% CONFIG:` JSON header so they survive page reloads and git commits.
 - **Toolbar Toggle**: Show or hide all sticky notes with a single click (`Notes (N)` button).
 
@@ -363,6 +365,7 @@ interface StickyNote {
   y: number;
   text: string;
   color?: 'yellow' | 'green' | 'blue' | 'pink' | 'orange' | 'purple';
+  keys?: string[];              // the note's own tags (hide keys)
 }
 ```
 

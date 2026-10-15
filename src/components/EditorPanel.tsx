@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
-import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, NoteElement, DiagramType, NodeShape, ParticipantType } from '@/lib/model';
+import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, NoteElement, StickyNoteElement, DiagramType, NodeShape, ParticipantType } from '@/lib/model';
 import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS } from '@/lib/editor';
-import { DiagramConfig, ArrowKeyMode, ArrowAnimationType } from '@/lib/views';
+import { DiagramConfig, ArrowKeyMode, ArrowAnimationType, StickyNote, StickyNoteColor } from '@/lib/views';
 import AnimatedArrowSelector from './AnimatedArrowSelector';
+import { NOTE_COLORS, STICKY_NOTE_COLOR_KEYS } from './StickyNote';
 
 // Operator vocabularies (EDITING_PLAN.md Section 4.8); keep in sync with
 // editor.ts (setArrowType validates against the same sets).
@@ -81,6 +82,8 @@ interface EditorPanelProps {
   arrowStyle: ArrowStylePatch | null;  // current style of the selected message/edge
   arrowTags: ArrowTagInfo | null; // tags of the selected message/edge (own + behavior)
   noteTags?: string[] | null;   // tags of the selected note (null when no note is selected)
+  stickyNoteTags?: string[] | null;  // tags of the selected sticky note (null when no sticky note is selected)
+  onUpdateNote?: (id: string, patch: Partial<Omit<StickyNote, 'id'>>) => void;  // edit the selected sticky note
   warning?: string | null;
   pendingDelete: PendingDelete | null; // delete confirmation state
   onEditLabel: (newLabel: string) => void;
@@ -117,6 +120,10 @@ function describeElement(el: ModelElement): string {
     case 'message': return `message ${el.from} ${el.operator} ${el.to}${el.label ? `: ${el.label}` : ''}`;
     case 'edge': return `edge ${el.from} ${el.operator} ${el.to}${el.label ? `: ${el.label}` : ''}`;
     case 'note': return `note over ${el.over.join(', ')}: ${el.text}`;
+    case 'sticky': {
+      const snippet = el.text.trim().replace(/\s+/g, ' ');
+      return `sticky note${snippet ? `: ${snippet.length > 40 ? `${snippet.slice(0, 40)}…` : snippet}` : ''}`;
+    }
     case 'block': return `${el.blockType} block${el.title ? ` "${el.title}"` : ''}`;
     case 'region': return `region ${el.regionType}${el.value ? `=${el.value}` : ''}`;
     case 'config': return 'CONFIG header';
@@ -136,6 +143,8 @@ export default function EditorPanel({
   arrowStyle,
   arrowTags,
   noteTags,
+  stickyNoteTags,
+  onUpdateNote,
   warning,
   pendingDelete,
   onEditLabel,
@@ -172,6 +181,11 @@ export default function EditorPanel({
   }
   if (config?.noteTags) {
     for (const n of config.noteTags) {
+      if (n.keys) for (const k of n.keys) if (!actorKeys.includes(k)) actorKeys.push(k);
+    }
+  }
+  if (config?.notes) {
+    for (const n of config.notes) {
       if (n.keys) for (const k of n.keys) if (!actorKeys.includes(k)) actorKeys.push(k);
     }
   }
@@ -252,7 +266,18 @@ export default function EditorPanel({
           onRemoveTag={onRemoveTag}
         />
       )}
-      {!isMultiSelect && activeElement && !isComponent(activeElement) && !isArrow(activeElement) && activeElement.kind !== 'note' && (
+      {!isMultiSelect && activeElement && activeElement.kind === 'sticky' && (
+        <StickyNoteFields
+          key={activeElement.key}
+          element={activeElement}
+          tags={stickyNoteTags ?? []}
+          actorKeys={actorKeys}
+          onUpdateNote={onUpdateNote}
+          onAddTag={onAddTag}
+          onRemoveTag={onRemoveTag}
+        />
+      )}
+      {!isMultiSelect && activeElement && !isComponent(activeElement) && !isArrow(activeElement) && activeElement.kind !== 'note' && activeElement.kind !== 'sticky' && (
         <p className="text-xs text-gray-500 dark:text-slate-400 italic">
           This element is not editable.
         </p>
@@ -940,6 +965,168 @@ function NoteFields({
           </button>
         </div>
         <datalist id="editor-note-tag-list">
+          {actorKeys.map(k => <option key={k} value={k} />)}
+        </datalist>
+      </div>
+    </div>
+  );
+}
+
+interface StickyNoteFieldsProps {
+  element: StickyNoteElement;
+  tags: string[];
+  actorKeys: string[];
+  onUpdateNote?: (id: string, patch: Partial<Omit<StickyNote, 'id'>>) => void;
+  onAddTag: (tag: string) => void;
+  onRemoveTag: (tag: string) => void;
+}
+
+// Single-selection fields for a sticky note card: text, color and tags.
+// (Editing the text here mirrors the card's own double-click inline editor.)
+function StickyNoteFields({
+  element, tags, actorKeys, onUpdateNote, onAddTag, onRemoveTag,
+}: StickyNoteFieldsProps) {
+  const [tagInput, setTagInput] = useState('');
+  const [existingTagSelect, setExistingTagSelect] = useState('');
+  const [text, setText] = useState(element.text);
+
+  // Keep the local text in sync when another note is selected or the text is
+  // edited elsewhere (the card's inline editor).
+  useEffect(() => {
+    setText(element.text);
+  }, [element.text]);
+
+  const commitText = () => {
+    if (text !== element.text) onUpdateNote?.(element.id, { text });
+  };
+
+  const submitTag = () => {
+    const tag = tagInput.trim();
+    if (tag) onAddTag(tag);
+    setTagInput('');
+  };
+
+  const submitExistingTag = () => {
+    if (existingTagSelect) {
+      onAddTag(existingTagSelect);
+      setExistingTagSelect('');
+    }
+  };
+
+  const currentColor: StickyNoteColor = (element.color as StickyNoteColor | undefined) || 'yellow';
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-gray-400 dark:text-slate-500">
+        Sticky note <span className="font-mono">{element.id}</span>
+      </p>
+
+      <div>
+        <span className={fieldLabel}>Text</span>
+        <textarea
+          data-testid="sticky-note-text"
+          className={fieldInput}
+          rows={3}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commitText}
+          placeholder="Type your thought..."
+        />
+      </div>
+
+      <div>
+        <span className={fieldLabel}>Color</span>
+        <div className="flex gap-1.5" data-testid="sticky-note-colors">
+          {STICKY_NOTE_COLOR_KEYS.map(c => (
+            <button
+              key={c}
+              type="button"
+              data-testid={`sticky-note-color-${c}`}
+              title={c}
+              onClick={() => onUpdateNote?.(element.id, { color: c })}
+              className={`w-5 h-5 rounded-full border border-black/20 transition-transform hover:scale-110 ${NOTE_COLORS[c].dot} ${
+                currentColor === c ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-slate-900' : ''
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <span className={fieldLabel}>Tags</span>
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1" data-testid="sticky-note-tag-chips">
+            {tags.map(tag => (
+              <span
+                key={tag}
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs"
+              >
+                {tag}
+                <button
+                  type="button"
+                  aria-label={`Remove tag ${tag}`}
+                  data-testid={`remove-sticky-note-tag-${tag}`}
+                  onClick={() => onRemoveTag(tag)}
+                  className="ml-1 hover:text-blue-900 dark:hover:text-blue-100"
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {actorKeys.length > 0 && (
+          <div className="flex space-x-1 mb-1">
+            <select
+              className={fieldInput}
+              value={existingTagSelect}
+              onChange={(e) => setExistingTagSelect(e.target.value)}
+              data-testid="sticky-note-select-existing-tag"
+              aria-label="Select existing tag"
+            >
+              <option value="">Select existing tag...</option>
+              {actorKeys.map(k => (
+                <option key={k} value={k}>#{k}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              data-testid="sticky-note-add-existing-tag"
+              disabled={!existingTagSelect}
+              onClick={submitExistingTag}
+              className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+        )}
+        <div className="flex space-x-1">
+          <input
+            type="text"
+            className={fieldInput}
+            placeholder="Add tag..."
+            list="editor-sticky-note-tag-list"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitTag();
+              }
+            }}
+            data-testid="sticky-note-add-tag-input"
+          />
+          <button
+            type="button"
+            title="Add tag"
+            data-testid="sticky-note-add-tag"
+            onClick={submitTag}
+            className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700"
+          >
+            Add
+          </button>
+        </div>
+        <datalist id="editor-sticky-note-tag-list">
           {actorKeys.map(k => <option key={k} value={k} />)}
         </datalist>
       </div>

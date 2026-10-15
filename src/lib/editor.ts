@@ -67,6 +67,7 @@ function cloneConfig(config: DiagramConfig | null): DiagramConfig | null {
       : undefined,
     arrows: config.arrows?.map(a => ({ ...a, keys: a.keys ? [...a.keys] : undefined })),
     noteTags: config.noteTags?.map(n => ({ ...n, over: [...n.over], keys: n.keys ? [...n.keys] : undefined })),
+    notes: config.notes?.map(n => ({ ...n, keys: n.keys ? [...n.keys] : undefined })),
   };
 }
 
@@ -158,6 +159,40 @@ function notesMatchEntry(entry: NoteTagEntry, over: string[], text: string, occu
 
 function isArrow(el: ModelElement): el is ModelElement & { from: string; to: string; label?: string } {
   return el.kind === 'message' || el.kind === 'edge';
+}
+
+// Sticky notes are keyed `sticky:<id>` (the CONFIG note id is stable, so the
+// raw key is its own processed key). Unlike parsed elements they are resolved
+// from CONFIG.notes, never from the parsed model.
+const STICKY_KEY_PREFIX = 'sticky:';
+
+function stickyNoteIdFromKey(key: string): string | null {
+  return key.startsWith(STICKY_KEY_PREFIX) ? key.slice(STICKY_KEY_PREFIX.length) : null;
+}
+
+// The tag rides on the sticky note's own CONFIG.notes entry `keys` field.
+function addStickyNoteTag(code: string, config: DiagramConfig | null, id: string, tag: string): EditResult {
+  const note = config?.notes?.find(n => n.id === id);
+  if (!note) return fail(code, config, `Sticky note ${id} not found`);
+  if (note.keys?.includes(tag)) return { code, config }; // already there
+  const newConfig = cloneConfig(config) ?? { version: 1 };
+  newConfig.notes = (newConfig.notes ?? []).map(n =>
+    n.id === id ? { ...n, keys: [...(n.keys ?? []), tag] } : n);
+  return { code: updateViewsData(code, newConfig), config: newConfig };
+}
+
+function removeStickyNoteTag(code: string, config: DiagramConfig | null, id: string, tag: string): EditResult {
+  const note = config?.notes?.find(n => n.id === id);
+  if (!note?.keys?.includes(tag)) return { code, config }; // nothing to remove
+  const newConfig = cloneConfig(config) ?? { version: 1 };
+  newConfig.notes = (newConfig.notes ?? []).map(n => {
+    if (n.id !== id) return n;
+    const kept = (n.keys ?? []).filter(k => k !== tag);
+    const entry = { ...n };
+    if (kept.length > 0) entry.keys = kept; else delete entry.keys;
+    return entry;
+  });
+  return { code: updateViewsData(code, newConfig), config: newConfig };
 }
 
 function isComponent(el: ModelElement): el is ModelElement & { id: string } {
@@ -1243,6 +1278,13 @@ export function setActorColor(code: string, config: DiagramConfig | null, key: s
 }
 
 export function addTag(code: string, config: DiagramConfig | null, key: string, tag: string): EditResult {
+  // Sticky notes live in CONFIG, not in the parsed model: resolve them first.
+  const stickyId = stickyNoteIdFromKey(key);
+  if (stickyId !== null) {
+    const t = tag.trim();
+    if (!TAG_RE.test(t)) return fail(code, config, `Invalid tag: ${tag}`);
+    return addStickyNoteTag(code, config, stickyId, t);
+  }
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
@@ -1303,6 +1345,11 @@ export function addTag(code: string, config: DiagramConfig | null, key: string, 
 }
 
 export function removeTag(code: string, config: DiagramConfig | null, key: string, tag: string): EditResult {
+  // Sticky notes live in CONFIG, not in the parsed model: resolve them first.
+  const stickyId = stickyNoteIdFromKey(key);
+  if (stickyId !== null) {
+    return removeStickyNoteTag(code, config, stickyId, tag);
+  }
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
@@ -1382,6 +1429,14 @@ export function getNoteTags(code: string, config: DiagramConfig | null, key: str
   const occurrence = noteOccurrence(model, el);
   const entry = config?.noteTags?.find(n => notesMatchEntry(n, el.over, el.text, occurrence));
   return entry?.keys ?? [];
+}
+
+// The sticky note's own tags (sticky notes carry no tag behavior: no
+// inheritance, so hiding is on/off only, like notes' own keys).
+export function getStickyNoteTags(config: DiagramConfig | null, key: string): string[] {
+  const id = stickyNoteIdFromKey(key);
+  if (id === null) return [];
+  return config?.notes?.find(n => n.id === id)?.keys ?? [];
 }
 
 // Set an arrow's tag behavior. 'clean' is the default and is stored as absent;

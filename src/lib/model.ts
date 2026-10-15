@@ -81,8 +81,21 @@ export interface ConfigElement extends BaseElement {
   kind: 'config';
 }
 
+// Sticky notes are CONFIG annotations (views.ts `StickyNote`), not parsed
+// diagram lines, so parseModel never emits them. The editor wraps each note in
+// this pseudo-element (key `sticky:<id>`, line span pinned to the CONFIG
+// header) so sticky notes join the same selection/tag/hide pipeline as parsed
+// elements.
+export interface StickyNoteElement extends BaseElement {
+  kind: 'sticky';
+  id: string;
+  text: string;
+  color?: string;
+}
+
 export type ModelElement = ParticipantElement | MessageElement | NoteElement
-  | NodeElement | EdgeElement | BlockElement | RegionElement | ConfigElement;
+  | NodeElement | EdgeElement | BlockElement | RegionElement | ConfigElement
+  | StickyNoteElement;
 
 export interface DiagramModel {
   type: DiagramType;

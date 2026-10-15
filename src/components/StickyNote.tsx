@@ -8,6 +8,8 @@ export interface StickyNoteProps {
   note: StickyNoteType;
   zoomScale?: number;
   getZoomScale?: () => number;
+  selected?: boolean;
+  onSelect?: (shiftKey: boolean) => void;
   onMove: (id: string, x: number, y: number) => void;
   onUpdateText: (id: string, text: string) => void;
   onUpdateColor: (id: string, color: StickyNoteColor) => void;
@@ -65,7 +67,7 @@ export const NOTE_COLORS: Record<StickyNoteColor, {
   },
 };
 
-const COLOR_KEYS: StickyNoteColor[] = ['yellow', 'green', 'blue', 'pink', 'orange', 'purple'];
+export const STICKY_NOTE_COLOR_KEYS: StickyNoteColor[] = ['yellow', 'green', 'blue', 'pink', 'orange', 'purple'];
 
 function formatInline(str: string): React.ReactNode {
   // Simple token parser for **bold**, *italic*, and `code`
@@ -154,6 +156,8 @@ export default function StickyNote({
   note,
   zoomScale = 1,
   getZoomScale,
+  selected = false,
+  onSelect,
   onMove,
   onUpdateText,
   onUpdateColor,
@@ -168,6 +172,9 @@ export default function StickyNote({
   const dragStartRef = useRef<{ clientX: number; clientY: number; startX: number; startY: number } | null>(null);
   const posRef = useRef(pos);
   posRef.current = pos;
+  // A click that immediately follows a drag is the drag's trailing click
+  // event, not a selection gesture.
+  const suppressClickAfterDragRef = useRef(false);
 
   const colorConfig = NOTE_COLORS[note.color || 'yellow'] || NOTE_COLORS.yellow;
 
@@ -210,6 +217,7 @@ export default function StickyNote({
     e.stopPropagation();
     e.preventDefault();
 
+    suppressClickAfterDragRef.current = false;
     setIsDragging(true);
     dragStartRef.current = {
       clientX: e.clientX,
@@ -236,6 +244,7 @@ export default function StickyNote({
       dragStartRef.current = null;
       if (finalPos.x !== note.x || finalPos.y !== note.y) {
         onMove(note.id, finalPos.x, finalPos.y);
+        suppressClickAfterDragRef.current = true;
       }
     };
 
@@ -246,7 +255,8 @@ export default function StickyNote({
   return (
     <div
       data-testid={`sticky-note-${note.id}`}
-      className={`sticky-note-card absolute select-none rounded border shadow-md transition-shadow hover:shadow-lg ${colorConfig.bg} ${colorConfig.border} ${colorConfig.text} flex flex-col`}
+      data-selected={selected ? 'true' : undefined}
+      className={`sticky-note-card absolute select-none rounded border shadow-md transition-shadow hover:shadow-lg ${colorConfig.bg} ${colorConfig.border} ${colorConfig.text} flex flex-col ${selected ? 'ring-2 ring-blue-500' : ''}`}
       style={{
         left: `${pos.x}px`,
         top: `${pos.y}px`,
@@ -259,7 +269,14 @@ export default function StickyNote({
       onMouseLeave={() => {
         if (!isEditing) setShowToolbar(false);
       }}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (suppressClickAfterDragRef.current) {
+          suppressClickAfterDragRef.current = false;
+          return;
+        }
+        onSelect?.(e.shiftKey);
+      }}
     >
       {/* Top Header / Drag Handle */}
       <div
@@ -277,7 +294,7 @@ export default function StickyNote({
             showToolbar || isEditing ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          {COLOR_KEYS.map((c) => (
+          {STICKY_NOTE_COLOR_KEYS.map((c) => (
             <button
               key={c}
               type="button"
@@ -307,13 +324,10 @@ export default function StickyNote({
         </div>
       </div>
 
-      {/* Note Body */}
+      {/* Note Body: click selects the note (via the card root), double-click edits */}
       <div
         className="flex-1 p-1.5 overflow-y-auto cursor-text text-[11px]"
         onDoubleClick={() => setIsEditing(true)}
-        onClick={() => {
-          if (!isEditing) setIsEditing(true);
-        }}
       >
         {isEditing ? (
           <textarea
@@ -322,6 +336,7 @@ export default function StickyNote({
             value={text}
             onChange={handleTextChange}
             onBlur={handleBlur}
+            onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 handleBlur();
