@@ -323,3 +323,126 @@ describe('parseModel — create -> change -> verify (harness)', () => {
     });
   });
 });
+
+describe('parseModel — chained flowchart edges', () => {
+  // Mermaid allows several links on one statement line (`A --> B --> C`).
+  // Every link must become an edge element and every endpoint a node — the
+  // actors of a chained line are all editable. Actor names are invented.
+  it('parses a chained line into one edge per link and registers every endpoint', () => {
+    const code = `flowchart LR
+    W["WidgetStream Router<br/>Kestrel sink"] --> X["Kestrel SQS"] --> Y["Kestrel<br/>PII scrub"] --> Z["MVP: Kestrel internal SNS"] --> V["Vendor handlers<br/>App/event mapping + consent"] --> U["Advertising conversion APIs"]
+    N["Long term: Zephyr Kafka outputs"] -.-> Y
+    Y -.-> M["Long term: Kafka fanout<br/>Replacement design TBD"] -.-> V`;
+    const model = parseModel(code);
+    expect(model).toEqual({
+      type: 'flowchart',
+      elements: [
+        { key: 'n:0', kind: 'node', id: 'W', label: '"WidgetStream Router<br/>Kestrel sink"', shape: 'rect', lineStart: 1, lineEnd: 1 },
+        { key: 'n:1', kind: 'node', id: 'X', label: '"Kestrel SQS"', shape: 'rect', lineStart: 1, lineEnd: 1 },
+        { key: 'n:2', kind: 'node', id: 'Y', label: '"Kestrel<br/>PII scrub"', shape: 'rect', lineStart: 1, lineEnd: 1 },
+        { key: 'n:3', kind: 'node', id: 'Z', label: '"MVP: Kestrel internal SNS"', shape: 'rect', lineStart: 1, lineEnd: 1 },
+        { key: 'n:4', kind: 'node', id: 'V', label: '"Vendor handlers<br/>App/event mapping + consent"', shape: 'rect', lineStart: 1, lineEnd: 1 },
+        { key: 'n:5', kind: 'node', id: 'U', label: '"Advertising conversion APIs"', shape: 'rect', lineStart: 1, lineEnd: 1 },
+        { key: 'e:0', kind: 'edge', from: 'W', to: 'X', operator: '-->', lineStart: 1, lineEnd: 1 },
+        { key: 'e:1', kind: 'edge', from: 'X', to: 'Y', operator: '-->', lineStart: 1, lineEnd: 1 },
+        { key: 'e:2', kind: 'edge', from: 'Y', to: 'Z', operator: '-->', lineStart: 1, lineEnd: 1 },
+        { key: 'e:3', kind: 'edge', from: 'Z', to: 'V', operator: '-->', lineStart: 1, lineEnd: 1 },
+        { key: 'e:4', kind: 'edge', from: 'V', to: 'U', operator: '-->', lineStart: 1, lineEnd: 1 },
+        { key: 'n:6', kind: 'node', id: 'N', label: '"Long term: Zephyr Kafka outputs"', shape: 'rect', lineStart: 2, lineEnd: 2 },
+        { key: 'e:5', kind: 'edge', from: 'N', to: 'Y', operator: '-.->', lineStart: 2, lineEnd: 2 },
+        { key: 'n:7', kind: 'node', id: 'M', label: '"Long term: Kafka fanout<br/>Replacement design TBD"', shape: 'rect', lineStart: 3, lineEnd: 3 },
+        { key: 'e:6', kind: 'edge', from: 'Y', to: 'M', operator: '-.->', lineStart: 3, lineEnd: 3 },
+        { key: 'e:7', kind: 'edge', from: 'M', to: 'V', operator: '-.->', lineStart: 3, lineEnd: 3 },
+      ],
+    });
+  });
+
+  it('parses mixed operators and pipe labels inside one chain', () => {
+    const code = `flowchart TD
+    A -->|one| B -.->|two| C ==> D --- E`;
+    const model = parseModel(code);
+    const edges = model.elements.filter(e => e.kind === 'edge');
+    expect(edges.map(e => ({ from: (e as { from: string }).from, to: (e as { to: string }).to, operator: (e as { operator: string }).operator, label: (e as { label?: string }).label }))).toEqual([
+      { from: 'A', to: 'B', operator: '-->', label: 'one' },
+      { from: 'B', to: 'C', operator: '-.->', label: 'two' },
+      { from: 'C', to: 'D', operator: '==>' },
+      { from: 'D', to: 'E', operator: '---' },
+    ]);
+    expect(model.elements.filter(e => e.kind === 'node').map(e => (e as { id: string }).id)).toEqual(['A', 'B', 'C', 'D', 'E']);
+  });
+
+  it('parses an open-text link inside a chain as one labeled link, then continues the chain', () => {
+    const code = `flowchart TD
+    A[Alpha] -- note --> B[Beta] --> C[Gamma]`;
+    const model = parseModel(code);
+    const edges = model.elements.filter(e => e.kind === 'edge');
+    expect(edges.map(e => ({ from: (e as { from: string }).from, to: (e as { to: string }).to, operator: (e as { operator: string }).operator, label: (e as { label?: string }).label }))).toEqual([
+      { from: 'A', to: 'B', operator: '-->', label: 'note' },
+      { from: 'B', to: 'C', operator: '-->' },
+    ]);
+  });
+
+  it('still parses a lone open-text link as one labeled link, not a link to a node called "text"', () => {
+    const code = `flowchart TD
+    A -- text --> B`;
+    const model = parseModel(code);
+    expect(model.elements).toEqual([
+      { key: 'n:0', kind: 'node', id: 'A', lineStart: 1, lineEnd: 1 },
+      { key: 'n:1', kind: 'node', id: 'B', lineStart: 1, lineEnd: 1 },
+      { key: 'e:0', kind: 'edge', from: 'A', to: 'B', operator: '-->', label: 'text', lineStart: 1, lineEnd: 1 },
+    ]);
+  });
+
+  it('keeps the first declaration of a repeated endpoint in a chain', () => {
+    const code = `flowchart TD
+    A[First] --> B --> A[Second]`;
+    const model = parseModel(code);
+    expect(model.elements).toEqual([
+      { key: 'n:0', kind: 'node', id: 'A', label: 'First', shape: 'rect', lineStart: 1, lineEnd: 1 },
+      { key: 'n:1', kind: 'node', id: 'B', lineStart: 1, lineEnd: 1 },
+      { key: 'e:0', kind: 'edge', from: 'A', to: 'B', operator: '-->', lineStart: 1, lineEnd: 1 },
+      { key: 'e:1', kind: 'edge', from: 'B', to: 'A', operator: '-->', lineStart: 1, lineEnd: 1 },
+    ]);
+  });
+
+  it('does not let a shape token swallow a following link (no phantom edges)', () => {
+    const code = `flowchart LR
+    B["Target topics<br/>facts TBD"] -.-> A["Owned adapter"] -.-> H`;
+    const model = parseModel(code);
+    expect(model.elements).toEqual([
+      { key: 'n:0', kind: 'node', id: 'B', label: '"Target topics<br/>facts TBD"', shape: 'rect', lineStart: 1, lineEnd: 1 },
+      { key: 'n:1', kind: 'node', id: 'A', label: '"Owned adapter"', shape: 'rect', lineStart: 1, lineEnd: 1 },
+      { key: 'n:2', kind: 'node', id: 'H', lineStart: 1, lineEnd: 1 },
+      { key: 'e:0', kind: 'edge', from: 'B', to: 'A', operator: '-.->', lineStart: 1, lineEnd: 1 },
+      { key: 'e:1', kind: 'edge', from: 'A', to: 'H', operator: '-.->', lineStart: 1, lineEnd: 1 },
+    ]);
+  });
+
+  it('skips unrecognized chained lines without erroring', () => {
+    const code = `flowchart TD
+    A --> B & C
+    D -- --> E
+    F[Ok] --> G`;
+    const model = parseModel(code);
+    expect(model.elements.filter(e => e.kind === 'node').map(e => (e as { id: string }).id)).toEqual(['F', 'G']);
+    expect(model.elements.filter(e => e.kind === 'edge').map(e => `${(e as { from: string }).from}->${(e as { to: string }).to}`)).toEqual(['F->G']);
+  });
+
+  it('parses a chain inside a subgraph and standalone nodes around it', () => {
+    const code = `flowchart TD
+    subgraph Cluster
+        A --> B --> C
+    end
+    L[Lone]`;
+    const model = parseModel(code);
+    expect(model.elements).toEqual([
+      { key: 'b:0', kind: 'block', blockType: 'subgraph', title: 'Cluster', lineStart: 1, lineEnd: 3 },
+      { key: 'n:0', kind: 'node', id: 'A', lineStart: 2, lineEnd: 2 },
+      { key: 'n:1', kind: 'node', id: 'B', lineStart: 2, lineEnd: 2 },
+      { key: 'n:2', kind: 'node', id: 'C', lineStart: 2, lineEnd: 2 },
+      { key: 'e:0', kind: 'edge', from: 'A', to: 'B', operator: '-->', lineStart: 2, lineEnd: 2 },
+      { key: 'e:1', kind: 'edge', from: 'B', to: 'C', operator: '-->', lineStart: 2, lineEnd: 2 },
+      { key: 'n:3', kind: 'node', id: 'L', label: 'Lone', shape: 'rect', lineStart: 4, lineEnd: 4 },
+    ]);
+  });
+});

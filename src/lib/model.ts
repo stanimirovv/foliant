@@ -103,9 +103,6 @@ export interface DiagramModel {
 }
 
 const ID = '[A-Za-z0-9_-]+';
-// Same shape vocabulary as the preprocessor: [..] ((..)) (..) {..} >..]
-// (the [..] alternative also covers the [(..)] cylinder shape).
-const SHAPE = String.raw`(?:\[.*?\]|\(\(.*?\)\)|\(.*?\)|\{.*?\}|>.*?\])`;
 
 const CONFIG_LINE_RE = /^%% (?:CONFIG|VIEWS): /;
 const REGION_START_RE = /^%%\s*@region-start:\s*([a-zA-Z0-9_-]+)(?:=([a-zA-Z0-9_-]+))?/;
@@ -159,12 +156,186 @@ const BLOCK_END_RE = /^\s*end\s*$/;
 const BLOCK_CONT_RE = /^\s*(else|and)\b/;
 
 // Flowcharts
-const EDGE_OPS = '<-->|<==>|x--x|o--o|-->|==>|-\\.->|---|--';
-const EDGE_PIPE_RE = new RegExp(`^(\\s*)(${ID})\\s*(${SHAPE})?\\s*(${EDGE_OPS})\\s*\\|([^|]*)\\|\\s*(${ID})\\s*(${SHAPE})?\\s*$`);
-const EDGE_TEXT_RE = new RegExp(`^(\\s*)(${ID})\\s*(${SHAPE})?\\s*(--|---|-\\.)\\s+(.+?)\\s+(${EDGE_OPS}|\\.->|\\.-)\\s*(${ID})\\s*(${SHAPE})?\\s*$`);
-const EDGE_PLAIN_RE = new RegExp(`^(\\s*)(${ID})\\s*(${SHAPE})?\\s*(${EDGE_OPS})\\s*(${ID})\\s*(${SHAPE})?\\s*$`);
-const NODE_LINE_RE = new RegExp(`^(\\s*)(${ID})\\s*(${SHAPE})?\\s*$`);
 const FC_SKIP_RE = /^\s*(direction|click|style|classDef|class|linkStyle|accTitle|accDescr)\b/;
+
+// Flowchart statement scanner ----------------------------------------------
+//
+// Mermaid allows several links on one statement line ("chained edges"):
+// `A --> B --> C`, `A["x"] -.-> B["y"] -.-> C`, `A -- note --> B --> C`.
+// The scanner walks the line left to right and returns its endpoints and
+// links with exact spans, so callers can rebuild the line surgically.
+// Anything unrecognized makes the whole line null — never a partial parse
+// (NFR-01: malformed input is skipped, never an error).
+//
+// The shape vocabulary matches the preprocessor: [..] ((..)) (..) {..} >..]
+// (the [..] alternative also covers the [(..)] cylinder shape). A shape token
+// never contains its own closing delimiter, so it cannot swallow a following
+// link of a chained line.
+
+const FC_ID_RE = /[A-Za-z0-9_-]+/y;
+const FC_SHAPE_RE = /(?:\[[^\]]*\]|\(\([^)]*\)\)|\([^)]*\)|\{[^}]*\}|>[^\]]*\])/y;
+const FC_WS_RE = /[ \t]*/y;
+const FC_PIPE_LABEL_RE = /\|([^|]*)\|/y;
+// Link operators, more specific (longer) forms first — the historical EDGE_OPS
+// alternation order.
+const FC_OPS = ['<-->', '<==>', 'x--x', 'o--o', '-->', '==>', '-.->', '---', '--'];
+// Open-text links (`A -- text --> B`): a leading operator, free text, then a
+// trailing operator. `.->` / `.-` are read as `-.->` (historical behavior).
+const FC_TEXT_SEG_RE = /(---|--|-\.)([ \t]+)(.+?)([ \t]+)(<-->|<==>|x--x|o--o|-->|==>|-\.->|---|--|\.->|\.-)[ \t]*/y;
+
+export interface FlowchartEndpoint {
+  id: string;
+  shapeToken?: string;   // raw shape text including delimiters
+  start: number;         // span of the id plus its optional shape token
+  end: number;
+  idEnd: number;         // end of the id (start of the shape token, if any)
+  shapeStart?: number;
+}
+
+export interface FlowchartSegment {
+  from: number;          // index into ParsedFlowchartLine.endpoints
+  to: number;
+  operator: string;      // normalized: '.->'/'.->' read as '-.->'
+  label?: string;
+  form: 'plain' | 'pipe' | 'text';
+  opStart: number;       // span of the (trailing) operator
+  opEnd: number;
+  labelStart?: number;   // span of the label text (inside the pipes / between the operators)
+  labelEnd?: number;
+  pipeStart?: number;    // span of the whole |label| token (pipe form)
+  pipeEnd?: number;
+  leadOpStart?: number;  // start of the leading operator (text form)
+}
+
+export interface ParsedFlowchartLine {
+  indent: string;
+  endpoints: FlowchartEndpoint[];
+  segments: FlowchartSegment[];
+}
+
+// Parse one flowchart statement line (a standalone node declaration or an
+// edge line, possibly chained) into its endpoints and links. Returns null for
+// anything unrecognized.
+export function parseFlowchartLine(line: string): ParsedFlowchartLine | null {
+  let pos = 0;
+  FC_WS_RE.lastIndex = pos;
+  const indent = FC_WS_RE.exec(line)![0];
+  pos = FC_WS_RE.lastIndex;
+
+  const endpoints: FlowchartEndpoint[] = [];
+  const segments: FlowchartSegment[] = [];
+
+  const skipWs = () => {
+    FC_WS_RE.lastIndex = pos;
+    FC_WS_RE.exec(line);
+    pos = FC_WS_RE.lastIndex;
+  };
+
+  const parseEndpoint = (): number | null => {
+    skipWs();
+    FC_ID_RE.lastIndex = pos;
+    const idMatch = FC_ID_RE.exec(line);
+    if (!idMatch) return null;
+    const id = idMatch[0];
+    const start = pos;
+    const idEnd = FC_ID_RE.lastIndex;
+    pos = idEnd;
+    skipWs();
+    FC_SHAPE_RE.lastIndex = pos;
+    const shapeMatch = FC_SHAPE_RE.exec(line);
+    let end = idEnd;
+    let shapeToken: string | undefined;
+    let shapeStart: number | undefined;
+    if (shapeMatch) {
+      shapeToken = shapeMatch[0];
+      shapeStart = pos;
+      end = FC_SHAPE_RE.lastIndex;
+      pos = end;
+    }
+    endpoints.push({ id, shapeToken, start, end, idEnd, shapeStart });
+    return endpoints.length - 1;
+  };
+
+  const matchOp = (ops: string[]): { op: string; start: number; end: number } | null => {
+    for (const op of ops) {
+      if (line.startsWith(op, pos)) return { op, start: pos, end: pos + op.length };
+    }
+    return null;
+  };
+
+  if (parseEndpoint() === null) return null;
+
+  while (true) {
+    skipWs();
+    if (pos >= line.length) break;
+    const from = endpoints.length - 1;
+
+    // Open-text link (`A -- text --> B`): tried before the plain/pipe forms,
+    // mirroring the historical EDGE_TEXT_RE-before-EDGE_PLAIN_RE order — the
+    // text form wins whenever it matches, so `A -- text --> B` is one labeled
+    // link, not a link to a node called "text".
+    FC_TEXT_SEG_RE.lastIndex = pos;
+    const textSeg = FC_TEXT_SEG_RE.exec(line);
+    if (textSeg) {
+      const leadOpStart = pos;
+      const labelStart = leadOpStart + textSeg[1].length + textSeg[2].length;
+      const labelEnd = labelStart + textSeg[3].length;
+      const trailOpStart = labelEnd + textSeg[4].length;
+      const trailOp = textSeg[5];
+      pos = FC_TEXT_SEG_RE.lastIndex;
+      const to = parseEndpoint();
+      if (to === null) return null;
+      const label = textSeg[3].trim();
+      segments.push({
+        from,
+        to,
+        operator: trailOp === '.->' || trailOp === '.-' ? '-.->' : trailOp,
+        label: label === '' ? undefined : label,
+        form: 'text',
+        opStart: trailOpStart,
+        opEnd: trailOpStart + trailOp.length,
+        labelStart,
+        labelEnd,
+        leadOpStart,
+      });
+      continue;
+    }
+
+    const opM = matchOp(FC_OPS);
+    if (!opM) return null;  // unrecognized token: the whole line is skipped
+    pos = opM.end;
+    skipWs();
+    FC_PIPE_LABEL_RE.lastIndex = pos;
+    const pipeMatch = FC_PIPE_LABEL_RE.exec(line);
+    if (pipeMatch) {
+      const pipeStart = pos;
+      const pipeEnd = FC_PIPE_LABEL_RE.lastIndex;
+      pos = pipeEnd;
+      const label = pipeMatch[1].trim();
+      const to = parseEndpoint();
+      if (to === null) return null;
+      segments.push({
+        from,
+        to,
+        operator: opM.op,
+        label: label === '' ? undefined : label,
+        form: 'pipe',
+        opStart: opM.start,
+        opEnd: opM.end,
+        labelStart: pipeStart + 1,
+        labelEnd: pipeEnd - 1,
+        pipeStart,
+        pipeEnd,
+      });
+      continue;
+    }
+    const to = parseEndpoint();
+    if (to === null) return null;
+    segments.push({ from, to, operator: opM.op, form: 'plain', opStart: opM.start, opEnd: opM.end });
+  }
+
+  return { indent, endpoints, segments };
+}
 
 function detectType(lines: string[]): { type: DiagramType; typeLine: number } {
   for (let i = 0; i < lines.length; i++) {
@@ -223,14 +394,6 @@ export function parseModel(code: string): DiagramModel {
     }
     const el: NodeElement = { key: nextKey('n'), kind: 'node', id, label, shape, lineStart: line, lineEnd: line };
     bump('n');
-    elements.push(el);
-  };
-
-  const pushEdge = (from: string, to: string, operator: string, label: string | undefined, line: number, fromShape?: string, toShape?: string) => {
-    registerNode(from, fromShape, line);
-    registerNode(to, toShape, line);
-    const el: EdgeElement = { key: nextKey('e'), kind: 'edge', from, to, operator, label, lineStart: line, lineEnd: line };
-    bump('e');
     elements.push(el);
   };
 
@@ -352,31 +515,25 @@ export function parseModel(code: string): DiagramModel {
     // Flowchart
     if (FC_SKIP_RE.test(line)) continue;
 
-    const edgePipe = line.match(EDGE_PIPE_RE);
-    if (edgePipe) {
-      const label = edgePipe[5].trim();
-      pushEdge(edgePipe[2], edgePipe[6], edgePipe[4], label === '' ? undefined : label, i, edgePipe[3], edgePipe[7]);
-      continue;
-    }
-
-    const edgeText = line.match(EDGE_TEXT_RE);
-    if (edgeText) {
-      const right = edgeText[6];
-      const operator = (right === '.->' || right === '.-') ? '-.->' : right;
-      const label = edgeText[5].trim();
-      pushEdge(edgeText[2], edgeText[7], operator, label === '' ? undefined : label, i, edgeText[3], edgeText[8]);
-      continue;
-    }
-
-    const edgePlain = line.match(EDGE_PLAIN_RE);
-    if (edgePlain) {
-      pushEdge(edgePlain[2], edgePlain[5], edgePlain[4], undefined, i, edgePlain[3], edgePlain[6]);
-      continue;
-    }
-
-    const nodeLine = line.match(NODE_LINE_RE);
-    if (nodeLine) {
-      registerNode(nodeLine[2], nodeLine[3], i);
+    const fcLine = parseFlowchartLine(line);
+    if (fcLine) {
+      // Register every endpoint first (first declaration wins, as before),
+      // then emit one edge element per link of the chain.
+      for (const ep of fcLine.endpoints) registerNode(ep.id, ep.shapeToken, i);
+      for (const seg of fcLine.segments) {
+        const el: EdgeElement = {
+          key: nextKey('e'),
+          kind: 'edge',
+          from: fcLine.endpoints[seg.from].id,
+          to: fcLine.endpoints[seg.to].id,
+          operator: seg.operator,
+          ...(seg.label !== undefined ? { label: seg.label } : {}),
+          lineStart: i,
+          lineEnd: i,
+        };
+        bump('e');
+        elements.push(el);
+      }
       continue;
     }
     // Unrecognized flowchart line: skipped, never an error.

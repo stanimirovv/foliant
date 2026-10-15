@@ -191,7 +191,7 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
           const regex = new RegExp(`\\b${actor}\\b`, 'g');
           line = line.replace(regex, group.name);
         } else {
-          const shapeRegex = new RegExp(`\\b${actor}\\b(?:\\s*(?:\\[.*?\\]|\\(\\(.*?\\)\\)|\\(.*?\\)|\\{.*?\\}|>.*?\\]))?`, 'g');
+          const shapeRegex = new RegExp(`\\b${actor}\\b(?:\\s*(?:\\[[^\\]]*\\]|\\(\\([^)]*\\)\\)|\\([^)]*\\)|\\{[^}]*\\}|>[^\\]]*\\]))?`, 'g');
           line = line.replace(shapeRegex, `${group.name}[${group.alias}]`);
         }
       }
@@ -208,7 +208,7 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     // Matches flowchart self-calls
     let isFlowchartSelfCall = false;
     for (const mergedName of Array.from(clean)) {
-      const nodePattern = `${mergedName}(?:\\s*\\[.*?\\]|\\s*\\(.*?\\)|\\s*\\{.*?\\}|\\s*>.*?\\])?`;
+      const nodePattern = `${mergedName}(?:\\s*\\[[^\\]]*\\]|\\s*\\([^)]*\\)|\\s*\\{[^}]*\\}|\\s*>[^\\]]*\\])?`;
       const edgePattern = `(?:---|-->|==>|==|-.->|-.-|<-->|<==>|x--x|o--o)(?:\\s*\\|.*?\\|)?`;
       const selfCallRegex = new RegExp(`^\\s*${nodePattern}\\s*${edgePattern}\\s*${nodePattern}\\s*$`);
       if (selfCallRegex.test(line)) {

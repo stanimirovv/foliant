@@ -4,7 +4,7 @@
 // (NFR-02), and malformed input is a no-op with a warning, never a
 // corruption (NFR-01).
 
-import { parseModel, parseShapeToken, parseParticipantLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeShape, ParticipantType } from './model';
+import { parseModel, parseShapeToken, parseParticipantLine, parseFlowchartLine, ParsedFlowchartLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeShape, ParticipantType } from './model';
 import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, DiagramConfig, NoteTagEntry, updateViewsData } from './views';
 import { ANIMATED_ARROW_COLORS } from './styling';
 
@@ -20,7 +20,9 @@ export interface EditResult {
 export type ArrowStylePatch = Pick<ArrowStyle, 'color' | 'width' | 'dash' | 'animation'>;
 
 const ID = '[A-Za-z0-9_-]+';
-const SHAPE = String.raw`(?:\[.*?\]|\(\(.*?\)\)|\(.*?\)|\{.*?\}|>.*?\])`;
+// A shape token never contains its own closing delimiter, so on a chained
+// edge line (`A["x"] --> B["y"] --> C["z"]`) it cannot swallow a following link.
+const SHAPE = String.raw`(?:\[[^\]]*\]|\(\([^)]*\)\)|\([^)]*\)|\{[^}]*\}|>[^\]]*\])`;
 const FC_OPS = '<-->|<==>|x--x|o--o|-->|==>|-\\.->|---|--';
 
 const SEQUENCE_OPERATORS = new Set(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '->o', '-->o', '->*', '-->*', '-', '--']);
@@ -238,10 +240,61 @@ function toEndpoint(id: string, wsBeforeShape: string, shape: string | undefined
   return { text: `${id}${wsBeforeShape}${newShape}`, trailing };
 }
 
+// Apply non-overlapping [start, end) replacements to a line.
+function spliceLine(line: string, replacements: { start: number; end: number; text: string }[]): string {
+  let out = line;
+  for (const r of [...replacements].sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, r.start) + r.text + out.slice(r.end);
+  }
+  return out;
+}
+
+// Rewrite the shape token of every endpoint with id nodeId on a chained edge
+// line. makeShape maps the current shape token to its replacement: undefined
+// keeps the endpoint byte-identical, '' drops the shape (bare id), anything
+// else replaces the token (keeping any whitespace between id and shape).
+// Returns the new line, null for a no-op, or undefined when the line does not
+// define nodeId.
+function rewriteChainedNodeShape(
+  line: string,
+  parsed: ParsedFlowchartLine,
+  nodeId: string,
+  makeShape: (shapeToken: string | undefined) => string | undefined,
+): string | null | undefined {
+  const matching = parsed.endpoints.filter(ep => ep.id === nodeId);
+  if (matching.length === 0) return undefined;
+  const replacements: { start: number; end: number; text: string }[] = [];
+  for (const ep of matching) {
+    const newShape = makeShape(ep.shapeToken);
+    if (newShape === undefined) continue;
+    const text = newShape === ''
+      ? ep.id
+      : ep.shapeToken === undefined
+        ? `${ep.id}${newShape}`
+        : `${ep.id}${line.slice(ep.idEnd, ep.shapeStart!)}${newShape}`;
+    replacements.push({ start: ep.start, end: ep.end, text });
+  }
+  if (replacements.length === 0) return null;
+  return spliceLine(line, replacements);
+}
+
+// Index of an arrow element among the arrows sharing its line, in source
+// order — the position of its link on a chained flowchart edge line.
+function arrowSegmentIndex(model: ReturnType<typeof parseModel>, el: ModelElement): number {
+  const sameLine = model.elements.filter(
+    e => (e.kind === 'message' || e.kind === 'edge') && e.lineStart === el.lineStart
+  );
+  return sameLine.findIndex(e => e.key === el.key);
+}
+
 // Rewrite the label of node nodeId on its defining line (standalone node line
 // or an edge line). Returns the new line, null for a no-op, or undefined when
 // the line does not define nodeId.
 function rewriteFlowchartNodeLabel(line: string, nodeId: string, alias: string): string | null | undefined {
+  const chained = parseFlowchartLine(line);
+  if (chained && chained.segments.length > 1) {
+    return rewriteChainedNodeShape(line, chained, nodeId, (shapeToken) => shapeTokenForAlias(shapeToken, alias));
+  }
   const pipe = line.match(FC_EDGE_PIPE_V);
   if (pipe) {
     if (pipe[2] !== nodeId && pipe[11] !== nodeId) return undefined;
@@ -285,6 +338,10 @@ function shapeTokenForShape(shapeToken: string | undefined, newShape: NodeShape,
 }
 
 function rewriteFlowchartNodeShape(line: string, nodeId: string, shape: NodeShape, defaultLabel: string): string | null | undefined {
+  const chained = parseFlowchartLine(line);
+  if (chained && chained.segments.length > 1) {
+    return rewriteChainedNodeShape(line, chained, nodeId, (shapeToken) => shapeTokenForShape(shapeToken, shape, defaultLabel));
+  }
   const pipe = line.match(FC_EDGE_PIPE_V);
   if (pipe) {
     if (pipe[2] !== nodeId && pipe[11] !== nodeId) return undefined;
@@ -359,8 +416,34 @@ export function setNodeShape(
 }
 
 // Rewrite the label of a flowchart edge (pipe form, open-text form, or plain).
+// segmentIndex selects the link on a chained edge line (source order).
 // Returns the new line, null for a no-op, or undefined for a non-edge line.
-function rewriteFlowchartEdgeLabel(line: string, newLabel: string): string | null | undefined {
+function rewriteFlowchartEdgeLabel(line: string, newLabel: string, segmentIndex: number = 0): string | null | undefined {
+  const chained = parseFlowchartLine(line);
+  if (chained && chained.segments.length > 1) {
+    const seg = chained.segments[segmentIndex];
+    if (!seg) return undefined;
+    const toEp = chained.endpoints[seg.to];
+    if (seg.form === 'pipe') {
+      if (newLabel === '') {
+        // Drop the |label| token, collapsing the surrounding whitespace.
+        const wsBefore = line.slice(seg.opEnd, seg.pipeStart!);
+        const wsAfter = line.slice(seg.pipeEnd!, toEp.start);
+        return spliceLine(line, [{ start: seg.opEnd, end: toEp.start, text: wsBefore || wsAfter || ' ' }]);
+      }
+      return spliceLine(line, [{ start: seg.labelStart!, end: seg.labelEnd!, text: newLabel }]);
+    }
+    if (seg.form === 'text') {
+      if (newLabel === '') {
+        // Normalize the open-text link to a plain link with the trailing operator.
+        return spliceLine(line, [{ start: seg.leadOpStart!, end: toEp.start, text: `${seg.operator} ` }]);
+      }
+      return spliceLine(line, [{ start: seg.labelStart!, end: seg.labelEnd!, text: newLabel }]);
+    }
+    if (newLabel === '') return null;  // plain link: nothing to clear
+    // Inject a pipe label right after the operator.
+    return spliceLine(line, [{ start: seg.opEnd, end: seg.opEnd, text: `|${newLabel}|` }]);
+  }
   const pipe = line.match(FC_EDGE_PIPE_V);
   if (pipe) {
     const fromText = `${pipe[2]}${pipe[3]}${pipe[4] ?? ''}`;
@@ -392,9 +475,22 @@ function rewriteFlowchartEdgeLabel(line: string, newLabel: string): string | nul
 }
 
 // Replace the operator of a flowchart edge in place; the open-text form is
-// normalized to the pipe form. Returns the new line or undefined for a
+// normalized to the pipe form. segmentIndex selects the link on a chained
+// edge line (source order). Returns the new line or undefined for a
 // non-edge line.
-function rewriteFlowchartEdgeOperator(line: string, operator: string): string | undefined {
+function rewriteFlowchartEdgeOperator(line: string, operator: string, segmentIndex: number = 0): string | undefined {
+  const chained = parseFlowchartLine(line);
+  if (chained && chained.segments.length > 1) {
+    const seg = chained.segments[segmentIndex];
+    if (!seg) return undefined;
+    if (seg.form === 'text') {
+      // Normalize the open-text link to a pipe link.
+      const toEp = chained.endpoints[seg.to];
+      const ws = line.slice(seg.opEnd, toEp.start);
+      return spliceLine(line, [{ start: seg.leadOpStart!, end: toEp.start, text: `${operator} |${seg.label ?? ''}|${ws || ' '}` }]);
+    }
+    return spliceLine(line, [{ start: seg.opStart, end: seg.opEnd, text: operator }]);
+  }
   const pipe = line.match(FC_EDGE_PIPE_V);
   if (pipe) {
     const fromText = `${pipe[2]}${pipe[3]}${pipe[4] ?? ''}`;
@@ -406,33 +502,6 @@ function rewriteFlowchartEdgeOperator(line: string, operator: string): string | 
     const fromText = `${text[2]}${text[3]}${text[4] ?? ''}`;
     const toText = `${text[12]}${text[13]}${text[14] ?? ''}`;
     return `${text[1]}${fromText}${text[5]}${operator} |${text[8]}|${text[11] || ' '}${toText}${text[15]}`;
-  }
-  return undefined;
-}
-
-// Endpoints of a flowchart edge line (pipe form or open-text form): the
-// indent plus each endpoint's id and full declaration (id + shape token).
-// Undefined for standalone node lines and other non-edge lines.
-function flowchartEdgeEndpoints(line: string): { indent: string; fromId: string; fromDecl: string; toId: string; toDecl: string } | undefined {
-  const pipe = line.match(FC_EDGE_PIPE_V);
-  if (pipe) {
-    return {
-      indent: pipe[1],
-      fromId: pipe[2],
-      fromDecl: `${pipe[2]}${pipe[3]}${pipe[4] ?? ''}`.trimEnd(),
-      toId: pipe[11],
-      toDecl: `${pipe[11]}${pipe[12]}${pipe[13] ?? ''}`.trimEnd(),
-    };
-  }
-  const text = line.match(FC_EDGE_TEXT_V);
-  if (text) {
-    return {
-      indent: text[1],
-      fromId: text[2],
-      fromDecl: `${text[2]}${text[3]}${text[4] ?? ''}`.trimEnd(),
-      toId: text[12],
-      toDecl: `${text[12]}${text[13]}${text[14] ?? ''}`.trimEnd(),
-    };
   }
   return undefined;
 }
@@ -519,7 +588,7 @@ export function editMessageLabel(code: string, config: DiagramConfig | null, key
   const line = code.split('\n')[el.lineStart];
   const newLine = model.type === 'sequence'
     ? rewriteSequenceMessageLabel(line, newLabel)
-    : rewriteFlowchartEdgeLabel(line, newLabel);
+    : rewriteFlowchartEdgeLabel(line, newLabel, arrowSegmentIndex(model, el));
   if (newLine === undefined) return fail(code, config, `Cannot parse message line: ${line.trim()}`);
   if (newLine === null) return { code, config }; // nothing to clear
   const newCode = replaceLines(code, el.lineStart, el.lineEnd, [newLine]);
@@ -571,7 +640,7 @@ export function setArrowType(code: string, config: DiagramConfig | null, key: st
   const line = code.split('\n')[el.lineStart];
   const newLine = model.type === 'sequence'
     ? rewriteSequenceMessageOperator(line, operator)
-    : rewriteFlowchartEdgeOperator(line, operator);
+    : rewriteFlowchartEdgeOperator(line, operator, arrowSegmentIndex(model, el));
   if (newLine === undefined || newLine === null) return fail(code, config, `Cannot parse message line: ${line.trim()}`);
   return { code: replaceLines(code, el.lineStart, el.lineEnd, [newLine]), config };
 }
@@ -1123,17 +1192,15 @@ export function moveNode(
   let declText: string;
   let indent: string;
   let isStandalone = false;
-  const standaloneMatch = firstLine.match(FC_NODE_V);
-  if (standaloneMatch && standaloneMatch[2] === el.id) {
-    isStandalone = true;
-    declText = firstLine.trim();
-    indent = standaloneMatch[1];
+  const parsedFirst = parseFlowchartLine(firstLine);
+  const firstEndpoint = parsedFirst?.endpoints.find(e => e.id === el.id);
+  if (parsedFirst && firstEndpoint) {
+    isStandalone = parsedFirst.segments.length === 0;
+    declText = firstLine.slice(firstEndpoint.start, firstEndpoint.end);
+    indent = parsedFirst.indent;
   } else {
-    const endpoints = flowchartEdgeEndpoints(firstLine);
-    declText = endpoints
-      ? (endpoints.fromId === el.id ? endpoints.fromDecl : endpoints.toDecl)
-      : (el.label ? `${el.id}[${el.label}]` : el.id);
-    indent = endpoints?.indent ?? '    ';
+    declText = el.label ? `${el.id}[${el.label}]` : el.id;
+    indent = '    ';
   }
 
   let newLines: string[];
@@ -1153,14 +1220,8 @@ export function moveNode(
     // with it, as a block, landing immediately before the target line.
     const mentions: number[] = [];
     for (let i = 0; i < insertAt; i++) {
-      const line = lines[i];
-      const node = line.match(FC_NODE_V);
-      if (node && node[2] === el.id) {
-        mentions.push(i);
-        continue;
-      }
-      const endpoints = flowchartEdgeEndpoints(line);
-      if (endpoints && (endpoints.fromId === el.id || endpoints.toId === el.id)) {
+      const parsed = parseFlowchartLine(lines[i]);
+      if (parsed && parsed.endpoints.some(ep => ep.id === el.id)) {
         mentions.push(i);
       }
     }
@@ -1216,35 +1277,65 @@ export function deleteElement(code: string, config: DiagramConfig | null, key: s
   if (model.type === 'flowchart') {
     const firstDeclaredHere = (id: string, lineNo: number) =>
       model.elements.some(e => e.kind === 'node' && e.id === id && e.lineStart === lineNo);
-    // A deleted node's own declaration must never survive on a rewritten line.
-    const deletedNodeId = el.kind === 'node' ? el.id : undefined;
-    for (const r of [el, ...cascaded]) {
-      if (!removed.has(r)) continue; // already rewritten away by a sibling element
+    // Group the removed elements by their line: a chained edge line can carry
+    // several of them, and it is rebuilt once — keeping the surviving links
+    // and re-declaring endpoints whose only declaration was on that line.
+    const byLine = new Map<number, ModelElement[]>();
+    for (const r of removed) {
       if (r.lineStart !== r.lineEnd) continue;
-      const endpoints = flowchartEdgeEndpoints(lines[r.lineStart]);
-      if (!endpoints) continue;
-      if (r.kind === 'node') {
-        if (endpoints.fromId !== r.id && endpoints.toId !== r.id) continue;
-        if (endpoints.fromId === endpoints.toId) continue; // self-loop: nothing survives
-        const keptId = endpoints.fromId === r.id ? endpoints.toId : endpoints.fromId;
-        const keptDecl = endpoints.fromId === r.id ? endpoints.toDecl : endpoints.fromDecl;
-        // Declared on an earlier line: plain removal loses nothing.
-        if (!firstDeclaredHere(keptId, r.lineStart)) continue;
-        rewriteAt.set(r.lineStart, [`${endpoints.indent}${keptDecl}`]);
-        removed.delete(r);
-        const shared = cascaded.find(c => isArrow(c) && c.lineStart === r.lineStart &&
-          c.lineEnd === r.lineEnd && (c.from === r.id || c.to === r.id));
-        if (shared) removed.delete(shared);
-      } else if (r.kind === 'edge') {
-        const keepFrom = endpoints.fromId !== deletedNodeId && firstDeclaredHere(r.from, r.lineStart);
-        const keepTo = endpoints.fromId !== endpoints.toId && endpoints.toId !== deletedNodeId && firstDeclaredHere(r.to, r.lineStart);
-        if (!keepFrom && !keepTo) continue;
-        const decls: string[] = [];
-        if (keepFrom) decls.push(`${endpoints.indent}${endpoints.fromDecl}`);
-        if (keepTo) decls.push(`${endpoints.indent}${endpoints.toDecl}`);
-        rewriteAt.set(r.lineStart, decls);
-        removed.delete(r);
+      const list = byLine.get(r.lineStart) ?? [];
+      list.push(r);
+      byLine.set(r.lineStart, list);
+    }
+    for (const [lineNo, rs] of byLine) {
+      const parsed = parseFlowchartLine(lines[lineNo]);
+      // Standalone node line or unparseable line: plain removal loses nothing.
+      if (!parsed || parsed.segments.length === 0) continue;
+      const sameLineEdges = model.elements.filter(e => e.kind === 'edge' && e.lineStart === lineNo);
+      const removedSegments = new Set<number>();
+      // A deleted node's own declaration must never survive on a rewritten line.
+      const removedNodeIds = new Set<string>();
+      for (const r of rs) {
+        if (r.kind === 'node') removedNodeIds.add(r.id);
+        else if (r.kind === 'edge') {
+          const idx = sameLineEdges.findIndex(e => e.key === r.key);
+          if (idx >= 0) removedSegments.add(idx);
+        }
       }
+      // A link survives unless it is removed directly or touches a deleted node.
+      const keptSegment = parsed.segments.map((seg, idx) => {
+        if (removedSegments.has(idx)) return false;
+        return !removedNodeIds.has(parsed.endpoints[seg.from].id)
+          && !removedNodeIds.has(parsed.endpoints[seg.to].id);
+      });
+      const inKeptSegment = (epIdx: number) =>
+        keptSegment.some((kept, segIdx) => kept &&
+          (parsed.segments[segIdx].from === epIdx || parsed.segments[segIdx].to === epIdx));
+      // Rebuild the line: surviving links stay chained (original text and
+      // order); an endpoint left with no surviving link keeps its declaration
+      // as a standalone line when this line was its first declaration.
+      const newLines: string[] = [];
+      let i = 0;
+      while (i < parsed.endpoints.length) {
+        const ep = parsed.endpoints[i];
+        if (!removedNodeIds.has(ep.id) && !inKeptSegment(i) && firstDeclaredHere(ep.id, lineNo)) {
+          newLines.push(`${parsed.indent}${lines[lineNo].slice(ep.start, ep.end)}`);
+          i++;
+          continue;
+        }
+        if (keptSegment[i]) {
+          // A run of consecutive surviving links: endpoints i..j+1.
+          let j = i;
+          while (j + 1 < keptSegment.length && keptSegment[j + 1]) j++;
+          newLines.push(`${parsed.indent}${lines[lineNo].slice(parsed.endpoints[i].start, parsed.endpoints[j + 1].end)}`);
+          i = j + 2;
+          continue;
+        }
+        i++;
+      }
+      if (newLines.length === 0) continue;  // the whole line drops
+      rewriteAt.set(lineNo, newLines);
+      for (const r of rs) removed.delete(r);
     }
   }
 

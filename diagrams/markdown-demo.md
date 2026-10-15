@@ -16,9 +16,9 @@ notes, saved views) round-trip through the markdown save.
 %% CONFIG: {"version":1,"arrows":[{"from":"C","to":"API","label":"New message","color":"#00ff9d","animation":"flow"}]}
 sequenceDiagram
     participant C as Client
-    participant API as API Gateway
-    participant Auth as Auth Service
     participant DB as Database
+    participant Auth as Auth Service
+    participant API as API Gateway
 
     C->>API: POST /login
     API->>Auth: Validate Credentials
