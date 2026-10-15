@@ -2559,6 +2559,34 @@ sequenceDiagram
       });
     });
 
+    it('switching from a markdown document to an embedded diagram never passes markdown prose to DiagramViewer', async () => {
+      mockParams({ file: 'notes.md' });
+      mockMarkdownDocFetch(MD_DOC);
+      const mockFetch = global.fetch as import('vitest').Mock;
+      const origImpl = mockFetch.getMockImplementation();
+      mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
+        const u = String(url);
+        if (u.startsWith('/api/markdown/diagram?')) {
+          return { ok: true, json: async () => ({ file: 'notes.md', index: 0, content: BLOCK0 }) };
+        }
+        return origImpl(url, init);
+      });
+
+      const { rerender } = render(<ClientPage />);
+      await screen.findByTestId('markdown-editor');
+
+      mockParams({ file: 'notes.md', diagram: '0' });
+      rerender(<ClientPage />);
+
+      const viewer = await screen.findByTestId('diagram-viewer');
+      expect(viewer.getAttribute('data-code')).not.toContain('# Notes');
+      expect(viewer.getAttribute('data-code')).not.toContain('Some prose');
+
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('A->>B: First diagram');
+      });
+    });
+
     it('clicking a markdown file clears the diagram param', async () => {
       mockParams({ file: 'notes.md', diagram: '1' });
       mockMarkdownFetch();

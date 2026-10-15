@@ -102,6 +102,23 @@ export interface DiagramModel {
   elements: ModelElement[];     // in source order
 }
 
+export const MERMAID_DIAGRAM_KEYWORDS = /^(sequenceDiagram|flowchart|graph|classDiagram|stateDiagram|erDiagram|gantt|pie|journey|gitGraph|mindmap|timeline|sankey|quadrantChart|xyChart|block|packet|architecture|kanban|radar|treemap|info|requirementDiagram|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment|agentflow|swimlane)/i;
+
+export function looksLikeMermaidDiagram(content: string): boolean {
+  let inFrontmatter = false;
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('%%')) continue;
+    if (trimmed === '---') {
+      inFrontmatter = !inFrontmatter;
+      continue;
+    }
+    if (inFrontmatter) continue;
+    return MERMAID_DIAGRAM_KEYWORDS.test(trimmed);
+  }
+  return false;
+}
+
 const ID = '[A-Za-z0-9_-]+';
 
 const CONFIG_LINE_RE = /^%% (?:CONFIG|VIEWS): /;

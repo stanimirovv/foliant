@@ -3,10 +3,10 @@
 import { useEffect, useState, useRef, useMemo, MouseEvent as ReactMouseEvent } from 'react';
 import mermaid from 'mermaid';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import { parseModel, ParticipantElement } from '@/lib/model';
-import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, markPanExclusionTargets, PAN_EXCLUDE_CLASS } from '@/lib/styling';
+import { parseModel, ParticipantElement, looksLikeMermaidDiagram } from '@/lib/model';
+import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, PAN_EXCLUDE_CLASS } from '@/lib/styling';
 import {
-  elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf,
+  elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf, zipModelToSvg, EDGE_HIT_CLASS,
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
   nearestParticipantAtX, nearestMessageKeyAt,
   sequenceConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
@@ -402,7 +402,10 @@ export default function DiagramViewer({
   // connect handle, grab on a movable body.
   const [hoverConnectHandle, setHoverConnectHandle] = useState<{ x: number; y: number; participantKey: string; participantId: string } | null>(null);
   const [hoverNode, setHoverNode] = useState<ParticipantScreenInfo | null>(null);
-  const [cursorHint, setCursorHint] = useState<'grab' | 'crosshair' | null>(null);
+  // Processed key of the hovered flowchart edge (its invisible hit path makes
+  // the hover target a ~12px band, so unlabeled edges are discoverable).
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+  const [cursorHint, setCursorHint] = useState<'grab' | 'crosshair' | 'pointer' | null>(null);
 
   // In edit mode, dragging a participant (sequence) or a node (flowchart)
   // must not pan the screen — exclude those elements from TransformWrapper
@@ -470,35 +473,40 @@ export default function DiagramViewer({
     );
     let isMounted = true;
     const renderDiagram = async () => {
+      // Add a random ID to prevent caching issues if code changes but ID doesn't
+      const id = `mermaid-svg-${Math.random().toString(36).substr(2, 9)}`;
       try {
         setError(null);
-        // Add a random ID to prevent caching issues if code changes but ID doesn't
-        const id = `mermaid-svg-${Math.random().toString(36).substr(2, 9)}`;
         const { svg } = await mermaid.render(id, code);
         // Post-process: normalize sequence diagram layers, apply arrow styles
-        // and node colors, tag pan-exclusion targets (after the arrow styles,
-        // which create the .arrow-anim-packet-runner / .arrow-x-mark overlays)
+        // and node colors, add the invisible per-edge hit paths (after the
+        // arrow styles, which create the .arrow-anim-packet-runner /
+        // .arrow-x-mark overlays), then tag pan-exclusion targets.
         const model = parseModel(code);
         let styled = reorderSequenceLayers(svg);
         styled = applyArrowStyles(styled, model, arrowStyles);
         styled = applyNodeColors(styled, nodeColors);
+        styled = addEdgeHitPaths(styled);
         styled = markPanExclusionTargets(styled);
         if (isMounted) {
           setSvgStr(styled);
         }
       } catch (err: unknown) {
+        if (typeof document !== 'undefined') {
+          document.getElementById(`d${id}`)?.remove();
+        }
         if (isMounted) {
           const e = err as Error;
           setError(e.message || 'Error rendering diagram');
         }
       }
     };
-    if (code) {
+    if (code && looksLikeMermaidDiagram(code)) {
       renderDiagram();
     } else {
       // No diagram to show (e.g. the active directory has no .mmd files, or
-      // the directory was just switched): drop the previous render instead of
-      // leaving the old diagram on screen.
+      // the directory was just switched, or content is not a mermaid diagram):
+      // drop the previous render instead of leaving the old diagram on screen.
       setSvgStr('');
       setError(null);
     }
@@ -577,6 +585,33 @@ export default function DiagramViewer({
     }
   }, [svgStr, selectedProcessedKeys, editMode, code]);
 
+  // Edge hover affordance: the hovered edge's invisible hit path lights up as
+  // a translucent band and the visible edge gets a soft glow, so unlabeled
+  // edges (selectable only through the hit path) are discoverable. Re-applied
+  // after every render, like the selection highlight.
+  useEffect(() => {
+    const container = document.getElementById('diagram-container');
+    if (!container) return;
+    container.querySelectorAll('.edge-hover').forEach(el => el.classList.remove('edge-hover'));
+    if (!editMode || !hoverEdge) return;
+    const svgRoot = container.querySelector('svg');
+    if (!svgRoot) return;
+    const model = parseModel(code);
+    if (model.type !== 'flowchart') return;
+    const edges = model.elements.filter(e => e.kind === 'edge');
+    const i = edges.findIndex(e => e.key === hoverEdge);
+    if (i < 0) return;
+    const visible = zipModelToSvg(svgRoot, model).edges[i];
+    if (!visible) return;
+    visible.classList.add('edge-hover');
+    const dataId = visible.getAttribute('data-id');
+    if (dataId) {
+      svgRoot.querySelectorAll(`path.${EDGE_HIT_CLASS}`).forEach(h => {
+        if (h.getAttribute('data-id') === dataId) h.classList.add('edge-hover');
+      });
+    }
+  }, [svgStr, hoverEdge, editMode, code]);
+
   // --- Drag interactions (edit mode) -------------------
   // "Handles connect, body moves" — every region of an element does exactly
   // one thing, and every action has a visible handle. The drag type is
@@ -609,6 +644,9 @@ export default function DiagramViewer({
   //   - Node box (g.node) → move: drag and release over empty space to
   //     reorder the node (a dashed indicator shows the insertion position
   //     along the layout axis — horizontal for TD/BT, vertical for LR/RL).
+  //   - Edge (its ~12px invisible hit band, the visible stroke, or the label
+  //     box) → select: the press selects the edge immediately and never pans
+  //     the canvas (edges have no drag interaction).
 
   const getSvgAndModel = () => {
     const container = document.getElementById('diagram-container');
@@ -619,11 +657,14 @@ export default function DiagramViewer({
 
   // Hover affordances: hovering an actor column (sequence) or a node
   // (flowchart) reveals its connect handle(s) and sets the cursor hint —
-  // crosshair on a connect handle, grab on a movable body.
+  // crosshair on a connect handle, grab on a movable body. Hovering a
+  // flowchart edge glows it (unlabeled edges are only selectable through
+  // their invisible hit path — hover makes the target discoverable).
   const handleContainerMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (!editMode || isVisualLocked || dragRef.current?.isDragging) {
       if (hoverConnectHandle) setHoverConnectHandle(null);
       if (hoverNode) setHoverNode(null);
+      if (hoverEdge) setHoverEdge(null);
       if (cursorHint) setCursorHint(null);
       return;
     }
@@ -668,12 +709,29 @@ export default function DiagramViewer({
         setHoverNode(hovered);
         const nearHandle = nearestNodeHandleAt(hovered, e.clientX, e.clientY) !== null;
         setCursorHint(nearHandle ? 'crosshair' : 'grab');
+        if (hoverEdge) setHoverEdge(null);
         return;
       }
+      // No node under the cursor: an edge is hovered when the event target
+      // resolves to one. The invisible fat hit path (addEdgeHitPaths) makes
+      // the browser do the proximity work — within its band the target is the
+      // edge's hit path (or its visible stroke / label box).
+      const key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model, { x: e.clientX, y: e.clientY });
+      const el = key ? ctx.model.elements.find(e2 => e2.key === key) : null;
+      const edgeKey = el?.kind === 'edge' ? el.key : null;
+      if (edgeKey !== hoverEdge) setHoverEdge(edgeKey);
+      if (edgeKey) {
+        setCursorHint('pointer');
+      } else if (cursorHint) {
+        setCursorHint(null);
+      }
+      if (hoverNode) setHoverNode(null);
+      return;
     }
 
     if (hoverConnectHandle) setHoverConnectHandle(null);
     if (hoverNode) setHoverNode(null);
+    if (hoverEdge) setHoverEdge(null);
     if (cursorHint) setCursorHint(null);
   };
 
@@ -784,8 +842,14 @@ export default function DiagramViewer({
           // Node box → move (reorder along the layout axis).
           dragType = 'node';
           participantKey = key;
+        } else if (el?.kind === 'edge') {
+          // Edge press: select immediately and prevent canvas pan from
+          // hijacking the click (the hit path is pan-excluded as well).
+          e.stopPropagation();
+          e.preventDefault();
+          onSelect(key);
+          return;
         }
-        // Edges: no drag — the click handler manages selection.
       }
     }
 
@@ -836,6 +900,7 @@ export default function DiagramViewer({
     suppressClickRef.current = false;
     setHoverConnectHandle(null);
     setHoverNode(null);
+    setHoverEdge(null);
     setCursorHint(null);
 
     // Select the participant/node (or the grabbed message) on press.
@@ -1261,6 +1326,7 @@ export default function DiagramViewer({
         onMouseLeave={() => {
           setHoverConnectHandle(null);
           setHoverNode(null);
+          setHoverEdge(null);
           setCursorHint(null);
         }}
       >
@@ -1290,7 +1356,7 @@ export default function DiagramViewer({
                 )}
               </div>
             ) : (
-              !code && !error && (
+              (!code || !looksLikeMermaidDiagram(code)) && !error && (
                 <div
                   className={`text-sm select-none ${theme === 'dark' ? 'text-slate-500' : 'text-gray-400'}`}
                   data-testid="no-diagram"

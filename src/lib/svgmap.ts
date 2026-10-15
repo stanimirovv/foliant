@@ -26,11 +26,21 @@
 //                        "L_<from>_<to>_<n>", DOM order = statement order,
 //                        marker-end (+ marker-start for <-->). Labels live in
 //                        g.edgeLabel g.label[data-id] > span.edgeLabel.
+//                        Every edge also gets an invisible fat hit path
+//                        (path.edge-hit, injected by addEdgeHitPaths) with
+//                        the same d/data-id — the reliable click target for
+//                        unlabeled edges, whose visible stroke is only ~2px.
 //   flowchart cluster    | g.cluster (subgraphs; not a node, not selectable).
 
 import { DiagramModel, ModelElement, ParticipantElement, MessageElement, NoteElement, NodeElement, EdgeElement, parseModel } from './model';
 import { ActorTransformOptions, buildActorRewriteMap } from './preprocessor';
 import { DiagramConfig } from './views';
+
+// Class of the invisible per-edge hit path injected by addEdgeHitPaths
+// (styling.ts): a transparent, non-scaling-stroke sibling of the visible edge
+// path that makes unlabeled edges reliably selectable. Kept here (not in
+// styling.ts) because styling.ts already imports from this module.
+export const EDGE_HIT_CLASS = 'edge-hit';
 
 export interface SvgZip {
   participants: (Element | null)[];  // aligned with model participant elements (source order)
@@ -376,6 +386,18 @@ export function elementKeyAtTarget(
 
     const edge = target.closest('path[data-et="edge"]');
     if (edge) return keyFromList(edges, zip.edges, edge);
+
+    // Invisible fat hit path (addEdgeHitPaths): carries the same data-id as
+    // its visible edge path, so it resolves to the same model edge.
+    const hit = target.closest(`path.${EDGE_HIT_CLASS}`);
+    if (hit) {
+      const dataId = hit.getAttribute('data-id');
+      if (dataId) {
+        const i = zip.edges.findIndex(el => el !== null && el.getAttribute('data-id') === dataId);
+        if (i >= 0) return edges[i].key;
+      }
+      return null;
+    }
 
     const label = target.closest('g.edgeLabel');
     if (label) {

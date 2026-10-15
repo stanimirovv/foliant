@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { parseModel, DiagramModel, ParticipantElement, MessageElement } from './model';
-import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, SvgZip } from './svgmap';
+import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, SvgZip, EDGE_HIT_CLASS } from './svgmap';
+import { addEdgeHitPaths } from './styling';
 import { transformActors, processMermaid } from './preprocessor';
 import { DiagramConfig } from './views';
 import { createSequenceDiagram, createFlowchartDiagram, renderPipeline } from './editorTestHarness';
@@ -163,6 +164,21 @@ describe('elementKeyAtTarget (flowchart fixture)', () => {
     expect(elementKeyAtTarget(svg.querySelector('path[data-id="L_A_B_0"]'), svg, model)).toBe('e:0');
     expect(elementKeyAtTarget(svg.querySelector('g.edgeLabel div'), svg, model)).toBe('e:1');
     expect(elementKeyAtTarget(svg.querySelector('g.edgeLabel span.edgeLabel p'), svg, model)).toBe('e:1');
+  });
+
+  it('resolves the invisible edge hit paths via their data-id', () => {
+    const withHits = parseSvg(addEdgeHitPaths(FLOW_SVG));
+    const hits = withHits.querySelectorAll(`path.${EDGE_HIT_CLASS}`);
+    expect(hits.length).toBe(2);
+    expect(elementKeyAtTarget(hits[0], withHits, model)).toBe('e:0');
+    expect(elementKeyAtTarget(hits[1], withHits, model)).toBe('e:1');
+    // a hit path whose data-id matches no zipped edge resolves to null
+    const orphan = withHits.querySelector(`path.${EDGE_HIT_CLASS}`)!.cloneNode() as Element;
+    orphan.setAttribute('data-id', 'L_NOPE_NOPE_0');
+    withHits.querySelector('g.edgePaths')!.appendChild(orphan);
+    expect(elementKeyAtTarget(orphan, withHits, model)).toBeNull();
+    // nodes still resolve (nodes are checked before hit paths)
+    expect(elementKeyAtTarget(withHits.querySelector('g.node[id$="-A-0"]'), withHits, model)).toBe('n:0');
   });
 
   it('returns null for clusters and the svg root', () => {

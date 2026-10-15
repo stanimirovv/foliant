@@ -16,23 +16,8 @@ export interface MermaidBlockPreviewProps {
   onSelect: () => void;
 }
 
-// Mermaid diagram type keywords (first meaningful token of the diagram source).
-// Used to validate that the content is actually a mermaid diagram before
-// passing it to mermaid.render — guards against upstream bugs that pass
-// non-diagram text (e.g. markdown prose) as block content.
-const MERMAID_DIAGRAM_KEYWORDS = /^(sequenceDiagram|flowchart|graph|classDiagram|stateDiagram|erDiagram|gantt|pie|journey|gitGraph|mindmap|timeline|sankey|quadrantChart|xyChart|block|packet|architecture|kanban|radar|treemap|info|requirementDiagram|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment|agentflow|swimlane)/i;
-
-// Returns true when the content looks like a mermaid diagram: after stripping
-// %% comment lines and blank lines, the first remaining line starts with a
-// known diagram keyword. Exported for tests.
-export function looksLikeMermaidDiagram(content: string): boolean {
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('%%')) continue;
-    return MERMAID_DIAGRAM_KEYWORDS.test(trimmed);
-  }
-  return false;
-}
+export { looksLikeMermaidDiagram, MERMAID_DIAGRAM_KEYWORDS } from '@/lib/model';
+import { looksLikeMermaidDiagram } from '@/lib/model';
 
 // Renders one embedded mermaid block inside the markdown preview. The block is
 // a visualization only: editing happens by selecting the diagram (click, or

@@ -1,4 +1,5 @@
 import { StickyNote as StickyNoteType, StickyNoteColor } from './views';
+import { EDGE_HIT_CLASS } from './svgmap';
 
 export interface SvgExportOptions {
   notes?: StickyNoteType[];
@@ -211,6 +212,11 @@ export function prepareSvgForExport(svg: SVGElement, options: SvgExportOptions =
   // 2. Remove editor artifacts
   clone.querySelectorAll('.editor-selected').forEach((el) => {
     el.classList.remove('editor-selected');
+  });
+  // The invisible per-edge hit paths are edit-mode selection targets, not
+  // diagram content.
+  clone.querySelectorAll(`path.${EDGE_HIT_CLASS}`).forEach((el) => {
+    el.remove();
   });
 
   // 3. Ensure <defs> is at the very beginning of the SVG so defs + background precede all diagram content

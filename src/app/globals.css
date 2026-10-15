@@ -25,6 +25,19 @@ body {
   filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.95)) drop-shadow(0 0 12px rgba(59, 130, 246, 0.45));
 }
 
+/* Edge hover affordance (edit mode): the hovered edge's invisible hit path
+   (path.edge-hit, injected by addEdgeHitPaths) lights up as a translucent
+   band and the visible edge gets a soft glow, so unlabeled edges — selectable
+   only through the hit path — are discoverable. The band's stroke overrides
+   the hit path's transparent presentation attribute via CSS. */
+path.edge-hit.edge-hover {
+  stroke: rgba(59, 130, 246, 0.28);
+}
+
+path[data-et="edge"].edge-hover {
+  filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.85));
+}
+
 /* Make diagram canvas and all diagram SVG text unselectable */
 #diagram-container,
 #diagram-container svg,

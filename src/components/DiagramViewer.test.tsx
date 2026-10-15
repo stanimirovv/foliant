@@ -39,6 +39,14 @@ describe('DiagramViewer', () => {
     });
   });
 
+  it('does not call mermaid.render and shows no error when code is markdown prose', async () => {
+    const markdownProse = '# Markdown Demo\n\nSome introductory prose text.\n';
+    const { container } = render(<DiagramViewer code={markdownProse} searchQuery="" theme="default" />);
+    expect(renderMock).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('Error');
+    expect(container.querySelector('[data-testid="no-diagram"]')).toBeTruthy();
+  });
+
   it('applies arrow styles to the rendered DOM', async () => {
     const arrowStyles: DiagramConfig = {
       version: 1,
@@ -104,6 +112,58 @@ describe('DiagramViewer', () => {
     expect(onSelect).toHaveBeenCalledWith('e:1');
     fireEvent.click(container.querySelector('path[data-id="L_A_B_0"]')!);
     expect(onSelect).toHaveBeenCalledWith('e:0');
+  });
+
+  it('click on an edge hit path selects the edge in edit mode', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={onSelect} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('path.edge-hit[data-id="L_A_B_0"]')).toBeTruthy();
+    });
+    fireEvent.click(container.querySelector('path.edge-hit[data-id="L_A_B_0"]')!);
+    expect(onSelect).toHaveBeenCalledWith('e:0');
+    fireEvent.click(container.querySelector('path.edge-hit[data-id="L_B_C_0"]')!);
+    expect(onSelect).toHaveBeenCalledWith('e:1');
+  });
+
+  it('pressing an edge hit path selects it immediately (canvas pan is not hijacked)', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={onSelect} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('path.edge-hit[data-id="L_A_B_0"]')).toBeTruthy();
+    });
+    const target = container.querySelector('path.edge-hit[data-id="L_A_B_0"]')!;
+    // far from the (zero-rect) nodes in jsdom, so no connect handle is hit
+    const notPrevented = fireEvent.mouseDown(target, { button: 0, clientX: 500, clientY: 500 });
+    expect(notPrevented).toBe(false); // preventDefault was called
+    expect(onSelect).toHaveBeenCalledWith('e:0');
+  });
+
+  it('hovering an edge hit path applies the hover affordance, and leaving clears it', async () => {
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={() => {}} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('path.edge-hit[data-id="L_A_B_0"]')).toBeTruthy();
+    });
+    const hit = container.querySelector('path.edge-hit[data-id="L_A_B_0"]')!;
+    const visible = container.querySelector('path[data-et="edge"][data-id="L_A_B_0"]')!;
+    fireEvent.mouseMove(hit, { clientX: 500, clientY: 500 });
+    await waitFor(() => {
+      expect(hit.classList.contains('edge-hover')).toBe(true);
+      expect(visible.classList.contains('edge-hover')).toBe(true);
+    });
+    expect(container.querySelector('#diagram-container')!.getAttribute('style')).toContain('pointer');
+    // moving over empty space clears the affordance
+    fireEvent.mouseMove(container.querySelector('#diagram-container svg')!, { clientX: 500, clientY: 500 });
+    await waitFor(() => {
+      expect(hit.classList.contains('edge-hover')).toBe(false);
+      expect(visible.classList.contains('edge-hover')).toBe(false);
+    });
   });
 
   it('does not call onSelect when edit mode is off', async () => {

@@ -6,7 +6,7 @@
 import { parseViewsData, DiagramConfig } from './views';
 import { DiagramModel, parseModel } from './model';
 import { ActorTransformOptions, PreprocessorOptions, processMermaid, transformActors } from './preprocessor';
-import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, markPanExclusionTargets, rewriteArrowStyles } from './styling';
+import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, rewriteArrowStyles } from './styling';
 
 export function createSequenceDiagram(): string {
   return `sequenceDiagram
@@ -79,6 +79,7 @@ export function applyStyles(svg: string, processedCode: string, config: DiagramC
   let out = reorderSequenceLayers(svg);
   out = applyArrowStyles(out, model, resolved);
   out = applyNodeColors(out, resolved);
+  out = addEdgeHitPaths(out);
   out = markPanExclusionTargets(out);
   return out;
 }

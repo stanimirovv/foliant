@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, reorderSequenceLayers, markPanExclusionTargets, PAN_EXCLUDE_CLASS, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
+import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, PAN_EXCLUDE_CLASS, EDGE_HIT_STROKE_WIDTH, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
 import { buildActorRewriteMap, transformActors } from './preprocessor';
 import { parseModel, MessageElement, EdgeElement } from './model';
 import { updateViewsData, DiagramConfig } from './views';
 import { createSequenceDiagram, createFlowchartDiagram, parseConfig, renderPipeline, applyStyles, svgText } from './editorTestHarness';
 import { setArrowStyle, setActorColor, addTag } from './editor';
-import { buildSelectionMap } from './svgmap';
+import { buildSelectionMap, zipModelToSvg } from './svgmap';
 import { SEQ_SVG, SEQ_CODE, FLOW_SVG, FLOW_CODE, parseSvgRoot } from './svgTestFixtures';
 
 // jsdom's CSSOM normalizes hex colors to rgb(); named colors pass through.
@@ -982,6 +982,90 @@ describe('markPanExclusionTargets', () => {
 
   it('returns the input unchanged when there is no svg', () => {
     expect(markPanExclusionTargets('not an svg')).toBe('not an svg');
+  });
+});
+
+describe('addEdgeHitPaths', () => {
+  // Obfuscated actors (never the user's real diagram data).
+  const FLOW = `flowchart LR
+    W["Widget"] --> X["Gadget"]
+    X -->|ships to| Y["Doohickey"]`;
+
+  it('inserts one invisible hit path per edge, mirroring d/data-id', async () => {
+    const res = await renderPipeline(FLOW);
+    const root = parseSvgRoot(addEdgeHitPaths(res.svg));
+    const visible = Array.from(root.querySelectorAll('g.edgePaths path[data-et="edge"]'));
+    const hits = Array.from(root.querySelectorAll(`g.edgePaths path.${'edge-hit'}`));
+    expect(visible.length).toBe(2);
+    expect(hits.length).toBe(2);
+    hits.forEach((hit, i) => {
+      expect(hit.getAttribute('data-id')).toBe(visible[i].getAttribute('data-id'));
+      expect(hit.getAttribute('d')).toBe(visible[i].getAttribute('d'));
+      expect(hit.getAttribute('class')).toBe('edge-hit');
+      expect(hit.getAttribute('data-et')).toBe('edge-hit');
+      expect(hit.getAttribute('fill')).toBe('none');
+      expect(hit.getAttribute('stroke')).toBe('transparent');
+      expect(hit.getAttribute('stroke-width')).toBe(String(EDGE_HIT_STROKE_WIDTH));
+      expect(hit.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+      expect(hit.getAttribute('pointer-events')).toBe('stroke');
+      // no duplicated id, no arrowhead marker, no inline style
+      expect(hit.getAttribute('id')).toBeNull();
+      expect(hit.getAttribute('marker-end')).toBeNull();
+      expect(hit.getAttribute('style')).toBeNull();
+    });
+  });
+
+  it('inserts each hit path after its edge and any arrow-animation overlays', async () => {
+    const res = await renderPipeline(FLOW);
+    const model = parseModel(res.processedCode);
+    const config: DiagramConfig = {
+      version: 1,
+      arrows: [{ from: 'X', to: 'Y', label: 'ships to', color: '#e11d48', animation: 'pulse' }],
+    };
+    const styled = applyArrowStyles(res.svg, model, config);
+    const root = parseSvgRoot(addEdgeHitPaths(styled));
+    const children = Array.from(root.querySelector('g.edgePaths')!.children);
+    const summary = children.map(el =>
+      el.classList.contains('arrow-anim-packet-runner') ? 'runner'
+        : el.classList.contains('edge-hit') ? `hit:${el.getAttribute('data-id')}`
+        : `edge:${el.getAttribute('data-id')}`
+    );
+    // the styled edge's runner sits between the visible path and its hit path
+    expect(summary).toEqual([
+      'edge:L_W_X_0',
+      'hit:L_W_X_0',
+      'edge:L_X_Y_0',
+      'runner',
+      'hit:L_X_Y_0',
+    ]);
+  });
+
+  it('is idempotent and leaves sequence/edge-less SVGs unchanged', async () => {
+    const res = await renderPipeline(FLOW);
+    const once = addEdgeHitPaths(res.svg);
+    expect(addEdgeHitPaths(once)).toBe(once);
+
+    const seq = await renderPipeline(createSequenceDiagram());
+    expect(addEdgeHitPaths(seq.svg)).toBe(seq.svg);
+
+    const singleNode = await renderPipeline('flowchart LR\n    W["Widget"]');
+    expect(addEdgeHitPaths(singleNode.svg)).toBe(singleNode.svg);
+    expect(addEdgeHitPaths('not an svg')).toBe('not an svg');
+  });
+
+  it('does not disturb the model<->SVG edge zip (hit paths are not data-et="edge")', async () => {
+    const res = await renderPipeline(FLOW);
+    const root = parseSvgRoot(addEdgeHitPaths(res.svg));
+    const zip = zipModelToSvg(root, parseModel(res.processedCode));
+    expect(zip.warnings).toEqual([]);
+    expect(zip.edges.map(el => el?.getAttribute('data-id'))).toEqual(['L_W_X_0', 'L_X_Y_0']);
+    expect(zip.edges.every(el => el?.matches('path[data-et="edge"]'))).toBe(true);
+  });
+
+  it('hit paths are tagged as pan-exclusion targets by markPanExclusionTargets', async () => {
+    const res = await renderPipeline(FLOW);
+    const root = parseSvgRoot(markPanExclusionTargets(addEdgeHitPaths(res.svg)));
+    expect(root.querySelectorAll(`path.edge-hit.${PAN_EXCLUDE_CLASS}`).length).toBe(2);
   });
 });
 

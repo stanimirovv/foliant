@@ -89,6 +89,7 @@ export default function ClientPage() {
   const rawCodeFileRef = useRef<string | null>(null); // which file rawCode belongs to
   const rawCodeDiagramRef = useRef<number | null>(null); // which embedded diagram (index) rawCode belongs to
   const saveSeqRef = useRef(0);                       // only the latest save applies its result
+  const loadSeqRef = useRef(0);                       // only the latest load applies its result
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [reloadNotice, setReloadNotice] = useState(false);
 
@@ -500,7 +501,9 @@ export default function ClientPage() {
   }, [dirParam]);
 
   const loadFile = useCallback(async (filename: string, index: number | null): Promise<boolean> => {
+    const seq = ++loadSeqRef.current;
     const content = await fetchCurrentContent(filename, index);
+    if (seq !== loadSeqRef.current) return false;
     if (content === null) {
       if (index !== null) {
         // Stale diagram index (e.g. a hand-edited URL): show an empty editor
@@ -509,6 +512,7 @@ export default function ClientPage() {
         rawCodeFileRef.current = filename;
         rawCodeDiagramRef.current = index;
         setRawCode('');
+        setDebouncedCode('');
       }
       return false;
     }
@@ -516,11 +520,19 @@ export default function ClientPage() {
     rawCodeFileRef.current = filename;
     rawCodeDiagramRef.current = index;
     setRawCode(content);
+    setDebouncedCode(content);
     return true;
   }, [fetchCurrentContent]);
 
   useEffect(() => {
     if (currentFile) {
+      // Switching to a different file or embedded diagram clears the in-memory
+      // content immediately so stale text (e.g. whole-document markdown prose)
+      // is never passed to DiagramViewer or the editor while the fetch runs.
+      if (rawCodeFileRef.current !== currentFile || rawCodeDiagramRef.current !== diagramIndex) {
+        setRawCode('');
+        setDebouncedCode('');
+      }
       // A markdown file without a diagram selection loads the whole document
       // into the rich markdown editor; a diagram selection loads just that
       // embedded block.
@@ -531,6 +543,7 @@ export default function ClientPage() {
       rawCodeFileRef.current = null;
       rawCodeDiagramRef.current = null;
       setRawCode('');
+      setDebouncedCode('');
       setSelection(null);
       setPendingDelete(null);
     }
@@ -561,6 +574,7 @@ export default function ClientPage() {
         if (content === lastWrittenRef.current) return;
         lastWrittenRef.current = content;
         setRawCode(content);
+        setDebouncedCode(content);
         setHistoryPast([]);   // external change: the in-memory history no longer applies
         setHistoryFuture([]);
         setReloadNotice(true);
@@ -601,7 +615,7 @@ export default function ClientPage() {
   // POST.
   useEffect(() => {
     if (!currentFile) return;
-    if (rawCodeFileRef.current !== currentFile) return;
+    if (rawCodeFileRef.current !== currentFile || rawCodeDiagramRef.current !== diagramIndex) return;
     if (rawCode === lastWrittenRef.current) return;
     setSaveStatus('saving');
     setSaveConflict(null);

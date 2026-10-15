@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { parseModel } from './model';
+import { parseModel, looksLikeMermaidDiagram } from './model';
 import { createSequenceDiagram, createFlowchartDiagram } from './editorTestHarness';
 
 const mainCode = fs.readFileSync(path.join(process.cwd(), 'diagrams/main.mmd'), 'utf-8');
@@ -20,15 +20,16 @@ describe('parseModel — repo fixtures', () => {
       { key: 'r:0', kind: 'region', regionType: 'flow', value: 'login', lineStart: 7, lineEnd: 7 },
       { key: 'm:0', kind: 'message', from: 'C', to: 'API', operator: '->>', label: 'POST /login', lineStart: 8, lineEnd: 8 },
       { key: 'm:1', kind: 'message', from: 'API', to: 'Auth', operator: '->>', label: 'Validate Credentials', lineStart: 9, lineEnd: 9 },
-      { key: 'r:1', kind: 'region', regionType: 'note', lineStart: 11, lineEnd: 11 },
+      { key: 'r:1', kind: 'region', regionType: 'note', value: undefined, lineStart: 11, lineEnd: 11 },
       { key: 'note:0', kind: 'note', over: ['API', 'Auth'], text: 'Passwords must be hashed via bcrypt', lineStart: 12, lineEnd: 12 },
       { key: 'r:2', kind: 'region', regionType: 'edge-case', value: 'invalid-password', lineStart: 15, lineEnd: 15 },
       { key: 'm:2', kind: 'message', from: 'Auth', to: 'API', operator: '-->>', label: '401 Unauthorized', lineStart: 16, lineEnd: 16 },
-      { key: 'm:3', kind: 'message', from: 'API', to: 'C', operator: '-->>', label: 'Error: Invalid Credentials', lineStart: 17, lineEnd: 17 },
-      { key: 'm:4', kind: 'message', from: 'Auth', to: 'DB', operator: '->>', label: 'Fetch User Data', lineStart: 20, lineEnd: 20 },
-      { key: 'm:5', kind: 'message', from: 'DB', to: 'Auth', operator: '-->>', label: 'User Record', lineStart: 21, lineEnd: 21 },
-      { key: 'm:6', kind: 'message', from: 'Auth', to: 'API', operator: '-->>', label: 'JWT Token', lineStart: 22, lineEnd: 22 },
-      { key: 'm:7', kind: 'message', from: 'API', to: 'C', operator: '-->>', label: '200 OK + Token', lineStart: 23, lineEnd: 23 },
+      { key: 'm:3', kind: 'message', from: 'C', to: 'API', operator: '->>', label: 'New message', lineStart: 17, lineEnd: 17 },
+      { key: 'm:4', kind: 'message', from: 'API', to: 'C', operator: '-->>', label: 'Error: Invalid Credentials', lineStart: 18, lineEnd: 18 },
+      { key: 'm:5', kind: 'message', from: 'Auth', to: 'DB', operator: '->>', label: 'Fetch User Data', lineStart: 21, lineEnd: 21 },
+      { key: 'm:6', kind: 'message', from: 'DB', to: 'Auth', operator: '-->>', label: 'User Record', lineStart: 22, lineEnd: 22 },
+      { key: 'm:7', kind: 'message', from: 'Auth', to: 'API', operator: '-->>', label: 'JWT Token', lineStart: 23, lineEnd: 23 },
+      { key: 'm:8', kind: 'message', from: 'API', to: 'C', operator: '-->>', label: '200 OK + Token', lineStart: 24, lineEnd: 24 },
     ]);
   });
 
@@ -444,5 +445,34 @@ describe('parseModel — chained flowchart edges', () => {
       { key: 'e:1', kind: 'edge', from: 'B', to: 'C', operator: '-->', lineStart: 2, lineEnd: 2 },
       { key: 'n:3', kind: 'node', id: 'L', label: 'Lone', shape: 'rect', lineStart: 4, lineEnd: 4 },
     ]);
+  });
+});
+
+describe('looksLikeMermaidDiagram', () => {
+  it('returns true for sequenceDiagram, flowchart, and graph diagrams', () => {
+    expect(looksLikeMermaidDiagram('sequenceDiagram\n    A->>B: hi')).toBe(true);
+    expect(looksLikeMermaidDiagram('  flowchart TD\n    A --> B')).toBe(true);
+    expect(looksLikeMermaidDiagram('graph LR\n    A --> B')).toBe(true);
+    expect(looksLikeMermaidDiagram('classDiagram\n    class A')).toBe(true);
+    expect(looksLikeMermaidDiagram('stateDiagram-v2\n    [*] --> A')).toBe(true);
+  });
+
+  it('returns true when preceded by comments or blank lines', () => {
+    expect(looksLikeMermaidDiagram('\n\n%% comment\n%% CONFIG: {"version":1}\nsequenceDiagram\n    A->>B: hi')).toBe(true);
+  });
+
+  it('returns true when preceded by YAML frontmatter', () => {
+    expect(looksLikeMermaidDiagram('---\ntitle: Demo\n---\nsequenceDiagram\n    A->>B: hi')).toBe(true);
+  });
+
+  it('returns false for empty or comment-only content', () => {
+    expect(looksLikeMermaidDiagram('')).toBe(false);
+    expect(looksLikeMermaidDiagram('   \n\n  ')).toBe(false);
+    expect(looksLikeMermaidDiagram('%% just a comment\n%% another')).toBe(false);
+  });
+
+  it('returns false for markdown prose', () => {
+    expect(looksLikeMermaidDiagram('# Markdown Demo\n\nSome prose text.')).toBe(false);
+    expect(looksLikeMermaidDiagram('This is plain text without any diagram.')).toBe(false);
   });
 });

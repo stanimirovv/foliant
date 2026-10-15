@@ -5,7 +5,7 @@
 import { ActorTransformOptions, buildActorRewriteMap } from './preprocessor';
 import { ArrowStyle, DiagramConfig, ArrowAnimationType } from './views';
 import { DiagramModel, ModelElement } from './model';
-import { zipModelToSvg } from './svgmap';
+import { zipModelToSvg, EDGE_HIT_CLASS } from './svgmap';
 
 export interface AnimatedArrowPreset {
   id: ArrowAnimationType;
@@ -952,11 +952,75 @@ export function reorderSequenceLayers(svg: string): string {
 // silently killed drag-panning in edit mode in real browsers.
 export const PAN_EXCLUDE_CLASS = 'pan-exclude';
 
+// --- Edge hit targets ---------------------------------------------------------
+// Mermaid renders each flowchart edge as a single ~2px-stroke path with
+// fill:none, so an unlabeled edge's only click target is the stroke itself —
+// a band that shrinks to sub-pixel width when zoomed out. To make edges
+// reliably selectable, every edge path gets an invisible sibling "hit path":
+// same geometry (d) and data-id, but a transparent stroke of constant screen
+// width (vector-effect="non-scaling-stroke") with pointer-events="stroke".
+// The hit path is inserted AFTER the edge's arrow-animation overlays
+// (applyArrowStyles injects them right after the path), so their pixels
+// resolve to the edge too; mermaid paints g.nodes above g.edgePaths, so a
+// hit path can never steal a node click. elementKeyAtTarget resolves hit
+// paths to model edges via data-id; svgExport strips them.
+
+// Width (screen px, thanks to non-scaling-stroke) of the invisible per-edge
+// hit band. Sized like the connect-handle grab radius (CONNECT_HANDLE_GRAB_RADIUS
+// = 13) so edge selection feels as forgiving as handle grabbing.
+export const EDGE_HIT_STROKE_WIDTH = 12;
+
+// Render-pipeline post-process step. Runs after applyArrowStyles (which adds
+// the per-edge animation overlays) and before markPanExclusionTargets (which
+// tags the hit paths as pan-exclusion targets).
+export function addEdgeHitPaths(svg: string): string {
+  const root = parseSvgRoot(svg);
+  if (!root) return svg;
+  try {
+    if (root.querySelector(`path.${EDGE_HIT_CLASS}`)) return svg;  // idempotent
+    const doc = root.ownerDocument;
+    if (!doc) return svg;
+    const paths = Array.from(root.querySelectorAll('g.edgePaths path[data-et="edge"]'));
+    if (paths.length === 0) return svg;
+    for (const path of paths) {
+      const hit = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const d = path.getAttribute('d');
+      if (d) hit.setAttribute('d', d);
+      const dataId = path.getAttribute('data-id');
+      if (dataId) hit.setAttribute('data-id', dataId);
+      hit.setAttribute('class', EDGE_HIT_CLASS);
+      hit.setAttribute('data-et', EDGE_HIT_CLASS);
+      hit.setAttribute('fill', 'none');
+      hit.setAttribute('stroke', 'transparent');
+      hit.setAttribute('stroke-width', String(EDGE_HIT_STROKE_WIDTH));
+      hit.setAttribute('vector-effect', 'non-scaling-stroke');
+      hit.setAttribute('pointer-events', 'stroke');
+      // Insert after the edge path and any arrow-animation overlays injected
+      // after it (sibling elements that are not real edge paths), so the hit
+      // path paints above them and their pixels select the edge as well.
+      let anchor: Element = path;
+      let next = anchor.nextElementSibling;
+      while (
+        next &&
+        !next.matches('path[data-et="edge"]') &&
+        !(next.matches('path') && next.classList.contains(EDGE_HIT_CLASS))
+      ) {
+        anchor = next;
+        next = anchor.nextElementSibling;
+      }
+      anchor.parentNode?.insertBefore(hit, anchor.nextSibling);
+    }
+    return root.outerHTML;
+  } catch {
+    return svg;
+  }
+}
+
 // Drag targets in edit mode: sequence participants (top boxes, lifelines,
 // bottom boxes/men), messages (line/path + label), notes, flowchart nodes,
-// and the arrow animation overlays created by applyArrowStyles. The marker
-// is added to the element itself; the library's `.E *` variant also covers
-// descendants.
+// the arrow animation overlays created by applyArrowStyles, and the flowchart
+// edge hit paths created by addEdgeHitPaths. The marker is added to the
+// element itself; the library's `.E *` variant also covers descendants.
 const PAN_EXCLUDE_TARGETS = [
   'g[data-et="participant"]',
   'line.actor-line',
@@ -968,6 +1032,7 @@ const PAN_EXCLUDE_TARGETS = [
   '.arrow-x-mark',
   'g[data-et="note"]',
   'g.node',
+  `path.${EDGE_HIT_CLASS}`,
 ];
 
 // Render-pipeline post-process step. Runs after applyArrowStyles, which

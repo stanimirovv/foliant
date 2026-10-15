@@ -69,6 +69,21 @@ describe('svgExport', () => {
       expect(output).not.toContain('editor-selected');
     });
 
+    it('removes the invisible edge hit paths (edit-mode selection targets)', () => {
+      const svg = createSvgElement(`
+        <svg id="test-svg" viewBox="0 0 500 400">
+          <g class="edgePaths">
+            <path d="M10,10L90,10" data-et="edge" data-id="L_A_B_0" class="flowchart-link"></path>
+            <path d="M10,10L90,10" data-id="L_A_B_0" class="edge-hit" data-et="edge-hit" fill="none" stroke="transparent" stroke-width="12" vector-effect="non-scaling-stroke" pointer-events="stroke"></path>
+          </g>
+        </svg>
+      `);
+      const output = prepareSvgForExport(svg);
+
+      expect(output).not.toContain('edge-hit');
+      expect(output).toContain('data-et="edge"');
+    });
+
     it('inserts dark mode background rect when isDark is true', () => {
       const svg = createSvgElement();
       const output = prepareSvgForExport(svg, { isDark: true });
