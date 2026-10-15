@@ -138,6 +138,12 @@ function arrowsMatchEntry(entry: ArrowStyle, from: string, to: string, label: st
     (entry.occurrence ?? 0) === occurrence;
 }
 
+// Composite lookup key for an arrow CONFIG entry's (from, to, label, occurrence)
+// identity. Labels cannot contain NUL, so the encoding is collision-free.
+function arrowEntryKey(from: string, to: string, label: string | undefined, occurrence: number): string {
+  return `${from}\u0000${to}\u0000${label ?? ''}\u0000${occurrence}`;
+}
+
 // 0-based occurrence of el among same-(over, text) notes.
 function noteOccurrence(model: ReturnType<typeof parseModel>, el: NoteElement): number {
   let occurrence = 0;
@@ -516,7 +522,42 @@ export function editMessageLabel(code: string, config: DiagramConfig | null, key
     : rewriteFlowchartEdgeLabel(line, newLabel);
   if (newLine === undefined) return fail(code, config, `Cannot parse message line: ${line.trim()}`);
   if (newLine === null) return { code, config }; // nothing to clear
-  return { code: replaceLines(code, el.lineStart, el.lineEnd, [newLine]), config };
+  const newCode = replaceLines(code, el.lineStart, el.lineEnd, [newLine]);
+
+  // Arrow CONFIG entries are keyed by (from, to, label, occurrence): a label
+  // edit re-keys the arrow's own entry — style, tags and tag mode follow the
+  // new label — and shifts the occurrence of sibling arrows in the old and
+  // new label groups. Element keys are index-based and stable across the edit,
+  // so old and new key tuples are matched element by element.
+  const newConfig = cloneConfig(config);
+  let configChanged = false;
+  if (newConfig?.arrows) {
+    const newModel = parseModel(newCode);
+    const newByKey = new Map<string, ModelElement>();
+    for (const e of newModel.elements) newByKey.set(e.key, e);
+    const retargeted = new Map<string, { label?: string; occurrence?: number }>();
+    for (const e of model.elements) {
+      if (!isArrow(e)) continue;
+      const n = newByKey.get(e.key);
+      if (!n || !isArrow(n)) continue;
+      const newOccurrence = elementOccurrence(newModel, n);
+      const before = arrowEntryKey(e.from, e.to, e.label, elementOccurrence(model, e));
+      const after = arrowEntryKey(n.from, n.to, n.label, newOccurrence);
+      if (before === after) continue;
+      retargeted.set(before, { label: n.label, occurrence: newOccurrence > 0 ? newOccurrence : undefined });
+    }
+    newConfig.arrows = newConfig.arrows.map(a => {
+      const target = retargeted.get(arrowEntryKey(a.from, a.to, a.label, a.occurrence ?? 0));
+      if (!target) return a;
+      const entry: ArrowStyle = { ...a };
+      if (target.label !== undefined) entry.label = target.label; else delete entry.label;
+      if (target.occurrence !== undefined) entry.occurrence = target.occurrence; else delete entry.occurrence;
+      configChanged = true;
+      return entry;
+    });
+  }
+  if (!configChanged || !newConfig) return { code: newCode, config };
+  return { code: updateViewsData(newCode, newConfig), config: newConfig };
 }
 
 export function setArrowType(code: string, config: DiagramConfig | null, key: string, operator: string): EditResult {

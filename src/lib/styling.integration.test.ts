@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { renderPipeline, applyStyles, svgText, parseConfig } from './editorTestHarness';
-import { setActorColor, setArrowStyle, addTag } from './editor';
+import { setActorColor, setArrowStyle, addTag, editMessageLabel } from './editor';
 import { ActorTransformOptions } from './preprocessor';
 import { parseSvgRoot, rgb, styleOf } from './svgTestFixtures';
 
@@ -150,5 +150,29 @@ describe('R-07 integration: arrows follow the rules of the merging (Step 12)', (
     const toHidden = back.root.querySelector('[data-et="message"][data-from="A"][data-to="D"]')!;
     expect(styleOf(toHidden).strokeDasharray).toBe('2 4');
     expect(back.text).toContain('log event');
+  });
+});
+
+describe('editMessageLabel keeps the rendered arrow style', () => {
+  it('re-renders with the same stroke color after the arrow text changes', async () => {
+    const raw = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    B-->>A: Hi there`;
+    const styled = setArrowStyle(raw, null, 'm:0', { color: '#e11d48', width: 3 });
+    const before = await renderState(styled.code, {});
+    const arrowBefore = before.root.querySelector('[data-et="message"][data-from="A"][data-to="B"]')!;
+    expect(styleOf(arrowBefore).stroke).toBe(rgb('#e11d48'));
+    expect(styleOf(arrowBefore).strokeWidth).toBe('3');
+
+    const edited = editMessageLabel(styled.code, styled.config, 'm:0', 'Hey');
+    expect(edited.warning).toBeUndefined();
+    const after = await renderState(edited.code, {});
+    const arrowAfter = after.root.querySelector('[data-et="message"][data-from="A"][data-to="B"]')!;
+    expect(styleOf(arrowAfter).stroke).toBe(rgb('#e11d48'));
+    expect(styleOf(arrowAfter).strokeWidth).toBe('3');
+    expect(after.text).toContain('Hey');
+    expect(after.text).not.toContain('Hello');
   });
 });

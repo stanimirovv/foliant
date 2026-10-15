@@ -200,6 +200,129 @@ describe('editMessageLabel', () => {
   });
 });
 
+describe('editMessageLabel arrow CONFIG migration', () => {
+  // Arrow CONFIG entries are keyed by (from, to, label, occurrence): a label
+  // edit must re-key the arrow's own entry so its style, tags and tag mode
+  // survive the rename instead of being orphaned (the color reset bug).
+  const withArrows = (arrows: string, body: string) =>
+    `%% CONFIG: {"version":1,"arrows":[${arrows}]}\n${body}`;
+  const SEQ_BODY = 'sequenceDiagram\n    participant A\n    participant B\n    A->>B: Hello';
+
+  it('keeps the full arrow style when the sequence label changes', () => {
+    const code = withArrows(
+      '{"from":"A","to":"B","label":"Hello","color":"#e11d48","width":3,"dash":"dashed","animation":"hesitate"}',
+      SEQ_BODY);
+    const res = editMessageLabel(code, parseConfig(code), 'm:0', 'Hey');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('    A->>B: Hey');
+    expect(res.config?.arrows).toEqual([
+      { from: 'A', to: 'B', label: 'Hey', color: '#e11d48', width: 3, dash: 'dashed', animation: 'hesitate' },
+    ]);
+    // The CONFIG line embedded in the code carries the migrated entry.
+    expect(parseConfig(res.code)?.arrows).toEqual(res.config?.arrows);
+    // The panel-facing lookup still resolves the style for the edited arrow.
+    expect(getArrowStyle(res.code, res.config, 'm:0')).toEqual({
+      color: '#e11d48', width: 3, dash: 'dashed', animation: 'hesitate',
+    });
+  });
+
+  it('carries the arrow tags and tag mode over the label change', () => {
+    const code = withArrows(
+      '{"from":"A","to":"B","label":"Hello","keys":["backend"],"keyMode":"merged"}',
+      SEQ_BODY);
+    const res = editMessageLabel(code, parseConfig(code), 'm:0', 'Hey');
+    expect(res.config?.arrows).toEqual([
+      { from: 'A', to: 'B', label: 'Hey', keys: ['backend'], keyMode: 'merged' },
+    ]);
+    expect(getArrowTags(res.code, res.config, 'm:0')).toEqual({
+      keys: ['backend'], keyMode: 'merged', inherited: [],
+    });
+  });
+
+  it('drops the occurrence when a styled duplicate is renamed to a unique label', () => {
+    const code = withArrows(
+      '{"from":"A","to":"B","label":"x","occurrence":1,"color":"#e11d48"}',
+      'sequenceDiagram\n    participant A\n    participant B\n    A->>B: x\n    A->>B: x');
+    // m:1 is the second 'x' (occurrence 1); renaming it to 'y' makes it the
+    // only 'y', i.e. occurrence 0 (stored as absent).
+    const res = editMessageLabel(code, parseConfig(code), 'm:1', 'y');
+    expect(res.config?.arrows).toEqual([
+      { from: 'A', to: 'B', label: 'y', color: '#e11d48' },
+    ]);
+    expect(getArrowStyle(res.code, res.config, 'm:1')).toEqual({ color: '#e11d48', dash: 'solid' });
+  });
+
+  it('shifts sibling occurrences when the edited arrow leaves a duplicated label group', () => {
+    const code = withArrows(
+      '{"from":"A","to":"B","label":"x","color":"#2563eb"},{"from":"A","to":"B","label":"x","occurrence":1,"color":"#e11d48"}',
+      'sequenceDiagram\n    participant A\n    participant B\n    A->>B: x\n    A->>B: x');
+    // Renaming the first 'x' removes it from the group: the second 'x' drops
+    // to occurrence 0 and must keep its own style.
+    const res = editMessageLabel(code, parseConfig(code), 'm:0', 'y');
+    expect(res.config?.arrows).toEqual([
+      { from: 'A', to: 'B', label: 'y', color: '#2563eb' },
+      { from: 'A', to: 'B', label: 'x', color: '#e11d48' },
+    ]);
+    expect(getArrowStyle(res.code, res.config, 'm:0')?.color).toBe('#2563eb');
+    expect(getArrowStyle(res.code, res.config, 'm:1')?.color).toBe('#e11d48');
+  });
+
+  it('shifts sibling occurrences when the edited arrow joins a label group ahead of a styled sibling', () => {
+    const code = withArrows(
+      '{"from":"A","to":"B","label":"x","color":"#e11d48"},{"from":"A","to":"B","label":"y","color":"#2563eb"}',
+      'sequenceDiagram\n    participant A\n    participant B\n    A->>B: x\n    A->>B: y');
+    // Renaming the first arrow to 'y' inserts it ahead of the styled 'y': the
+    // edited arrow takes occurrence 0 and the sibling shifts to occurrence 1.
+    const res = editMessageLabel(code, parseConfig(code), 'm:0', 'y');
+    expect(res.config?.arrows).toEqual([
+      { from: 'A', to: 'B', label: 'y', color: '#e11d48' },
+      { from: 'A', to: 'B', label: 'y', occurrence: 1, color: '#2563eb' },
+    ]);
+    expect(getArrowStyle(res.code, res.config, 'm:0')?.color).toBe('#e11d48');
+    expect(getArrowStyle(res.code, res.config, 'm:1')?.color).toBe('#2563eb');
+  });
+
+  it('re-keys the entry to the label-less form when the label is cleared', () => {
+    const code = withArrows('{"from":"A","to":"B","label":"Hello","color":"#e11d48"}', SEQ_BODY);
+    const res = editMessageLabel(code, parseConfig(code), 'm:0', '');
+    expect(res.code).toContain('    A->>B');
+    expect(res.config?.arrows).toEqual([{ from: 'A', to: 'B', color: '#e11d48' }]);
+    expect(getArrowStyle(res.code, res.config, 'm:0')).toEqual({ color: '#e11d48', dash: 'solid' });
+  });
+
+  it('keeps a flowchart edge color when its label changes', () => {
+    const code = withArrows('{"from":"A","to":"B","label":"Hi","color":"#e11d48"}',
+      'flowchart TD\n    A -->|Hi| B');
+    const res = editMessageLabel(code, parseConfig(code), 'e:0', 'Yo');
+    expect(res.code).toContain('    A -->|Yo| B');
+    expect(res.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Yo', color: '#e11d48' }]);
+    expect(getArrowStyle(res.code, res.config, 'e:0')).toEqual({ color: '#e11d48', dash: 'solid' });
+  });
+
+  it('leaves the CONFIG untouched when the edited arrow has no entry', () => {
+    const code = withArrows('{"from":"A","to":"B","label":"other","color":"#e11d48"}', SEQ_BODY);
+    const cfg = parseConfig(code);
+    const res = editMessageLabel(code, cfg, 'm:0', 'Hey');
+    expect(res.config).toBe(cfg);
+    expect(res.code.split('\n')[0]).toBe(code.split('\n')[0]);
+  });
+
+  it('is a config no-op when the label text is unchanged', () => {
+    const code = withArrows('{"from":"A","to":"B","label":"Hello","color":"#e11d48"}', SEQ_BODY);
+    const cfg = parseConfig(code);
+    const res = editMessageLabel(code, cfg, 'm:0', 'Hello');
+    expect(res.config).toBe(cfg);
+    expect(res.code.split('\n')[0]).toBe(code.split('\n')[0]);
+  });
+
+  it('adds no CONFIG line when there is no config', () => {
+    const code = 'sequenceDiagram\n    participant A\n    participant B\n    A->>B: Hello';
+    const res = editMessageLabel(code, null, 'm:0', 'Hey');
+    expect(res.config).toBeNull();
+    expect(res.code).toBe('sequenceDiagram\n    participant A\n    participant B\n    A->>B: Hey');
+  });
+});
+
 describe('setArrowType', () => {
   it('replaces every sequence operator, preserving the label', () => {
     const ops = ['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)'];
