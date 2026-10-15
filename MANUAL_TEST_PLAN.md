@@ -100,6 +100,7 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 > Stop here: notes behave like messages for shift-select, tagging and by-key hiding.
 
 - [ ] Select a note → the panel shows the note (over target + text) and a Tags section (no longer "not editable").
+- [ ] Click a note where a participant's lifeline crosses it (e.g. the center of a `Note over A`, right through the label) → the note is selected, not the participant; the same holds with Shift held.
 - [ ] Add a tag (e.g. `edge-case`) to the note → a chip appears in the panel and the tag appears in the sidebar under Actors → By Key; persists after F5 in `%% CONFIG:` under `noteTags[].keys`.
 - [ ] Shift-click a note and a message → both join the multi-selection ("Selected Elements (2)"); **Add tag to all** tags the note and the message at once.
 - [ ] With a note tagged `edge-case`, set `edge-case` to **Off** in By Key → the note disappears from the canvas (its participants and messages stay); set it back **On** → the note returns.

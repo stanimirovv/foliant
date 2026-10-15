@@ -275,10 +275,35 @@ function keyFromList(list: ModelElement[], zipped: (Element | null)[], el: Eleme
   return i >= 0 ? list[i].key : null;
 }
 
+// The zipped note group whose rect contains the given viewport point, or null.
+function noteGroupAtPoint(zippedNotes: (Element | null)[], point: { x: number; y: number }): Element | null {
+  for (const el of zippedNotes) {
+    if (!el) continue;
+    const rect = el.querySelector('rect');
+    if (!rect) continue;
+    const r = rect.getBoundingClientRect();
+    if (point.x >= r.left && point.x <= r.right && point.y >= r.top && point.y <= r.bottom) {
+      return el;
+    }
+  }
+  return null;
+}
+
 // Resolves a click target to a model element key (the processed key that
 // DiagramViewer reports; ClientPage maps it to the raw element via
 // buildSelectionMap). Returns null for anything not selectable.
-export function elementKeyAtTarget(target: Element | null, svg: Element, model: DiagramModel): string | null {
+//
+// `point` is the click position in viewport coordinates. Mermaid paints
+// participant lifelines above notes, so a click landing on a lifeline that
+// crosses a note really targets the note (the note's fill is opaque; the
+// lifeline only shows through) — pass the point to resolve such clicks to
+// the note instead of the participant.
+export function elementKeyAtTarget(
+  target: Element | null,
+  svg: Element,
+  model: DiagramModel,
+  point?: { x: number; y: number },
+): string | null {
   if (!target) return null;
   const zip = zipModelToSvg(svg, model);
 
@@ -309,6 +334,14 @@ export function elementKeyAtTarget(target: Element | null, svg: Element, model: 
 
     const note = target.closest('g[data-et="note"]');
     if (note) return keyFromList(notes, zip.notes, note);
+
+    // Lifelines are painted above notes: a click whose target is a lifeline
+    // but whose position is inside a note's rect belongs to the note.
+    const lifeLine = target.closest('line.actor-line, line[data-et="life-line"]');
+    if (lifeLine && point) {
+      const overNote = noteGroupAtPoint(zip.notes, point);
+      if (overNote) return keyFromList(notes, zip.notes, overNote);
+    }
 
     const group = target.closest('g[data-et="participant"]');
     const line = target.closest('line.actor-line');

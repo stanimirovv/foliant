@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { parseModel, DiagramModel, ParticipantElement, MessageElement } from './model';
 import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, SvgZip } from './svgmap';
 import { transformActors, processMermaid } from './preprocessor';
@@ -124,6 +124,22 @@ describe('elementKeyAtTarget (sequence fixture)', () => {
     expect(key('line.actor-line[data-id="B"]')).toBe('p:1');
     expect(key('rect.actor-bottom[name="A"]')).toBe('p:0');
     expect(key('g.actor-man[name="B"] text')).toBe('p:1');
+  });
+
+  it('resolves a lifeline click inside a note rect to the note (lifelines paint above notes)', () => {
+    const lifeline = svg.querySelector('line.actor-line[data-id="A"]')!;
+    const noteRect = svg.querySelector('g[data-et="note"] rect')!;
+    // jsdom reports zero-sized rects; give the note rect a real box.
+    vi.spyOn(noteRect, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 100, bottom: 40, width: 100, height: 40, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    // the click lands on the lifeline but inside the note -> the note wins
+    expect(elementKeyAtTarget(lifeline, svg, model, { x: 50, y: 20 })).toBe('note:0');
+    // a lifeline click outside the note still resolves to the participant
+    expect(elementKeyAtTarget(lifeline, svg, model, { x: 50, y: 200 })).toBe('p:0');
+    // without a click point the behavior is unchanged
+    expect(elementKeyAtTarget(lifeline, svg, model)).toBe('p:0');
   });
 
   it('returns null for unselectable targets', () => {

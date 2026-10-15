@@ -694,7 +694,7 @@ export default function DiagramViewer({
     }
 
     const target = e.target as Element;
-    let key = elementKeyAtTarget(target, ctx.svgRoot, ctx.model);
+    let key = elementKeyAtTarget(target, ctx.svgRoot, ctx.model, { x: e.clientX, y: e.clientY });
     if (!key && ctx.model.type === 'sequence') {
       key = nearestMessageKeyAt(
         getMessageEndpointScreenInfo(ctx.svgRoot, ctx.model),
@@ -1204,7 +1204,7 @@ export default function DiagramViewer({
     if (!editMode || isVisualLocked || !onSelect) return;
     const ctx = getSvgAndModel();
     if (!ctx) return;
-    let key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model);
+    let key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model, { x: e.clientX, y: e.clientY });
     if (!key && ctx.model.type === 'sequence') {
       key = nearestMessageKeyAt(
         getMessageEndpointScreenInfo(ctx.svgRoot, ctx.model),
