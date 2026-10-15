@@ -73,6 +73,47 @@ describe('EditorPanel', () => {
     expect(screen.getByText(/Click an element in the diagram/)).toBeTruthy();
   });
 
+  it('shows the all-arrows default style section when nothing is selected and dispatches edits', () => {
+    const props = makeProps({
+      config: { version: 1, defaultArrowStyle: { color: '#e11d48', width: 3 } },
+      globalArrowStyle: { color: '#e11d48', width: 3 },
+      onSetGlobalColor: vi.fn(),
+      onSetGlobalWidth: vi.fn(),
+    });
+    render(<EditorPanel {...props} />);
+
+    expect(screen.getByTestId('global-arrow-fields')).toBeTruthy();
+    const color = screen.getByTestId('global-arrow-color-picker') as HTMLInputElement;
+    expect(color.type).toBe('color');
+    expect(color.value).toBe('#e11d48');
+    expect((screen.getByTestId('global-arrow-width') as HTMLInputElement).value).toBe('3');
+
+    fireEvent.change(color, { target: { value: '#2563eb' } });
+    expect(props.onSetGlobalColor).toHaveBeenCalledWith('#2563eb');
+    // clearing the default color dispatches an empty string
+    fireEvent.click(screen.getByTestId('clear-global-arrow-color'));
+    expect(props.onSetGlobalColor).toHaveBeenCalledWith('');
+
+    fireEvent.change(screen.getByTestId('global-arrow-width'), { target: { value: '5' } });
+    expect(props.onSetGlobalWidth).toHaveBeenCalledWith(5);
+    fireEvent.change(screen.getByTestId('global-arrow-width'), { target: { value: '' } });
+    expect(props.onSetGlobalWidth).toHaveBeenCalledWith('');
+  });
+
+  it('hides the all-arrows section when an element is selected or the handlers are missing', () => {
+    const { unmount } = render(<EditorPanel {...makeProps({
+      element: message0,
+      globalArrowStyle: { color: '#e11d48' },
+      onSetGlobalColor: vi.fn(),
+      onSetGlobalWidth: vi.fn(),
+    })} />);
+    expect(screen.queryByTestId('global-arrow-fields')).toBeNull();
+    unmount();
+
+    render(<EditorPanel {...makeProps({ globalArrowStyle: { color: '#e11d48' } })} />);
+    expect(screen.queryByTestId('global-arrow-fields')).toBeNull();
+  });
+
   it('participant fields dispatch label, color, tags and delete', () => {
     const props = makeProps({
       element: participantA,

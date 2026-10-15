@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
 import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, NoteElement, StickyNoteElement, DiagramType, NodeShape, ParticipantType } from '@/lib/model';
 import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS } from '@/lib/editor';
-import { DiagramConfig, ArrowKeyMode, ArrowAnimationType, StickyNote, StickyNoteColor } from '@/lib/views';
+import { DiagramConfig, ArrowKeyMode, ArrowAnimationType, ArrowStyleDefaults, StickyNote, StickyNoteColor } from '@/lib/views';
 import AnimatedArrowSelector from './AnimatedArrowSelector';
 import { NOTE_COLORS, STICKY_NOTE_COLOR_KEYS } from './StickyNote';
 
@@ -81,6 +81,9 @@ interface EditorPanelProps {
   config: DiagramConfig | null;   // current CONFIG (field values + datalists)
   arrowStyle: ArrowStylePatch | null;  // current style of the selected message/edge
   arrowTags: ArrowTagInfo | null; // tags of the selected message/edge (own + behavior)
+  globalArrowStyle?: ArrowStyleDefaults | null;  // CONFIG.defaultArrowStyle (all-arrows fallback)
+  onSetGlobalColor?: (color: string) => void;   // edit the all-arrows default color ('' clears)
+  onSetGlobalWidth?: (width: number | '') => void;  // edit the all-arrows default width ('' clears)
   noteTags?: string[] | null;   // tags of the selected note (null when no note is selected)
   stickyNoteTags?: string[] | null;  // tags of the selected sticky note (null when no sticky note is selected)
   onUpdateNote?: (id: string, patch: Partial<Omit<StickyNote, 'id'>>) => void;  // edit the selected sticky note
@@ -142,6 +145,9 @@ export default function EditorPanel({
   config,
   arrowStyle,
   arrowTags,
+  globalArrowStyle,
+  onSetGlobalColor,
+  onSetGlobalWidth,
   noteTags,
   stickyNoteTags,
   onUpdateNote,
@@ -198,7 +204,15 @@ export default function EditorPanel({
       <h2 className="text-xs font-bold uppercase text-gray-500 dark:text-slate-400 mb-2">Editor</h2>
       {!isMultiSelect && !activeElement && (
         <>
-          <p className="text-xs text-gray-500 dark:text-slate-400 italic">
+          {onSetGlobalColor && onSetGlobalWidth && (
+            <GlobalArrowFields
+              arrowStyle={globalArrowStyle ?? null}
+              arrowColors={arrowColors}
+              onSetColor={onSetGlobalColor}
+              onSetWidth={onSetGlobalWidth}
+            />
+          )}
+          <p className="text-xs text-gray-500 dark:text-slate-400 italic mt-2">
             Click an element in the diagram to edit it.
           </p>
           <p className="text-xs text-gray-400 dark:text-slate-500 italic mt-1">
@@ -1130,6 +1144,87 @@ function StickyNoteFields({
           {actorKeys.map(k => <option key={k} value={k} />)}
         </datalist>
       </div>
+    </div>
+  );
+}
+
+interface GlobalArrowFieldsProps {
+  arrowStyle: ArrowStyleDefaults | null;
+  arrowColors: string[];
+  onSetColor: (color: string) => void;
+  onSetWidth: (width: number | '') => void;
+}
+
+// Default style applied to every arrow without its own entry field
+// (CONFIG.defaultArrowStyle). Shown when nothing is selected.
+function GlobalArrowFields({ arrowStyle, arrowColors, onSetColor, onSetWidth }: GlobalArrowFieldsProps) {
+  return (
+    <div
+      className="space-y-2 border border-blue-100 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 rounded p-2.5"
+      data-testid="global-arrow-fields"
+    >
+      <span className={fieldLabel}>All arrows (default style)</span>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className={fieldLabel}>Color</span>
+          <div className="flex items-center space-x-1.5">
+            <input
+              type="color"
+              aria-label="Default arrow color"
+              data-testid="global-arrow-color-picker"
+              className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
+              list="editor-global-arrow-color-list"
+              value={colorToHex(arrowStyle?.color, '#00ff9d')}
+              onChange={(e) => onSetColor(e.target.value)}
+            />
+            <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={arrowStyle?.color || 'Default'}>
+              {arrowStyle?.color || 'Default'}
+            </span>
+            {arrowStyle?.color && (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Clear default arrow color"
+                data-testid="clear-global-arrow-color"
+                title="Reset to theme default"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onSetColor('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSetColor('');
+                  }
+                }}
+                className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none shrink-0"
+              >
+                Clear
+              </span>
+            )}
+          </div>
+          <datalist id="editor-global-arrow-color-list">
+            {arrowColors.map(c => <option key={c} value={c} />)}
+          </datalist>
+        </label>
+
+        <label className="block">
+          <span className={fieldLabel}>Width</span>
+          <input
+            type="number"
+            min={1}
+            max={10}
+            className={fieldInput}
+            placeholder="1-10"
+            data-testid="global-arrow-width"
+            value={arrowStyle?.width ?? ''}
+            onChange={(e) => onSetWidth(e.target.value === '' ? '' : Number(e.target.value))}
+          />
+        </label>
+      </div>
+      <p className="text-[11px] text-gray-400 dark:text-slate-500">
+        Applies to every arrow that does not set its own color or width.
+      </p>
     </div>
   );
 }

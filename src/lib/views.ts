@@ -72,11 +72,19 @@ export interface StickyNote {
   keys?: string[];              // the note's own tags (hide keys)
 }
 
+// Global default style for ALL arrows: the fallback for every arrow whose own
+// entry does not set the field (styling.ts resolves entry fields over these).
+export interface ArrowStyleDefaults {
+  color?: string;               // stroke color, any CSS color
+  width?: number;               // stroke width, 1–10
+}
+
 export interface DiagramConfig {
   version: number;
   views?: SavedView[];
   actors?: Record<string, ActorMetadata>;
   arrows?: ArrowStyle[];
+  defaultArrowStyle?: ArrowStyleDefaults;
   noteTags?: NoteTagEntry[];
   notes?: StickyNote[];
 }
@@ -142,9 +150,11 @@ export function updateViewsData(code: string, config: DiagramConfig | null): str
   const emptyViews = !config?.views || config.views.length === 0;
   const emptyActors = !config?.actors || Object.keys(config.actors).length === 0;
   const emptyArrows = !config?.arrows || config.arrows.length === 0;
+  const emptyDefault = !config?.defaultArrowStyle ||
+    (config.defaultArrowStyle.color === undefined && config.defaultArrowStyle.width === undefined);
   const emptyNoteTags = !config?.noteTags || config.noteTags.length === 0;
   const emptyNotes = !config?.notes || config.notes.length === 0;
-  if (!config || (emptyViews && emptyActors && emptyArrows && emptyNoteTags && emptyNotes)) {
+  if (!config || (emptyViews && emptyActors && emptyArrows && emptyDefault && emptyNoteTags && emptyNotes)) {
     if (hasConfig) {
       lines.shift();
     }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
-  deleteElement, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
+  deleteElement, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
   getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation, insertMessage,
@@ -1716,6 +1716,79 @@ describe('setArrowStyle', () => {
     }
     expect(setArrowStyle(SEQ, SEQ_CFG, 'p:0', { color: 'red' }).warning).toBeTruthy();
     expect(setArrowStyle(SEQ, SEQ_CFG, 'm:99', { color: 'red' }).warning).toBeTruthy();
+  });
+});
+
+describe('setGlobalArrowStyle', () => {
+  it('sets the default color and width, creating the CONFIG header; body untouched', () => {
+    const code = createSequenceDiagram();
+    const res = setGlobalArrowStyle(code, null, { color: '#e11d48', width: 3 });
+    expect(res.warning).toBeUndefined();
+    expect(res.code.endsWith(code)).toBe(true);  // header prepended, body untouched
+    expect(res.config?.defaultArrowStyle).toEqual({ color: '#e11d48', width: 3 });
+    expect(parseConfig(res.code)?.defaultArrowStyle).toEqual({ color: '#e11d48', width: 3 });
+  });
+
+  it('merges per field: setting one default keeps the other', () => {
+    const first = setGlobalArrowStyle(SEQ, SEQ_CFG, { color: 'red' });
+    const second = setGlobalArrowStyle(first.code, first.config, { width: 4 });
+    expect(second.config?.defaultArrowStyle).toEqual({ color: 'red', width: 4 });
+    const third = setGlobalArrowStyle(second.code, second.config, { color: 'blue' });
+    expect(third.config?.defaultArrowStyle).toEqual({ color: 'blue', width: 4 });
+  });
+
+  it('clears fields individually and removes the key when both are cleared', () => {
+    const styled = setGlobalArrowStyle(SEQ, SEQ_CFG, { color: 'red', width: 4 });
+    const clearedColor = setGlobalArrowStyle(styled.code, styled.config, { color: '' });
+    expect(clearedColor.config?.defaultArrowStyle).toEqual({ width: 4 });
+    const clearedAll = setGlobalArrowStyle(clearedColor.code, clearedColor.config, { width: undefined });
+    expect(clearedAll.config?.defaultArrowStyle).toBeUndefined();
+    // actors still carry state, so the header stays
+    expect(parseConfig(clearedAll.code)?.actors).toEqual({ A: { color: 'red' } });
+  });
+
+  it('removes the CONFIG header when the default was the only state', () => {
+    const code = createSequenceDiagram();
+    const styled = setGlobalArrowStyle(code, null, { color: 'red' });
+    const cleared = setGlobalArrowStyle(styled.code, styled.config, { color: '' });
+    expect(cleared.code).toBe(code);
+    expect(parseConfig(cleared.code)).toBeNull();
+  });
+
+  it('preserves per-arrow entries and other config state', () => {
+    const res = setGlobalArrowStyle(SEQ, SEQ_CFG, { color: 'red', width: 2 });
+    expect(res.config?.actors).toEqual({ A: { color: 'red' } });
+    expectBodyIdentical(SEQ, res.code);
+    const withArrow = setArrowStyle(SEQ, SEQ_CFG, 'm:0', { color: 'blue' });
+    const both = setGlobalArrowStyle(withArrow.code, withArrow.config, { width: 5 });
+    expect(both.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'Hello', color: 'blue' }]);
+    expect(both.config?.defaultArrowStyle).toEqual({ width: 5 });
+  });
+
+  it('is a no-op when nothing changes', () => {
+    const styled = setGlobalArrowStyle(SEQ, SEQ_CFG, { color: 'red', width: 2 });
+    const again = setGlobalArrowStyle(styled.code, styled.config, { color: 'red' });
+    expect(again.code).toBe(styled.code);
+    expect(again.config).toBe(styled.config);
+    const cleared = setGlobalArrowStyle(SEQ, SEQ_CFG, { color: '' });
+    expect(cleared.code).toBe(SEQ);
+    expect(cleared.config).toBe(SEQ_CFG);
+  });
+
+  it('soft-fails on invalid widths', () => {
+    for (const width of [0, 11, 1.5, -1]) {
+      const res = setGlobalArrowStyle(SEQ, SEQ_CFG, { width });
+      expect(res.warning).toBeTruthy();
+      expect(res.code).toBe(SEQ);
+    }
+  });
+
+  it('does not mutate the input config', () => {
+    const config: DiagramConfig = { version: 1, defaultArrowStyle: { color: 'red' } };
+    const snapshot = JSON.stringify(config);
+    setGlobalArrowStyle(SEQ, config, { color: 'blue', width: 3 });
+    setGlobalArrowStyle(SEQ, config, { color: '' });
+    expect(JSON.stringify(config)).toBe(snapshot);
   });
 });
 

@@ -505,6 +505,100 @@ describe('applyArrowStyles (sequence fixture)', () => {
   });
 });
 
+describe('applyArrowStyles (defaultArrowStyle)', () => {
+  const model = parseModel(SEQ_CODE);
+
+  it('applies the global default color and width to every arrow without an entry', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      defaultArrowStyle: { color: '#e11d48', width: 3 },
+    });
+    const root = parseSvgRoot(out);
+    for (const id of ['i1', 'i2', 'i5']) {
+      const line = root.querySelector(`line[data-id="${id}"]`)!;
+      expect(styleOf(line).stroke).toBe(rgb('#e11d48'));
+      expect(styleOf(line).strokeWidth).toBe('3');
+    }
+    // self-call path is an arrow too
+    const selfCall = root.querySelector('path[data-id="i4"]')!;
+    expect(styleOf(selfCall).stroke).toBe(rgb('#e11d48'));
+    expect(styleOf(selfCall).strokeWidth).toBe('3');
+  });
+
+  it('recolors a cloned marker for the default color', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      defaultArrowStyle: { color: '#e11d48' },
+    });
+    const root = parseSvgRoot(out);
+    const line = root.querySelector('line[data-id="i1"]')!;
+    const markerId = line.getAttribute('marker-end')!.match(/^url\(#(.+)\)$/)![1];
+    expect(markerId).toContain('--styled-');
+    const clone = Array.from(root.querySelectorAll('marker')).find(m => m.getAttribute('id') === markerId)!;
+    expect(styleOf(clone.querySelector('path')!).fill).toBe(rgb('#e11d48'));
+  });
+
+  it('lets a per-arrow entry override the default per field', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      defaultArrowStyle: { color: '#e11d48', width: 4 },
+      arrows: [{ from: 'A', to: 'B', label: 'm1', color: '#2563eb' }],
+    });
+    const root = parseSvgRoot(out);
+    // entry color wins; the default width is inherited
+    const i1 = root.querySelector('line[data-id="i1"]')!;
+    expect(styleOf(i1).stroke).toBe(rgb('#2563eb'));
+    expect(styleOf(i1).strokeWidth).toBe('4');
+    // no entry: the full default applies
+    const i2 = root.querySelector('line[data-id="i2"]')!;
+    expect(styleOf(i2).stroke).toBe(rgb('#e11d48'));
+    expect(styleOf(i2).strokeWidth).toBe('4');
+  });
+
+  it('lets a per-arrow width override while inheriting the default color', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      defaultArrowStyle: { color: '#e11d48', width: 4 },
+      arrows: [{ from: 'B', to: 'A', label: 'm2', width: 2 }],
+    });
+    const root = parseSvgRoot(out);
+    const i2 = root.querySelector('line[data-id="i2"]')!;
+    expect(styleOf(i2).stroke).toBe(rgb('#e11d48'));
+    expect(styleOf(i2).strokeWidth).toBe('2');
+  });
+
+  it('applies the default to arrows whose entry carries only tags', () => {
+    const out = applyArrowStyles(SEQ_SVG, model, {
+      version: 1,
+      defaultArrowStyle: { color: '#e11d48' },
+      arrows: [{ from: 'A', to: 'B', label: 'm1', keys: ['critical'] }],
+    });
+    const root = parseSvgRoot(out);
+    const i1 = root.querySelector('line[data-id="i1"]')!;
+    expect(styleOf(i1).stroke).toBe(rgb('#e11d48'));
+  });
+
+  it('is a byte-identical no-op for an empty default object', () => {
+    expect(applyArrowStyles(SEQ_SVG, model, { version: 1, defaultArrowStyle: {} })).toBe(SEQ_SVG);
+  });
+
+  it('applies the default to flowchart edges and their labels', () => {
+    const flowModel = parseModel(FLOW_CODE);
+    const out = applyArrowStyles(FLOW_SVG, flowModel, {
+      version: 1,
+      defaultArrowStyle: { color: '#10b981', width: 5 },
+    });
+    const root = parseSvgRoot(out);
+    for (const id of ['L_A_B_0', 'L_B_C_0']) {
+      const path = root.querySelector(`path[data-id="${id}"]`)!;
+      expect(styleOf(path).stroke).toBe(rgb('#10b981'));
+      expect(styleOf(path).strokeWidth).toBe('5');
+    }
+    const span = root.querySelector('g.edgeLabel span.edgeLabel')!;
+    expect(styleOf(span).fill).toBe(rgb('#10b981'));
+  });
+});
+
 describe('applyArrowStyles (flowchart fixture)', () => {
   const model = parseModel(FLOW_CODE);
   const config: DiagramConfig = {

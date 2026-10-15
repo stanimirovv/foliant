@@ -117,6 +117,26 @@ function findArrowStyle(arrows: ArrowStyle[], model: DiagramModel, el: ModelElem
   return found ?? null;
 }
 
+type VisualArrowStyle = Pick<ArrowStyle, 'color' | 'width' | 'dash' | 'animation'>;
+
+// Effective visual style of an arrow: the global defaultArrowStyle merged with
+// the arrow's own entry — the entry wins per field, so an explicitly styled
+// arrow keeps its color/width while inheriting the default for the rest.
+// Null when neither carries a visual style.
+function resolveArrowStyle(config: DiagramConfig, entry: ArrowStyle | null): VisualArrowStyle | null {
+  const def = config.defaultArrowStyle;
+  if (!def && !entry) return null;
+  const merged: VisualArrowStyle = {
+    color: entry?.color ?? def?.color,
+    width: entry?.width ?? def?.width,
+    dash: entry?.dash,
+    animation: entry?.animation,
+  };
+  const hasVisual = merged.color !== undefined || merged.width !== undefined ||
+    merged.dash !== undefined || (merged.animation !== undefined && merged.animation !== 'none');
+  return hasVisual ? merged : null;
+}
+
 // Clones the marker referenced by the given marker-* attribute, recolors the
 // clone's shapes, and points the attribute at the clone (avoids the shared
 // marker last-write-wins problem). Markers are looked up inside this SVG
@@ -152,7 +172,8 @@ function recolorMarker(root: Element, arrow: Element, attr: string, color: strin
 // Applies CONFIG.arrows to a rendered SVG. Styles are resolved against the
 // processed model (post-transform endpoints, via rewriteArrowStyles).
 export function applyArrowStyles(svg: string, model: DiagramModel, config: DiagramConfig | null): string {
-  if (!config || !config.arrows || config.arrows.length === 0) return svg;
+  const arrowEntries = config?.arrows ?? [];
+  if (!config || (arrowEntries.length === 0 && !config.defaultArrowStyle)) return svg;
   if (model.type !== 'sequence' && model.type !== 'flowchart') return svg;
   const root = parseSvgRoot(svg);
   if (!root) return svg;
@@ -178,7 +199,7 @@ export function applyArrowStyles(svg: string, model: DiagramModel, config: Diagr
     const pulseIndices: number[] = [];
     if (!isFlowchart) {
       arrows.forEach((el, i) => {
-        const style = findArrowStyle(config.arrows!, model, el);
+        const style = resolveArrowStyle(config, findArrowStyle(arrowEntries, model, el));
         if (style && style.animation === 'pulse' && zipped[i]) {
           pulseIndices.push(i);
         }
@@ -188,7 +209,7 @@ export function applyArrowStyles(svg: string, model: DiagramModel, config: Diagr
     const keyframesRules: string[] = [];
 
     arrows.forEach((el, i) => {
-      const style = findArrowStyle(config.arrows!, model, el);
+      const style = resolveArrowStyle(config, findArrowStyle(arrowEntries, model, el));
       if (!style) return;
       const target = zipped[i];
       if (!target) return;  // soft-fail: no SVG counterpart

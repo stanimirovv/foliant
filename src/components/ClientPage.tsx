@@ -17,7 +17,7 @@ import { computeLineDiff } from '@/lib/sourceDiff';
 import mermaid from 'mermaid';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
-  setArrowType, setActorColor, addTag, removeTag, setArrowStyle, getArrowStyle,
+  setArrowType, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
   getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation,
@@ -1333,6 +1333,16 @@ export default function ClientPage() {
     applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
   };
 
+  // All-arrows default style (CONFIG.defaultArrowStyle): the fallback for
+  // arrows without their own entry field. '' / '' clears the field.
+  const handleSetGlobalColor = (color: string) => {
+    applyEditResult(setGlobalArrowStyle(rawCode, viewsData, { color }));
+  };
+
+  const handleSetGlobalWidth = (width: number | '') => {
+    applyEditResult(setGlobalArrowStyle(rawCode, viewsData, { width: width === '' ? undefined : width }));
+  };
+
   const handleSetDash = (dash: 'solid' | 'dashed' | 'dotted') => {
     if (!selectedArrow) return;
     const patch = currentArrowPatch();
@@ -2442,6 +2452,9 @@ export default function ClientPage() {
                       config={viewsData}
                       arrowStyle={selectedArrowStyle}
                       arrowTags={selectedArrowTags}
+                      globalArrowStyle={viewsData?.defaultArrowStyle ?? null}
+                      onSetGlobalColor={handleSetGlobalColor}
+                      onSetGlobalWidth={handleSetGlobalWidth}
                       noteTags={selectedNoteTags}
                       stickyNoteTags={selectedStickyNoteTags}
                       warning={editWarning}

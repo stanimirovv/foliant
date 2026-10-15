@@ -5,7 +5,7 @@
 // corruption (NFR-01).
 
 import { parseModel, parseShapeToken, parseParticipantLine, parseFlowchartLine, ParsedFlowchartLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeShape, ParticipantType } from './model';
-import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, DiagramConfig, NoteTagEntry, updateViewsData } from './views';
+import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, ArrowStyleDefaults, DiagramConfig, NoteTagEntry, updateViewsData } from './views';
 import { ANIMATED_ARROW_COLORS } from './styling';
 
 export interface EditResult {
@@ -68,6 +68,7 @@ function cloneConfig(config: DiagramConfig | null): DiagramConfig | null {
       ? Object.fromEntries(Object.entries(config.actors).map(([k, v]) => [k, { ...v, keys: v.keys ? [...v.keys] : undefined }]))
       : undefined,
     arrows: config.arrows?.map(a => ({ ...a, keys: a.keys ? [...a.keys] : undefined })),
+    defaultArrowStyle: config.defaultArrowStyle ? { ...config.defaultArrowStyle } : undefined,
     noteTags: config.noteTags?.map(n => ({ ...n, over: [...n.over], keys: n.keys ? [...n.keys] : undefined })),
     notes: config.notes?.map(n => ({ ...n, keys: n.keys ? [...n.keys] : undefined })),
   };
@@ -1689,6 +1690,43 @@ export function getArrowStyle(code: string, config: DiagramConfig | null, key: s
     dash: entry.dash ?? 'solid',
     ...(entry.animation ? { animation: entry.animation } : {}),
   };
+}
+
+// Global arrow defaults (CONFIG.defaultArrowStyle): the fallback color/width
+// for every arrow whose own entry does not set the field. The patch MERGES:
+// a field present in the patch is set (empty string / undefined clears it),
+// an absent field keeps its current value. When both defaults are cleared the
+// key is removed (and the CONFIG header with it, when nothing else carries
+// state).
+export function setGlobalArrowStyle(code: string, config: DiagramConfig | null, style: ArrowStyleDefaults): EditResult {
+  const hasColor = Object.prototype.hasOwnProperty.call(style, 'color');
+  const hasWidth = Object.prototype.hasOwnProperty.call(style, 'width');
+  if (hasWidth && style.width !== undefined && (!Number.isInteger(style.width) || style.width < 1 || style.width > 10)) {
+    return fail(code, config, 'Arrow width must be an integer between 1 and 10');
+  }
+
+  const newConfig = cloneConfig(config) ?? { version: 1 };
+  const prev = newConfig.defaultArrowStyle ?? {};
+  const next: ArrowStyleDefaults = { ...prev };
+  if (hasColor) {
+    const color = style.color !== undefined && style.color.trim() !== '' ? style.color.trim() : undefined;
+    if (color !== undefined) next.color = color; else delete next.color;
+  }
+  if (hasWidth) {
+    if (style.width !== undefined) next.width = style.width; else delete next.width;
+  }
+
+  const prevHasDefault = prev.color !== undefined || prev.width !== undefined;
+  const nextHasDefault = next.color !== undefined || next.width !== undefined;
+  if (prevHasDefault === nextHasDefault && JSON.stringify(prev) === JSON.stringify(next)) {
+    return { code, config };  // no-op: no history entry
+  }
+  if (nextHasDefault) {
+    newConfig.defaultArrowStyle = next;
+  } else {
+    delete newConfig.defaultArrowStyle;
+  }
+  return { code: updateViewsData(code, newConfig), config: newConfig };
 }
 
 export function convertDiagramToAnimatedArrows(
