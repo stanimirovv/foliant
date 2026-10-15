@@ -2563,7 +2563,7 @@ sequenceDiagram
       mockParams({ file: 'notes.md' });
       mockMarkdownDocFetch(MD_DOC);
       const mockFetch = global.fetch as import('vitest').Mock;
-      const origImpl = mockFetch.getMockImplementation();
+      const origImpl = mockFetch.getMockImplementation()!;
       mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
         const u = String(url);
         if (u.startsWith('/api/markdown/diagram?')) {
