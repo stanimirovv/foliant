@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef, MouseEvent as ReactMouseEvent } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
@@ -43,6 +43,27 @@ const RICH_ARROW_LAST_POSITIVE_COLOR_KEY = 'mermaid_rich_arrow_last_positive_col
 const RICH_ARROW_LAST_ERROR_COLOR_KEY = 'mermaid_rich_arrow_last_error_color';
 const DEFAULT_RICH_ARROW_POSITIVE_COLOR = '#00ff9d';
 const DEFAULT_RICH_ARROW_ERROR_COLOR = '#ff2a85';
+
+// The right sidebar (Properties / Mermaid Source) is resizable by dragging
+// the handle on its left edge — the vertical divider between the diagram
+// editor and the plain-text source. Single-tab and split view keep
+// independent persisted widths.
+const SIDEBAR_WIDTH_KEY = 'mermaid_sidebar_width';
+const SPLIT_SIDEBAR_WIDTH_KEY = 'mermaid_sidebar_split_width';
+const DEFAULT_SIDEBAR_WIDTH = 320; // w-80
+const DEFAULT_SPLIT_SIDEBAR_WIDTH = 640; // w-[640px]
+const MIN_SIDEBAR_WIDTH = 240;
+const MIN_MAIN_WIDTH = 320; // keep at least this much room for the diagram
+
+function loadSidebarWidth(key: string, fallback: number): number {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const stored = Number(window.localStorage.getItem(key));
+      if (Number.isFinite(stored) && stored >= MIN_SIDEBAR_WIDTH) return stored;
+    } catch {}
+  }
+  return fallback;
+}
 
 export default function ClientPage() {
   const router = useRouter();
@@ -142,6 +163,10 @@ export default function ClientPage() {
   };
   const [sidebarTab, setSidebarTab] = useState<'properties' | 'source'>('properties');
   const [isSplitView, setIsSplitView] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadSidebarWidth(SIDEBAR_WIDTH_KEY, DEFAULT_SIDEBAR_WIDTH));
+  const [splitSidebarWidth, setSplitSidebarWidth] = useState(() => loadSidebarWidth(SPLIT_SIDEBAR_WIDTH_KEY, DEFAULT_SPLIT_SIDEBAR_WIDTH));
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const sidebarResizeRef = useRef<{ startX: number; startWidth: number; split: boolean; latestWidth: number } | null>(null);
   const [editModeKind, setEditModeKind] = useState<'visual' | 'code'>('visual');
   const [changedLines, setChangedLines] = useState<number[]>([]);
   const [sourceValidationError, setSourceValidationError] = useState<string | null>(null);
@@ -172,6 +197,61 @@ export default function ClientPage() {
       }
     };
   }, []);
+
+  // --- Sidebar resize (drag the handle on the sidebar's left edge) ---
+  const activeSidebarWidth = isSplitView ? splitSidebarWidth : sidebarWidth;
+
+  const handleSidebarResizeStart = (e: ReactMouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const split = isSplitView;
+    const startWidth = split ? splitSidebarWidth : sidebarWidth;
+    sidebarResizeRef.current = { startX: e.clientX, startWidth, split, latestWidth: startWidth };
+    setIsResizingSidebar(true);
+  };
+
+  // Window-level move/up listeners while dragging, so the drag keeps working
+  // even when the cursor leaves the handle (e.g. over the Monaco editor).
+  useEffect(() => {
+    if (!isResizingSidebar) return;
+    const onMouseMove = (e: MouseEvent) => {
+      const start = sidebarResizeRef.current;
+      if (!start) return;
+      const maxWidth = Math.max(MIN_SIDEBAR_WIDTH, window.innerWidth - MIN_MAIN_WIDTH);
+      const next = Math.min(Math.max(MIN_SIDEBAR_WIDTH, start.startWidth + (start.startX - e.clientX)), maxWidth);
+      start.latestWidth = next;
+      if (start.split) setSplitSidebarWidth(next);
+      else setSidebarWidth(next);
+    };
+    const onMouseUp = () => {
+      const start = sidebarResizeRef.current;
+      sidebarResizeRef.current = null;
+      setIsResizingSidebar(false);
+      if (start && typeof window !== 'undefined' && window.localStorage) {
+        try {
+          window.localStorage.setItem(start.split ? SPLIT_SIDEBAR_WIDTH_KEY : SIDEBAR_WIDTH_KEY, String(start.latestWidth));
+        } catch {}
+      }
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [isResizingSidebar]);
+
+  // While resizing, keep the column cursor and disable text selection page-wide.
+  useEffect(() => {
+    if (!isResizingSidebar) return;
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    return () => {
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+    };
+  }, [isResizingSidebar]);
 
   const switchToCodeMode = () => {
     setEditModeKind('code');
@@ -2233,12 +2313,28 @@ export default function ClientPage() {
           </div>
           {editMode && (
             <div
-              className={`flex-shrink-0 border-l flex flex-col transition-all ${
-                isSplitView ? 'w-[640px]' : 'w-80'
+              data-testid="editor-sidebar"
+              className={`relative flex-shrink-0 border-l flex flex-col ${
+                isResizingSidebar ? '' : 'transition-[width] duration-150'
               } ${
                 isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
               }`}
+              style={{ width: activeSidebarWidth }}
             >
+              {/* Drag handle on the left edge: resizes the sidebar (and with
+                  it the diagram area) between MIN_SIDEBAR_WIDTH and the space
+                  left for the diagram. */}
+              <div
+                data-testid="sidebar-resize-handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize editor panel"
+                title="Drag to resize"
+                onMouseDown={handleSidebarResizeStart}
+                className={`absolute -left-1 top-0 bottom-0 w-2 cursor-col-resize z-10 ${
+                  isResizingSidebar ? 'bg-blue-500/50' : 'bg-transparent hover:bg-blue-500/30'
+                }`}
+              />
               {/* Tab Bar Header */}
               <div
                 className={`flex items-center justify-between border-b px-2 py-1.5 text-xs font-medium select-none ${

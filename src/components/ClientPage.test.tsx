@@ -2113,6 +2113,84 @@ sequenceDiagram
     expect(screen.getByText('Click an element in the diagram to edit it.')).toBeTruthy();
   });
 
+  describe('sidebar resize handle', () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it('resizes the sidebar by dragging the handle on its left edge and persists the width', async () => {
+      await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      const sidebar = screen.getByTestId('editor-sidebar');
+      // default single-tab width (w-80)
+      expect(sidebar.style.width).toBe('320px');
+
+      const handle = screen.getByTestId('sidebar-resize-handle');
+      // drag the handle 100px to the left -> sidebar grows by 100px
+      fireEvent.mouseDown(handle, { clientX: 1000 });
+      fireEvent.mouseMove(window, { clientX: 900 });
+      fireEvent.mouseUp(window);
+
+      expect(sidebar.style.width).toBe('420px');
+      expect(window.localStorage.getItem('mermaid_sidebar_width')).toBe('420');
+    });
+
+    it('clamps the sidebar width to a minimum and to the space left for the diagram', async () => {
+      await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      const sidebar = screen.getByTestId('editor-sidebar');
+      const handle = screen.getByTestId('sidebar-resize-handle');
+      // jsdom window.innerWidth is 1024, so the max width is 1024 - 320 = 704
+
+      // drag far right -> clamped to the 240px minimum
+      fireEvent.mouseDown(handle, { clientX: 1000 });
+      fireEvent.mouseMove(window, { clientX: 2000 });
+      fireEvent.mouseUp(window);
+      expect(sidebar.style.width).toBe('240px');
+
+      // drag far left -> clamped to the max (diagram keeps at least 320px)
+      fireEvent.mouseDown(handle, { clientX: 500 });
+      fireEvent.mouseMove(window, { clientX: -500 });
+      fireEvent.mouseUp(window);
+      expect(sidebar.style.width).toBe('704px');
+    });
+
+    it('resizes the split view sidebar independently and remembers each mode’s width', async () => {
+      await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      fireEvent.click(screen.getByTestId('toggle-split-view'));
+
+      const sidebar = screen.getByTestId('editor-sidebar');
+      // default split-view width (w-[640px])
+      expect(sidebar.style.width).toBe('640px');
+
+      // drag the handle 100px to the right -> split sidebar shrinks by 100px
+      const handle = screen.getByTestId('sidebar-resize-handle');
+      fireEvent.mouseDown(handle, { clientX: 1000 });
+      fireEvent.mouseMove(window, { clientX: 1100 });
+      fireEvent.mouseUp(window);
+
+      expect(sidebar.style.width).toBe('540px');
+      expect(window.localStorage.getItem('mermaid_sidebar_split_width')).toBe('540');
+      // the single-tab width is untouched
+      expect(window.localStorage.getItem('mermaid_sidebar_width')).toBeNull();
+
+      // toggling back to single-tab restores its own width
+      fireEvent.click(screen.getByTestId('toggle-split-view'));
+      expect(sidebar.style.width).toBe('320px');
+    });
+
+    it('restores a persisted sidebar width on load', async () => {
+      window.localStorage.setItem('mermaid_sidebar_width', '500');
+      await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      expect(screen.getByTestId('editor-sidebar').style.width).toBe('500px');
+    });
+  });
+
   it('Export to SVG button exports SVG with download link and embedded visuals', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
 
