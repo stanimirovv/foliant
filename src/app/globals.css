@@ -447,6 +447,48 @@ path[data-et="edge"].edge-hover {
 .markdown-body .md-mermaid-block:hover .md-mermaid-edit-chip,
 .markdown-body .md-mermaid-block:focus-visible .md-mermaid-edit-chip { opacity: 1; }
 
+/* Per-block view/tag controls in the mermaid block bar (markdown preview) */
+.markdown-body .md-mermaid-view-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35em;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.markdown-body .md-mermaid-view-select {
+  font-size: 0.7rem;
+  padding: 0.1em 0.4em;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #374151;
+  max-width: 12em;
+  cursor: pointer;
+}
+
+.markdown-body .md-mermaid-tag-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1em 0.55em;
+  border-radius: 9999px;
+  border: 1px solid #bfdbfe;
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.markdown-body .md-mermaid-tag-chip:hover { background: rgba(59, 130, 246, 0.2); }
+
+.markdown-body .md-mermaid-tag-chip.md-mermaid-tag-off {
+  border-color: rgba(220, 38, 38, 0.4);
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+  text-decoration: line-through;
+}
+
 .markdown-body .md-mermaid-svg {
   padding: 0.75em;
   overflow-x: auto;
@@ -505,6 +547,10 @@ path[data-et="edge"].edge-hover {
 .theme-dark .markdown-body .md-mermaid-error-message { color: #f87171; }
 .theme-dark .markdown-body .md-mermaid-error-source { background: rgba(127, 29, 29, 0.25); border-color: #7f1d1d; color: #fecaca; }
 .theme-dark .markdown-body .md-mermaid-error-chip { color: #f87171; background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.4); }
+.theme-dark .markdown-body .md-mermaid-view-select { background: #0f172a; border-color: #334155; color: #e2e8f0; }
+.theme-dark .markdown-body .md-mermaid-tag-chip { border-color: rgba(96, 165, 250, 0.5); background: rgba(59, 130, 246, 0.15); color: #93c5fd; }
+.theme-dark .markdown-body .md-mermaid-tag-chip:hover { background: rgba(59, 130, 246, 0.3); }
+.theme-dark .markdown-body .md-mermaid-tag-chip.md-mermaid-tag-off { border-color: rgba(248, 113, 113, 0.5); background: rgba(248, 113, 113, 0.12); color: #f87171; }
 
 /* Default Mermaid Actor styling for Dark Mode to match main blue and dark background */
 .theme-dark rect.actor:not([data-colored="true"]) {

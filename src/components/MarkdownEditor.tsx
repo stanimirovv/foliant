@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { Code, Eye, FileText, Undo2, Redo2 } from 'lucide-react';
 import WYSIWYGEditor from './WYSIWYGEditor';
+import { DiagramViewSelection } from '@/lib/diagramView';
 
 export interface MarkdownEditorProps {
   code: string;
@@ -20,6 +21,10 @@ export interface MarkdownEditorProps {
   // Opens the mermaid block at `index` in the diagram editor (the same
   // select-to-edit flow as the Files menu entries).
   onSelectDiagram: (index: number) => void;
+  // Per-block view/tag selections for the mermaid preview controls (driven
+  // by the mdview/mdhide URL params in ClientPage).
+  viewStates?: Map<number, DiagramViewSelection>;
+  onViewStateChange?: (index: number, selection: DiagramViewSelection) => void;
 }
 
 type MarkdownViewMode = 'edit' | 'preview';
@@ -55,6 +60,8 @@ export default function MarkdownEditor({
   canUndo,
   canRedo,
   onSelectDiagram,
+  viewStates,
+  onViewStateChange,
 }: MarkdownEditorProps) {
   const [viewMode, setViewMode] = useState<MarkdownViewMode>(loadViewMode);
   const isDark = theme === 'dark';
@@ -193,6 +200,8 @@ export default function MarkdownEditor({
                 onCodeChange={onCodeChange}
                 onMarkdownEdit={onMarkdownEdit ?? onCodeChange}
                 onSelectDiagram={onSelectDiagram}
+                viewStates={viewStates}
+                onViewStateChange={onViewStateChange}
               />
             </div>
           </div>

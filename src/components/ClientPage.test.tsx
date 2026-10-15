@@ -136,7 +136,8 @@ vi.mock('./DiagramViewer', () => ({
 }));
 
 // The MarkdownEditor stub records the document it received and lets tests
-// drive text edits (onCodeChange) and diagram selection (onSelectDiagram).
+// drive text edits (onCodeChange) and diagram selection (onSelectDiagram). It
+// also records the per-block view/tag states and can report a change for one.
 vi.mock('./MarkdownEditor', () => ({
   __esModule: true,
   default: (props: {
@@ -144,11 +145,14 @@ vi.mock('./MarkdownEditor', () => ({
     fileName: string;
     onCodeChange: (newCode: string) => void;
     onSelectDiagram: (index: number) => void;
+    viewStates?: Map<number, { viewName?: string | null; hideKeys?: string[] }>;
+    onViewStateChange?: (index: number, selection: { viewName?: string | null; hideKeys?: string[] }) => void;
   }) => (
     <div
       data-testid="markdown-editor"
       data-code={props.code}
       data-file={props.fileName}
+      data-viewstates={JSON.stringify(props.viewStates ? Object.fromEntries(props.viewStates) : null)}
     >
       <textarea
         data-testid="markdown-editor-source"
@@ -164,6 +168,12 @@ vi.mock('./MarkdownEditor', () => ({
           select diagram {i}
         </button>
       ))}
+      <button
+        data-testid="markdown-viewstate-0"
+        onClick={() => props.onViewStateChange?.(0, { viewName: null, hideKeys: ['backend'] })}
+      >
+        change view state 0
+      </button>
     </div>
   ),
 }));
@@ -2597,6 +2607,45 @@ sequenceDiagram
       // the toolbar shows the markdown file badge instead of the diagram search
       expect(screen.getByTestId('markdown-file-badge').textContent).toContain('notes.md');
       expect(screen.queryByPlaceholderText('Search diagram...')).toBeNull();
+    });
+
+    // The markdown preview's per-block view/tag controls keep their state in
+    // the URL (mdview.<i> / mdhide.<i> params) and report changes through
+    // onViewStateChange, which ClientPage writes back to the URL.
+    it('passes per-block view state from the URL (mdview.N/mdhide.N) to the markdown editor', async () => {
+      mockParams({ file: 'notes.md', 'mdview.0': 'Backend only', 'mdhide.1': 'critical' });
+      mockMarkdownDocFetch(MD_DOC);
+      render(<ClientPage />);
+
+      const editor = await screen.findByTestId('markdown-editor');
+      await waitFor(() => {
+        const states = JSON.parse(editor.getAttribute('data-viewstates') ?? 'null');
+        expect(states).toEqual({
+          0: { viewName: 'Backend only', hideKeys: [] },
+          1: { viewName: null, hideKeys: ['critical'] },
+        });
+      });
+    });
+
+    it('writes per-block view state changes back to the URL', async () => {
+      mockParams({ file: 'notes.md' });
+      mockMarkdownDocFetch(MD_DOC);
+      render(<ClientPage />);
+
+      const editor = await screen.findByTestId('markdown-editor');
+      await waitFor(() => {
+        expect(editor.getAttribute('data-code')).toBe(MD_DOC);
+      });
+
+      mockReplace.mockClear();
+      fireEvent.click(screen.getByTestId('markdown-viewstate-0'));
+      await waitFor(() => {
+        const url = mockReplace.mock.calls.at(-1)?.[0] as string;
+        const params = new URLSearchParams(url.split('?')[1]);
+        expect(params.get('mdhide.0')).toBe('backend');
+        expect(params.get('mdview.0')).toBeNull();
+        expect(params.get('file')).toBe('notes.md');
+      });
     });
 
     it('auto-saves markdown edits to the .md file (whole-file POST)', async () => {

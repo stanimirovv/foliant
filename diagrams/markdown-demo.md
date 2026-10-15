@@ -10,10 +10,12 @@ block's content is replaced, the surrounding prose is untouched.
 ## Login flow (sequence diagram)
 
 The first block carries a `%% CONFIG:` line, so canvas edits (colors, sticky
-notes, saved views) round-trip through the markdown save.
+notes, saved views) round-trip through the markdown save. Its participants are
+tagged (`frontend` / `backend`) and it has a saved view, so the preview's
+per-block view dropdown and tag chips can be tried right here.
 
 ```mermaid
-%% CONFIG: {"version":1,"arrows":[{"from":"C","to":"API","label":"New message","color":"#00ff9d","animation":"flow"}]}
+%% CONFIG: {"version":1,"arrows":[{"from":"C","to":"API","label":"New message","color":"#00ff9d","animation":"flow"}],"actors":{"C":{"keys":["frontend"]},"DB":{"keys":["backend"]},"Auth":{"keys":["backend"]},"API":{"keys":["backend"]}},"views":[{"name":"Backend only","hideKeys":["frontend"]}]}
 sequenceDiagram
     participant C as Client
     participant DB as Database

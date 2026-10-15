@@ -3,15 +3,38 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import WYSIWYGEditor from './WYSIWYGEditor';
 import { parseMarkdownBlocks } from '@/lib/markdownBlocks';
 
-// Mock MermaidBlockPreview so we don't need mermaid/SVG in these tests.
+// Mock MermaidBlockPreview so we don't need mermaid/SVG in these tests. The
+// mock also records the per-block view state and can report a change.
 vi.mock('./MermaidBlockPreview', () => ({
-  default: ({ index, title, onSelect }: { index: number; title: string; onSelect: () => void }) => (
+  default: ({
+    index,
+    title,
+    onSelect,
+    viewState,
+    onViewStateChange,
+  }: {
+    index: number;
+    title: string;
+    onSelect: () => void;
+    viewState?: { viewName?: string | null; hideKeys?: string[] };
+    onViewStateChange?: (selection: { viewName?: string | null; hideKeys?: string[] }) => void;
+  }) => (
     <div
       data-testid={`mock-mermaid-block-${index}`}
       data-title={title}
+      data-viewstate={JSON.stringify(viewState ?? null)}
       onClick={onSelect}
     >
       mermaid block {index}: {title}
+      <button
+        data-testid={`mock-mermaid-viewstate-${index}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onViewStateChange?.({ viewName: 'V', hideKeys: ['k'] });
+        }}
+      >
+        change view state
+      </button>
     </div>
   ),
 }));
@@ -314,6 +337,27 @@ describe('WYSIWYGEditor', () => {
       expect(code2).toContain('# New Title');
       expect(code2).toContain('New prose.');
       expect(code2).not.toContain('Intro prose with **bold** text.');
+    });
+  });
+
+  describe('per-block view/tag state (markdown preview controls)', () => {
+    it('passes each block\'s selection to its mermaid preview, keyed by diagram index', () => {
+      const viewStates = new Map<number, { viewName?: string | null; hideKeys?: string[] }>([
+        [1, { viewName: 'Focus', hideKeys: ['backend'] }],
+      ]);
+      renderEditor({ viewStates });
+      expect(screen.getByTestId('mock-mermaid-block-0').getAttribute('data-viewstate')).toBe('null');
+      expect(screen.getByTestId('mock-mermaid-block-1').getAttribute('data-viewstate'))
+        .toBe(JSON.stringify({ viewName: 'Focus', hideKeys: ['backend'] }));
+    });
+
+    it('reports a selection change with the diagram index', () => {
+      const onViewStateChange = vi.fn();
+      renderEditor({ onViewStateChange });
+      fireEvent.click(screen.getByTestId('mock-mermaid-viewstate-1'));
+      expect(onViewStateChange).toHaveBeenCalledWith(1, { viewName: 'V', hideKeys: ['k'] });
+      fireEvent.click(screen.getByTestId('mock-mermaid-viewstate-0'));
+      expect(onViewStateChange).toHaveBeenCalledWith(0, { viewName: 'V', hideKeys: ['k'] });
     });
   });
 });

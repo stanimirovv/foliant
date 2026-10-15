@@ -10,7 +10,8 @@ import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText } from 'lucide-react';
-import { parseViewsData, updateViewsData, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
+import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
+import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
 import { parseModel, ModelElement, NodeShape, ParticipantType, StickyNoteElement } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
 import mermaid from 'mermaid';
@@ -779,32 +780,22 @@ export default function ClientPage() {
     });
   }, [stickyNotes, hideKeys]);
 
-  const availableKeys = useMemo(() => {
-    const keys = new Set<string>();
-    if (viewsData?.actors) {
-      Object.values(viewsData.actors).forEach(a => { if (a.keys) a.keys.forEach(k => keys.add(k)); });
-    }
-    // Messages/edges carry their own tags too (their inherited tags are the
-    // origin service's, already listed via the actors).
-    if (viewsData?.arrows) {
-      for (const a of viewsData.arrows) {
-        if (a.keys) a.keys.forEach(k => keys.add(k));
-      }
-    }
-    // Notes carry their own tags as well.
-    if (viewsData?.noteTags) {
-      for (const n of viewsData.noteTags) {
-        if (n.keys) n.keys.forEach(k => keys.add(k));
-      }
-    }
-    // Sticky notes carry their own tags as well.
-    if (viewsData?.notes) {
-      for (const n of viewsData.notes) {
-        if (n.keys) n.keys.forEach(k => keys.add(k));
-      }
-    }
-    return Array.from(keys);
-  }, [viewsData]);
+  const availableKeys = useMemo(() => collectAvailableKeys(viewsData), [viewsData]);
+
+  // Per-block view/tag selections for the markdown preview's diagram controls,
+  // keyed by diagram index. The state lives in the URL (mdview/mdhide params),
+  // so it survives reloads and is shareable — like the diagram editor's
+  // filter params — and toggling never writes to the file.
+  const mdViewStates = useMemo(
+    () => parseMarkdownViewStates(searchParams.toString()),
+    [searchParams],
+  );
+
+  const handleMarkdownViewStateChange = (index: number, selection: DiagramViewSelection) => {
+    const params = new URLSearchParams(searchParams.toString());
+    applyMarkdownViewState(params, index, selection);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
 
   const actorOptions = useMemo<ActorTransformOptions>(() => ({
     mergeByKeys: Array.from(mergeKeys),
@@ -2276,6 +2267,8 @@ export default function ClientPage() {
                 onSelectDiagram={(index) => {
                   if (currentFile) selectMarkdownDiagram(currentFile, index);
                 }}
+                viewStates={mdViewStates}
+                onViewStateChange={handleMarkdownViewStateChange}
               />
             ) : (
               <DiagramViewer

@@ -11,6 +11,7 @@ import {
   deleteBlock,
   type TextBlock,
 } from '@/lib/markdownBlocks';
+import { DiagramViewSelection } from '@/lib/diagramView';
 
 export interface WYSIWYGEditorProps {
   code: string;
@@ -20,6 +21,10 @@ export interface WYSIWYGEditorProps {
   // WYSIWYG edits (with undo) — the primary mutation path.
   onMarkdownEdit: (newCode: string) => void;
   onSelectDiagram: (index: number) => void;
+  // Per-block view/tag selections for the mermaid preview controls, keyed by
+  // the diagram index (the same index onSelectDiagram reports).
+  viewStates?: Map<number, DiagramViewSelection>;
+  onViewStateChange?: (index: number, selection: DiagramViewSelection) => void;
 }
 
 // The WYSIWYG document surface: renders the full markdown document as a
@@ -33,6 +38,8 @@ export default function WYSIWYGEditor({
   theme,
   onMarkdownEdit,
   onSelectDiagram,
+  viewStates,
+  onViewStateChange,
 }: WYSIWYGEditorProps) {
   // Position of a pending (not yet committed) new block, or null.
   const [pendingInsert, setPendingInsert] = useState<number | null>(null);
@@ -158,6 +165,10 @@ export default function WYSIWYGEditor({
               endLine={block.endLine}
               theme={theme}
               onSelect={() => onSelectDiagram(block.index)}
+              viewState={viewStates?.get(block.index)}
+              onViewStateChange={onViewStateChange
+                ? (selection) => onViewStateChange(block.index, selection)
+                : undefined}
             />
           )}
           {/* Insert button (or pending block) after each block */}

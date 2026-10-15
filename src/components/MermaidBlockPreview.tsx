@@ -1,8 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 import { Pencil } from 'lucide-react';
+import { collectAvailableKeys, parseViewsData } from '@/lib/views';
+import {
+  DiagramViewSelection,
+  EMPTY_DIAGRAM_VIEW_SELECTION,
+  findSavedView,
+  renderDiagramWithView,
+} from '@/lib/diagramView';
 
 export interface MermaidBlockPreviewProps {
   content: string;
@@ -14,6 +21,12 @@ export interface MermaidBlockPreviewProps {
   // Selecting the block opens the diagram in the diagram editor (the same
   // select-to-edit flow as the Files menu).
   onSelect: () => void;
+  // Per-block view/tag selection for the preview controls. When provided and
+  // the block's CONFIG has saved views or tags, the header bar shows a view
+  // dropdown and tag toggle chips, and the rendered SVG applies the selection
+  // (the same pipeline the diagram editor uses). Never writes to the file.
+  viewState?: DiagramViewSelection;
+  onViewStateChange?: (selection: DiagramViewSelection) => void;
 }
 
 export { looksLikeMermaidDiagram, MERMAID_DIAGRAM_KEYWORDS } from '@/lib/model';
@@ -39,6 +52,8 @@ export default function MermaidBlockPreview({
   endLine,
   theme,
   onSelect,
+  viewState,
+  onViewStateChange,
 }: MermaidBlockPreviewProps) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +65,48 @@ export default function MermaidBlockPreview({
   // Guard: content that is not a mermaid diagram (e.g. markdown prose leaked
   // in by an upstream bug) is never passed to mermaid.render.
   const isNotDiagram = !isEmpty && !looksLikeMermaidDiagram(content);
+
+  // The block's own CONFIG (views, tags) drives the preview controls and the
+  // render pipeline.
+  const config = useMemo(() => parseViewsData(content), [content]);
+  const views = useMemo(() => config?.views ?? [], [config]);
+  const availableKeys = useMemo(() => collectAvailableKeys(config), [config]);
+  const showViewControls = Boolean(onViewStateChange) && (views.length > 0 || availableKeys.length > 0);
+
+  // The render input: the raw block processed with the selected view / hidden
+  // tags. Without a selection and without a CONFIG, the raw content renders
+  // unchanged.
+  const renderInput = useMemo(
+    () => renderDiagramWithView(content, config, viewState ?? EMPTY_DIAGRAM_VIEW_SELECTION),
+    [content, config, viewState],
+  );
+
+  // The view active in this block (null when the selection names no saved
+  // view of this block). Its stored state drives the render; the chips show
+  // its hidden tags so a chip click can exit the view from that state.
+  const activeView = findSavedView(config, viewState?.viewName);
+  const effectiveHideKeys = activeView?.hideKeys ?? viewState?.hideKeys ?? [];
+
+  const handleSelectView = (name: string) => {
+    if (!onViewStateChange) return;
+    if (!name) {
+      // Back to the full diagram (mirrors deselectView: drop the filter state).
+      onViewStateChange({ viewName: null, hideKeys: [] });
+      return;
+    }
+    const view = views.find(v => v.name === name);
+    onViewStateChange({ viewName: name, hideKeys: view?.hideKeys ?? [] });
+  };
+
+  const handleToggleKey = (key: string) => {
+    if (!onViewStateChange) return;
+    const next = new Set(effectiveHideKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    // A manual tag toggle exits view mode (mirrors setActorState clearing the
+    // active view in the diagram editor).
+    onViewStateChange({ viewName: null, hideKeys: Array.from(next) });
+  };
 
   useEffect(() => {
     mermaid.initialize({
@@ -97,7 +154,7 @@ export default function MermaidBlockPreview({
       (async () => {
         const id = `md-mermaid-${index}-${Math.random().toString(36).substr(2, 9)}`;
         try {
-          const { svg } = await mermaid.render(id, content);
+          const { svg } = await mermaid.render(id, renderInput.code);
           if (cancelled) return;
           lastGoodRef.current = svg;
           setSvg(svg);
@@ -125,7 +182,7 @@ export default function MermaidBlockPreview({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [content, index, theme, isEmpty, isNotDiagram]);
+  }, [renderInput.code, index, theme, isEmpty, isNotDiagram]);
 
   // A block that has never rendered successfully gets the full error box;
   // a transient failure keeps the last good render with a small chip.
@@ -148,6 +205,46 @@ export default function MermaidBlockPreview({
       >
         <span className="font-medium truncate">{title}</span>
         <span className="flex-shrink-0">Diagram {index + 1} · lines {startLine}–{endLine}</span>
+        {showViewControls && (
+          <div
+            className="md-mermaid-view-controls"
+            data-testid={`md-mermaid-view-controls-${index}`}
+            // The block opens the diagram editor on click; the controls must
+            // not trigger that.
+            onClick={(e) => e.stopPropagation()}
+          >
+            {views.length > 0 && (
+              <select
+                data-testid={`md-mermaid-view-select-${index}`}
+                className="md-mermaid-view-select"
+                value={activeView?.name ?? ''}
+                onChange={(e) => handleSelectView(e.target.value)}
+                title="Apply a saved view to this diagram"
+              >
+                <option value="">All (default)</option>
+                {views.map(v => (
+                  <option key={v.name} value={v.name}>{v.name}</option>
+                ))}
+              </select>
+            )}
+            {availableKeys.map(k => {
+              const off = effectiveHideKeys.includes(k);
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  data-testid={`md-mermaid-tag-${index}-${k}`}
+                  data-state={off ? 'off' : 'on'}
+                  className={`md-mermaid-tag-chip${off ? ' md-mermaid-tag-off' : ''}`}
+                  onClick={() => handleToggleKey(k)}
+                  title={off ? `Show elements tagged "${k}"` : `Hide elements tagged "${k}"`}
+                >
+                  {k}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {error !== null && (
           <span
             data-testid={`md-mermaid-error-chip-${index}`}

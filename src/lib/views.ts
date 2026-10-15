@@ -84,6 +84,36 @@ export interface DiagramConfig {
 export const VIEWS_PREFIX = '%% VIEWS: ';
 export const CONFIG_PREFIX = '%% CONFIG: '; // We can allow %% CONFIG: for newer files
 
+// All tags (keys) used anywhere in the config: actors, arrows, note tags and
+// sticky notes. Drives the "By Key" filter lists — the diagram editor sidebar
+// and the markdown preview's per-block tag toggles.
+export function collectAvailableKeys(config: DiagramConfig | null): string[] {
+  const keys = new Set<string>();
+  if (config?.actors) {
+    Object.values(config.actors).forEach(a => { if (a.keys) a.keys.forEach(k => keys.add(k)); });
+  }
+  // Messages/edges carry their own tags too (their inherited tags are the
+  // origin service's, already listed via the actors).
+  if (config?.arrows) {
+    for (const a of config.arrows) {
+      if (a.keys) a.keys.forEach(k => keys.add(k));
+    }
+  }
+  // Notes carry their own tags as well.
+  if (config?.noteTags) {
+    for (const n of config.noteTags) {
+      if (n.keys) n.keys.forEach(k => keys.add(k));
+    }
+  }
+  // Sticky notes carry their own tags as well.
+  if (config?.notes) {
+    for (const n of config.notes) {
+      if (n.keys) n.keys.forEach(k => keys.add(k));
+    }
+  }
+  return Array.from(keys);
+}
+
 export function parseViewsData(code: string): DiagramConfig | null {
   if (!code) return null;
   const firstLine = code.split('\n')[0];

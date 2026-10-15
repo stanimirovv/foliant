@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseViewsData, updateViewsData, DiagramConfig, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from './views';
+import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from './views';
 import { createSequenceDiagram, createFlowchartDiagram } from './editorTestHarness';
 
 describe('Views parsing and updating', () => {
@@ -203,6 +203,40 @@ describe('CONFIG notes (StickyNote)', () => {
     const newCode = updateViewsData(code, config);
     expect(newCode).toBe(`sequenceDiagram\n  A->>B: Hello`);
     expect(parseViewsData(newCode)).toBeNull();
+  });
+});
+
+describe('collectAvailableKeys', () => {
+  it('returns an empty list for a missing config', () => {
+    expect(collectAvailableKeys(null)).toEqual([]);
+  });
+
+  it('collects the union of actor, arrow, note and sticky-note tags, deduped', () => {
+    const config: DiagramConfig = {
+      version: 1,
+      actors: {
+        A: { keys: ['backend', 'shared'] },
+        B: { keys: ['shared'] },
+        C: {},
+      },
+      arrows: [{ from: 'A', to: 'B', label: 'x', keys: ['critical'] }],
+      noteTags: [{ over: ['A'], text: 'note', keys: ['edge-case'] }],
+      notes: [{ id: 'n1', x: 0, y: 0, text: 'sticky', keys: ['legacy'] }],
+    };
+    expect(collectAvailableKeys(config).sort()).toEqual(
+      ['backend', 'critical', 'edge-case', 'legacy', 'shared'].sort(),
+    );
+  });
+
+  it('ignores entries without keys', () => {
+    const config: DiagramConfig = {
+      version: 1,
+      actors: { A: { color: 'red' } },
+      arrows: [{ from: 'A', to: 'B', label: 'x' }],
+      noteTags: [{ over: ['A'], text: 'note' }],
+      notes: [{ id: 'n1', x: 0, y: 0, text: 'sticky' }],
+    };
+    expect(collectAvailableKeys(config)).toEqual([]);
   });
 });
 

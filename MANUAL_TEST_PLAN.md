@@ -232,7 +232,20 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Rapid typing in a panel field → debounced: one save, no flicker, final value correct.
 - [ ] Two browser tabs on the same file: edit in tab A → tab B adopts the change via SSE without clobbering.
 
-## Increment 14 — Final automated gates
+## Increment 14 — Views & tags in the markdown preview
+
+> Stop here: a markdown document's embedded diagrams can be filtered in place, per block, without opening the diagram editor.
+
+- [ ] Open a markdown file (Preview mode) whose diagram block has a `%% CONFIG:` with tags and saved views → the block header shows a view dropdown and tag chips; a block without views/tags shows none.
+- [ ] Pick a saved view from the dropdown → only that block re-renders with the view applied (hidden actors/regions/messages gone); other blocks are untouched; the URL gains `mdview.<i>=<name>`; the file on disk is unchanged.
+- [ ] Pick "All (default)" → the block renders in full again and the URL param is removed.
+- [ ] Click a tag chip → that block hides the tagged elements (actors, messages, notes); the chip shows the off state; the URL gains `mdhide.<i>=<tag>`; clicking again restores them.
+- [ ] With a view active, click a tag chip → view mode exits and the manual tag state takes over (seeded from the view's hidden tags).
+- [ ] Clicking a chip or the dropdown does NOT open the diagram editor (no `diagram=` param; the markdown viewer stays).
+- [ ] Two diagrams with different views/tags in one file: set block 0 to view A and hide a tag in block 1 → both apply independently → F5 → both survive (state is in the URL).
+- [ ] Blocks without a CONFIG, and documents in Edit mode (Monaco), show no controls and render as before.
+
+## Increment 15 — Final automated gates
 
 > Stop here: everything is green before you call it done.
 

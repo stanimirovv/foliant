@@ -68,6 +68,60 @@ describe('MarkdownEditor', () => {
     renderMock.mockImplementation(baseRender);
   });
 
+  it('passes per-block view/tag state down to the mermaid preview controls', async () => {
+    const doc = [
+      '# Notes',
+      '',
+      '```mermaid',
+      '%% CONFIG: {"version":1,"actors":{"A":{"keys":["backend"]}},"views":[{"name":"Hide A","hideKeys":["backend"]}]}',
+      'sequenceDiagram',
+      '    participant A as Alice',
+      '    participant B as Bob',
+      '    A->>B: Hello',
+      '```',
+      '',
+    ].join('\n');
+    const onViewStateChange = vi.fn();
+    const onSelectDiagram = vi.fn();
+    const viewStates = new Map([[0, { viewName: null, hideKeys: [] }]]);
+    renderEditor({ code: doc, viewStates, onViewStateChange, onSelectDiagram });
+
+    // the block's tag chip and view dropdown render (full plumbing through
+    // MarkdownEditor → WYSIWYGEditor → MermaidBlockPreview)
+    const chip = await screen.findByTestId('md-mermaid-tag-0-backend');
+    expect(chip.getAttribute('data-state')).toBe('on');
+    const select = screen.getByTestId('md-mermaid-view-select-0') as HTMLSelectElement;
+    expect(Array.from(select.options).map(o => o.textContent)).toEqual(['All (default)', 'Hide A']);
+
+    // a chip click reports the selection for this diagram index and does not
+    // trigger the select-to-edit flow
+    fireEvent.click(chip);
+    expect(onViewStateChange).toHaveBeenCalledWith(0, { viewName: null, hideKeys: ['backend'] });
+    expect(onSelectDiagram).not.toHaveBeenCalled();
+
+    // a view selection reports the view name seeded with the view's hidden tags
+    fireEvent.change(select, { target: { value: 'Hide A' } });
+    expect(onViewStateChange).toHaveBeenCalledWith(0, { viewName: 'Hide A', hideKeys: ['backend'] });
+  });
+
+  it('shows no view/tag controls in the preview without a change handler', async () => {
+    const doc = [
+      '# Notes',
+      '',
+      '```mermaid',
+      '%% CONFIG: {"version":1,"actors":{"A":{"keys":["backend"]}},"views":[{"name":"Hide A","hideKeys":["backend"]}]}',
+      'sequenceDiagram',
+      '    participant A as Alice',
+      '    participant B as Bob',
+      '    A->>B: Hello',
+      '```',
+      '',
+    ].join('\n');
+    renderEditor({ code: doc });
+    await screen.findByTestId('md-mermaid-svg-0');
+    expect(screen.queryByTestId('md-mermaid-view-controls-0')).toBeNull();
+  });
+
   it('shows the WYSIWYG preview by default, and the raw source in Edit mode', async () => {
     renderEditor();
 
