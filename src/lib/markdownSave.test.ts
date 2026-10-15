@@ -120,4 +120,40 @@ describe('runMarkdownSaveJob', () => {
     );
     expect(state.content).toBe(MD);
   });
+
+  it('fails with verify-failed when written content on disk does not match expected content', async () => {
+    const { state, deps } = makeDeps(MD);
+    const original = extractMermaidBlocks(MD)[0].content;
+    // Simulate disk corruption during write
+    deps.writeFileAtomic = async (_path, _content) => {
+      state.content = 'corrupted disk content';
+    };
+    await expect(
+      runMarkdownSaveJob(
+        { filePath: '/tmp/notes.md', index: 0, content: 'sequenceDiagram\nA->>B: New', expectedContent: original },
+        deps,
+      )
+    ).rejects.toMatchObject({
+      code: 'verify-failed',
+      message: expect.stringContaining("Contents aren't saved"),
+    });
+  });
+
+  it('fails with verify-failed when diagrams in the saved markdown cannot be extracted or are missing', async () => {
+    const { state, deps } = makeDeps(MD);
+    const original = extractMermaidBlocks(MD)[0].content;
+    // Simulate disk write that omitted the diagram block
+    deps.writeFileAtomic = async (_path, _content) => {
+      state.content = '# Notes\n\nNo diagrams here.\n';
+    };
+    await expect(
+      runMarkdownSaveJob(
+        { filePath: '/tmp/notes.md', index: 0, content: 'sequenceDiagram\nA->>B: New', expectedContent: original },
+        deps,
+      )
+    ).rejects.toMatchObject({
+      code: 'verify-failed',
+      message: expect.stringContaining("Contents aren't saved"),
+    });
+  });
 });

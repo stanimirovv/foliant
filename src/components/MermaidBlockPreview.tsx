@@ -143,10 +143,21 @@ export default function MermaidBlockPreview({
   }, [theme]);
 
   useEffect(() => {
-    if (isEmpty || isNotDiagram) {
+    if (isEmpty) {
       setSvg(null);
       setError(null);
       lastGoodRef.current = null;
+      return;
+    }
+    if (isNotDiagram) {
+      if (lastGoodRef.current !== null) {
+        // While typing or editing, a diagram may temporarily lack a diagram keyword.
+        // Keep the last good render on screen and show a syntax-error chip.
+        setError('No diagram type detected');
+        return;
+      }
+      setSvg(null);
+      setError(null);
       return;
     }
     let cancelled = false;
@@ -189,7 +200,7 @@ export default function MermaidBlockPreview({
   const showErrorBox = error !== null && lastGoodRef.current === null;
   // Content that is not a mermaid diagram (upstream bug guard): show a
   // friendly note instead of a mermaid syntax-error diagram.
-  const showNotDiagram = isNotDiagram;
+  const showNotDiagram = isNotDiagram && lastGoodRef.current === null;
 
   return (
     <div

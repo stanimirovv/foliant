@@ -35,6 +35,45 @@ export interface MarkdownSaveResult {
   bytesWritten: number;
 }
 
+export function verifyMarkdownFileAndDiagrams(
+  diskContent: string,
+  expectedFileContent: string,
+  targetDiagramIndex?: number,
+  expectedTargetDiagramContent?: string,
+): void {
+  if (diskContent !== expectedFileContent) {
+    throw new JobError(
+      'verify-failed',
+      "Contents aren't saved: markdown file on disk does not match saved content",
+    );
+  }
+  let verifiedBlocks;
+  try {
+    verifiedBlocks = extractMermaidBlocks(diskContent);
+  } catch (err) {
+    throw new JobError(
+      'verify-failed',
+      `Contents aren't saved: failed to extract diagrams from markdown file: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (targetDiagramIndex !== undefined && expectedTargetDiagramContent !== undefined) {
+    const block = verifiedBlocks[targetDiagramIndex];
+    if (!block) {
+      throw new JobError(
+        'verify-failed',
+        `Contents aren't saved: diagram at index ${targetDiagramIndex} missing after save`,
+      );
+    }
+    const normalize = (s: string) => s.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n+$/, '');
+    if (normalize(block.content) !== normalize(expectedTargetDiagramContent)) {
+      throw new JobError(
+        'verify-failed',
+        `Contents aren't saved: diagram at index ${targetDiagramIndex} content does not match saved diagram`,
+      );
+    }
+  }
+}
+
 export async function runMarkdownSaveJob(
   args: MarkdownSaveJobArgs,
   deps: MarkdownSaveDeps,
@@ -66,5 +105,18 @@ export async function runMarkdownSaveJob(
   assertOnlyMermaidBlockChanged(disk, updated, args.index, args.content);
 
   await deps.writeFileAtomic(args.filePath, updated);
+
+  let readBack: string;
+  try {
+    readBack = await deps.readFile(args.filePath);
+  } catch {
+    throw new JobError(
+      'verify-failed',
+      `Contents aren't saved: could not read ${args.filePath} back after saving`,
+    );
+  }
+
+  verifyMarkdownFileAndDiagrams(readBack, updated, args.index, args.content);
+
   return { status: 'done', bytesWritten: updated.length };
 }

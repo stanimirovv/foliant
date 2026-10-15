@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import { getDiagramsDir, resolveDiagramFilePath } from '@/lib/config';
 import { defaultJobQueue } from '@/lib/jobQueue';
 import { runMarkdownSaveJob } from '@/lib/markdownSave';
+import { diskWriteQueue, writeFileAtomic } from '@/lib/fileStore';
 
 // POST /api/markdown/save[&dir=...]
 // Body: { file, index, content, expectedContent }
@@ -47,16 +48,14 @@ export async function POST(request: Request) {
   }
 
   const jobId = defaultJobQueue.enqueue(() =>
-    runMarkdownSaveJob(
-      { filePath, index, content, expectedContent },
-      {
-        readFile: p => fs.readFile(p, 'utf-8'),
-        writeFileAtomic: async (p, c) => {
-          const tmp = `${p}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
-          await fs.writeFile(tmp, c, 'utf-8');
-          await fs.rename(tmp, p);
+    diskWriteQueue.run(() =>
+      runMarkdownSaveJob(
+        { filePath, index, content, expectedContent },
+        {
+          readFile: p => fs.readFile(p, 'utf-8'),
+          writeFileAtomic: (p, c) => writeFileAtomic(p, c),
         },
-      },
+      ),
     ),
   );
 

@@ -4,6 +4,8 @@ import ClientPage from './ClientPage';
 import { parseModel } from '@/lib/model';
 import { parseViewsData, StickyNote } from '@/lib/views';
 import { createSequenceDiagram } from '@/lib/editorTestHarness';
+import { extractMermaidBlocks } from '@/lib/markdown';
+import { runMarkdownSaveJob } from '@/lib/markdownSave';
 import mermaid from 'mermaid';
 
 let currentMockParams: Record<string, string> = { dir: '/old/dir' };
@@ -2794,6 +2796,174 @@ sequenceDiagram
       const conflict = await screen.findByTestId('save-conflict');
       expect(conflict.textContent).toContain('changed on disk');
     }, 10000);
+
+    // A stateful fake disk that behaves like the real API routes: whole-file
+    // GET/POST, embedded-diagram GET, and the background save job (run through
+    // the real runMarkdownSaveJob so the compare-and-swap + splice logic is
+    // the production one).
+    const NOTES_MD = [
+      '# Notes',
+      '',
+      'Intro prose that must survive.',
+      '',
+      '```mermaid',
+      BLOCK0,
+      '```',
+      '',
+      'Middle prose.',
+      '',
+      '```mermaid',
+      BLOCK1,
+      '```',
+      '',
+      'Trailing prose.',
+      '',
+    ].join('\n');
+
+    const mockMarkdownDisk = (initial: string, opts?: { failSaveJob?: string }) => {
+      const disk = { content: initial };
+      const jobs = new Map<string, { status: string; code?: string; error?: string }>();
+      const mockFetch = global.fetch as import('vitest').Mock;
+      mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
+        const u = String(url);
+        if (init?.method === 'POST' && u.startsWith('/api/file/notes.md')) {
+          disk.content = JSON.parse(init.body ?? '{}').content ?? '';
+          return { ok: true, json: async () => ({ success: true }) };
+        }
+        if (init?.method === 'POST' && u.startsWith('/api/markdown/save')) {
+          const body = JSON.parse(init.body ?? '{}');
+          const id = `job_${jobs.size + 1}`;
+          if (opts?.failSaveJob) {
+            jobs.set(id, { status: 'failed', code: 'verify-failed', error: opts.failSaveJob });
+          } else {
+            try {
+              await runMarkdownSaveJob(
+                { filePath: 'notes.md', index: body.index, content: body.content, expectedContent: body.expectedContent },
+                { readFile: async () => disk.content, writeFileAtomic: async (_p, c) => { disk.content = c; } },
+              );
+              jobs.set(id, { status: 'done' });
+            } catch (err) {
+              jobs.set(id, { status: 'failed', code: (err as { code?: string }).code, error: (err as Error).message });
+            }
+          }
+          return { ok: true, status: 202, json: async () => ({ jobId: id }) };
+        }
+        if (u.startsWith('/api/jobs/')) {
+          const id = decodeURIComponent(u.slice('/api/jobs/'.length));
+          return { ok: true, json: async () => ({ id, ...jobs.get(id) }) };
+        }
+        if (u.startsWith('/api/markdown/diagrams')) {
+          return { ok: true, json: async () => ({ file: 'notes.md', diagrams: extractMermaidBlocks(disk.content).map(b => ({ index: b.index, title: b.title, startLine: b.startLine, endLine: b.endLine })) }) };
+        }
+        if (u.startsWith('/api/markdown/diagram?')) {
+          const index = Number(new URL(`http://test${u}`).searchParams.get('index'));
+          const block = extractMermaidBlocks(disk.content)[index];
+          if (!block) return { ok: false, status: 404, json: async () => ({ error: 'Diagram index out of range' }) };
+          return { ok: true, json: async () => ({ file: 'notes.md', index, content: block.content }) };
+        }
+        if (u.startsWith('/api/files')) {
+          return { ok: true, json: async () => ({ files: [], markdownFiles: ['notes.md'] }) };
+        }
+        if (u.startsWith('/api/file/notes.md')) {
+          return { ok: true, json: async () => ({ content: disk.content }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+      return disk;
+    };
+
+    // Regression: saving a view on an embedded diagram POSTed the diagram
+    // source to /api/file/notes.md, replacing the whole markdown document with
+    // a single diagram. The corruption showed up when the document was opened.
+    it('saving a view on an embedded diagram keeps the markdown file intact, then opening the document shows it', async () => {
+      mockParams({ file: 'notes.md', diagram: '1' });
+      const disk = mockMarkdownDisk(NOTES_MD);
+      (window as unknown as { prompt: unknown }).prompt = vi.fn(() => 'My View');
+      const { rerender } = render(<ClientPage />);
+
+      const viewer = await screen.findByTestId('diagram-viewer');
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('A->>B: Second diagram');
+      }, { timeout: 3000 });
+
+      fireEvent.click(screen.getByTitle('Save Current View'));
+      await waitFor(() => {
+        expect(extractMermaidBlocks(disk.content)[1]?.content).toContain('"views"');
+      }, { timeout: 5000 });
+
+      // open the markdown document
+      mockParams({ file: 'notes.md' });
+      rerender(<ClientPage />);
+      const editor = await screen.findByTestId('markdown-editor');
+      await waitFor(() => {
+        expect(editor.getAttribute('data-code')).toBe(disk.content);
+      }, { timeout: 3000 });
+
+      // the document on disk is intact: prose kept, both diagrams kept, only
+      // block 1 gained the saved view
+      expect(disk.content.startsWith('# Notes\n\nIntro prose that must survive.\n')).toBe(true);
+      expect(disk.content).toContain('Middle prose.');
+      expect(disk.content.endsWith('Trailing prose.\n')).toBe(true);
+      const blocks = extractMermaidBlocks(disk.content);
+      expect(blocks).toHaveLength(2);
+      expect(blocks[0].content).toBe(BLOCK0);
+      expect(parseViewsData(blocks[1].content)?.views?.map(v => v.name)).toEqual(['My View']);
+      // the markdown file was never overwritten wholesale
+      const mockFetch = global.fetch as import('vitest').Mock;
+      expect(mockFetch.mock.calls.some(c =>
+        String(c[0]).startsWith('/api/file/notes.md') && (c[1] as { method?: string } | undefined)?.method === 'POST'
+      )).toBe(false);
+    }, 15000);
+
+    it('deleting a view on an embedded diagram keeps the markdown file intact', async () => {
+      const codeWithView = BLOCK1.replace(
+        '{"version":1,"actors":{"A":{"color":"#e11d48"}}}',
+        '{"version":1,"actors":{"A":{"color":"#e11d48"}},"views":[{"name":"To Delete","hiddenPaths":[]}]}',
+      );
+      const mdWithView = NOTES_MD.replace(BLOCK1, codeWithView);
+      mockParams({ file: 'notes.md', diagram: '1' });
+      const disk = mockMarkdownDisk(mdWithView);
+      (window as unknown as { confirm: unknown }).confirm = vi.fn(() => true);
+      render(<ClientPage />);
+
+      const viewer = await screen.findByTestId('diagram-viewer');
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('To Delete');
+      }, { timeout: 3000 });
+
+      // Click delete view
+      const deleteBtn = await screen.findByTestId('delete-view-btn-To Delete');
+      fireEvent.click(deleteBtn);
+      await waitFor(() => {
+        expect(extractMermaidBlocks(disk.content)[1]?.content).not.toContain('To Delete');
+      }, { timeout: 5000 });
+
+      // Prose and other diagram are untouched
+      expect(disk.content.startsWith('# Notes\n\nIntro prose that must survive.\n')).toBe(true);
+      const blocks = extractMermaidBlocks(disk.content);
+      expect(blocks).toHaveLength(2);
+      expect(blocks[0].content).toBe(BLOCK0);
+    }, 15000);
+
+    it('displays error message that contents aren\'t saved when verification fails', async () => {
+      mockParams({ file: 'notes.md', diagram: '1' });
+      mockMarkdownDisk(NOTES_MD, { failSaveJob: "Contents aren't saved: verification failed" });
+      (window as unknown as { prompt: unknown }).prompt = vi.fn(() => 'My View');
+      render(<ClientPage />);
+
+      const viewer = await screen.findByTestId('diagram-viewer');
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('A->>B: Second diagram');
+      }, { timeout: 3000 });
+
+      fireEvent.click(screen.getByTitle('Save Current View'));
+      await waitFor(() => {
+        expect(screen.getByTestId('save-indicator').textContent).toBe('Save failed');
+      }, { timeout: 5000 });
+
+      const errorEl = await screen.findByTestId('save-error');
+      expect(errorEl.textContent).toContain("Contents aren't saved");
+    }, 15000);
   });
 });
 

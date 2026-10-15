@@ -29,6 +29,7 @@ import { rewriteArrowStyles, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS } fro
 import { exportSvgToFile } from '@/lib/svgExport';
 import { PendingDelete } from './EditorPanel';
 import type { MdDiagramMeta } from '@/lib/markdownTypes';
+import { createSerialQueue } from '@/lib/serialQueue';
 
 // Undo/redo history depth: capped so both stacks stay small (10-15 steps).
 const HISTORY_LIMIT = 15;
@@ -112,7 +113,9 @@ export default function ClientPage() {
   const rawCodeDiagramRef = useRef<number | null>(null); // which embedded diagram (index) rawCode belongs to
   const saveSeqRef = useRef(0);                       // only the latest save applies its result
   const loadSeqRef = useRef(0);                       // only the latest load applies its result
+  const saveQueueRef = useRef(createSerialQueue());   // client-side FIFO queue for persistence calls
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [reloadNotice, setReloadNotice] = useState(false);
 
   // Undo/redo (EDITING_PLAN.md Section 4.11): the state is a single string
@@ -525,17 +528,25 @@ export default function ClientPage() {
     return fetchFileContent(filename);
   }, [fetchEmbeddedDiagram, fetchFileContent]);
 
-  const postFile = useCallback(async (filename: string, content: string): Promise<boolean> => {
+  const postFile = useCallback(async (filename: string, content: string): Promise<{ ok: boolean; message?: string }> => {
     try {
       const r = await fetch(`/api/file/${filename}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
-      return r.ok;
+      if (!r.ok) {
+        let message = "Contents aren't saved";
+        try {
+          const data = await r.json();
+          if (typeof data?.error === 'string') message = data.error;
+        } catch {}
+        return { ok: false, message };
+      }
+      return { ok: true };
     } catch (e) {
       console.error(e);
-      return false;
+      return { ok: false, message: "Contents aren't saved" };
     }
   }, [dirParam]);
 
@@ -556,30 +567,78 @@ export default function ClientPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file: filename, index, content, expectedContent }),
       });
-      if (!r.ok) return { ok: false, message: 'Save request rejected' };
+      if (!r.ok) return { ok: false, message: "Contents aren't saved: save request rejected" };
       const data = await r.json();
-      if (typeof data.jobId !== 'string') return { ok: false, message: 'Save request rejected' };
+      if (typeof data.jobId !== 'string') return { ok: false, message: "Contents aren't saved: save request rejected" };
       const deadline = Date.now() + 30000;
       for (;;) {
         const jr = await fetch(`/api/jobs/${encodeURIComponent(data.jobId)}`);
-        if (!jr.ok) return { ok: false, message: 'Could not check the save status' };
+        if (!jr.ok) return { ok: false, message: "Contents aren't saved: could not check save status" };
         const job = await jr.json();
         if (job.status === 'done') return { ok: true };
         if (job.status === 'failed') {
           return {
             ok: false,
             code: typeof job.code === 'string' ? job.code : undefined,
-            message: typeof job.error === 'string' ? job.error : 'Save failed',
+            message: typeof job.error === 'string' ? job.error : "Contents aren't saved",
           };
         }
-        if (Date.now() > deadline) return { ok: false, message: 'Save timed out' };
+        if (Date.now() > deadline) return { ok: false, message: "Contents aren't saved: save timed out" };
         await new Promise(resolve => setTimeout(resolve, 400));
       }
     } catch (e) {
       console.error(e);
-      return { ok: false, message: 'Save failed' };
+      return { ok: false, message: "Contents aren't saved" };
     }
   }, [dirParam]);
+
+  // Persists the active diagram (either embedded diagram via background job
+  // or standalone .mmd file via atomic POST). All persist operations are
+  // serialized through saveQueueRef to ensure writes never run in parallel.
+  const persistActiveDiagram = useCallback(async (contentToPersist: string): Promise<{ ok: boolean; message?: string }> => {
+    if (!currentFile) return { ok: false, message: 'No file selected' };
+    return saveQueueRef.current.run(async () => {
+      setSaveStatus('saving');
+      setSaveConflict(null);
+      setSaveErrorMessage(null);
+      if (isEmbeddedDiagram && diagramIndex !== null) {
+        const expectedContent = lastWrittenRef.current ?? '';
+        lastWrittenRef.current = contentToPersist;
+        const result = await saveEmbeddedDiagram(currentFile, diagramIndex, contentToPersist, expectedContent);
+        if (result.ok) {
+          lastWrittenRef.current = contentToPersist;
+          setRawCode(contentToPersist);
+          setSaveStatus('saved');
+          setSaveErrorMessage(null);
+          return { ok: true };
+        } else {
+          setSaveStatus('error');
+          setSaveErrorMessage(result.message || "Contents aren't saved");
+          if (result.code === 'conflict') {
+            setSaveConflict(result.message || 'The diagram changed on disk; it was reloaded.');
+          }
+          const disk = await fetchCurrentContent(currentFile, diagramIndex);
+          if (disk !== null && rawCodeFileRef.current === currentFile && rawCodeDiagramRef.current === diagramIndex) {
+            lastWrittenRef.current = disk;
+          }
+          return { ok: false, message: result.message || "Contents aren't saved" };
+        }
+      } else {
+        const res = await postFile(currentFile, contentToPersist);
+        if (res.ok) {
+          lastWrittenRef.current = contentToPersist;
+          setRawCode(contentToPersist);
+          setSaveStatus('saved');
+          setSaveErrorMessage(null);
+          return { ok: true };
+        } else {
+          setSaveStatus('error');
+          setSaveErrorMessage(res.message || "Contents aren't saved");
+          return { ok: false, message: res.message || "Contents aren't saved" };
+        }
+      }
+    });
+  }, [currentFile, isEmbeddedDiagram, diagramIndex, saveEmbeddedDiagram, postFile, fetchCurrentContent]);
 
   const loadFile = useCallback(async (filename: string, index: number | null): Promise<boolean> => {
     const seq = ++loadSeqRef.current;
@@ -678,6 +737,13 @@ export default function ClientPage() {
     return () => clearTimeout(timer);
   }, [saveConflict]);
 
+  // The save-error notice auto-dismisses.
+  useEffect(() => {
+    if (!saveErrorMessage) return;
+    const timer = setTimeout(() => setSaveErrorMessage(null), 8000);
+    return () => clearTimeout(timer);
+  }, [saveErrorMessage]);
+
   const [debouncedCode, setDebouncedCode] = useState(rawCode);
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -700,22 +766,27 @@ export default function ClientPage() {
     if (rawCode === lastWrittenRef.current) return;
     setSaveStatus('saving');
     setSaveConflict(null);
+    setSaveErrorMessage(null);
     const seq = ++saveSeqRef.current;
     const contentToSave = rawCode;
     const timer = setTimeout(() => {
-      if (isEmbeddedDiagram && diagramIndex !== null) {
-        // Compare-and-swap: the job re-reads the markdown file and refuses to
-        // write when the target block changed on disk since it was loaded.
-        const expectedContent = lastWrittenRef.current ?? '';
-        // Optimistically mark the content as written so the SSE echo of our
-        // own save is ignored (same pattern as the direct POST below).
-        lastWrittenRef.current = contentToSave;
-        saveEmbeddedDiagram(currentFile, diagramIndex, contentToSave, expectedContent).then(result => {
+      saveQueueRef.current.run(async () => {
+        if (seq !== saveSeqRef.current) return; // a newer edit superseded this save
+        if (isEmbeddedDiagram && diagramIndex !== null) {
+          // Compare-and-swap: the job re-reads the markdown file and refuses to
+          // write when the target block changed on disk since it was loaded.
+          const expectedContent = lastWrittenRef.current ?? '';
+          // Optimistically mark the content as written so the SSE echo of our
+          // own save is ignored (same pattern as the direct POST below).
+          lastWrittenRef.current = contentToSave;
+          const result = await saveEmbeddedDiagram(currentFile, diagramIndex, contentToSave, expectedContent);
           if (seq !== saveSeqRef.current) return; // a newer edit superseded this save
           if (result.ok) {
             setSaveStatus('saved');
+            setSaveErrorMessage(null);
           } else {
             setSaveStatus('error');
+            setSaveErrorMessage(result.message || "Contents aren't saved");
             if (result.code === 'conflict') {
               setSaveConflict(result.message || 'The diagram changed on disk; it was reloaded.');
             }
@@ -729,18 +800,19 @@ export default function ClientPage() {
               }
             });
           }
-        });
-      } else {
-        postFile(currentFile, contentToSave).then(ok => {
+        } else {
+          const res = await postFile(currentFile, contentToSave);
           if (seq !== saveSeqRef.current) return; // a newer edit superseded this save
-          if (ok) {
+          if (res.ok) {
             lastWrittenRef.current = contentToSave;
             setSaveStatus('saved');
+            setSaveErrorMessage(null);
           } else {
             setSaveStatus('error'); // retried on the next edit
+            setSaveErrorMessage(res.message || "Contents aren't saved");
           }
-        });
-      }
+        }
+      });
     }, 800);
     return () => clearTimeout(timer);
   }, [rawCode, currentFile, postFile, isEmbeddedDiagram, diagramIndex, saveEmbeddedDiagram, fetchCurrentContent]);
@@ -1489,7 +1561,8 @@ export default function ClientPage() {
     }
     const name = `${base}.mmd`;
     if (files.includes(name)) return `${name} already exists`;
-    if (!(await postFile(name, NEW_DIAGRAM_TEMPLATES[type]))) {
+    const createRes = await postFile(name, NEW_DIAGRAM_TEMPLATES[type]);
+    if (!createRes.ok) {
       return 'Could not create the file';
     }
     setFiles(prev => [...prev, name].sort());
@@ -1562,14 +1635,9 @@ export default function ClientPage() {
 
     const newCode = updateViewsData(rawCode, newData);
 
-    // Saving a view writes the file directly, so it must also update
-    // lastWrittenRef (Section 4.10) or the SSE echo would be adopted as an
-    // external change.
-    if (await postFile(currentFile, newCode)) {
-      lastWrittenRef.current = newCode;
-      setRawCode(newCode);
-    } else {
-      console.error('Failed to save view');
+    const res = await persistActiveDiagram(newCode);
+    if (!res.ok) {
+      console.error('Failed to save view:', res.message);
     }
   };
 
@@ -1590,11 +1658,9 @@ export default function ClientPage() {
 
     const newCode = updateViewsData(rawCode, newData);
 
-    if (await postFile(currentFile, newCode)) {
-      lastWrittenRef.current = newCode;
-      setRawCode(newCode);
-    } else {
-      console.error('Failed to delete view');
+    const res = await persistActiveDiagram(newCode);
+    if (!res.ok) {
+      console.error('Failed to delete view:', res.message);
     }
   };
 
@@ -2210,8 +2276,16 @@ export default function ClientPage() {
                       ? 'text-green-600'
                       : 'text-blue-500'
                 }`}
+                title={saveStatus === 'error' ? (saveErrorMessage || "Contents aren't saved") : undefined}
               >
                 {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : 'Save failed'}
+              </span>
+            )}
+            {saveStatus === 'error' && (
+              <span data-testid="save-error" className="text-xs text-red-500 font-medium" title={saveErrorMessage || "Contents aren't saved"}>
+                {saveErrorMessage && saveErrorMessage.toLowerCase().includes("aren't saved")
+                  ? saveErrorMessage
+                  : `Contents aren't saved${saveErrorMessage ? `: ${saveErrorMessage}` : ''}`}
               </span>
             )}
             {saveConflict && (
