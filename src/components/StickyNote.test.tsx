@@ -18,6 +18,7 @@ describe('StickyNote Component', () => {
     onMove: vi.fn(),
     onUpdateText: vi.fn(),
     onUpdateColor: vi.fn(),
+    onResize: vi.fn(),
     onDelete: vi.fn(),
   };
 
@@ -163,5 +164,137 @@ describe('StickyNote Component', () => {
     fireEvent.mouseUp(window);
 
     expect(defaultProps.onMove).toHaveBeenCalledWith('note-1', 150, 180);
+  });
+
+  it('renders at the default size when the note has no stored size', () => {
+    render(<StickyNote {...defaultProps} />);
+    const card = screen.getByTestId('sticky-note-note-1') as HTMLElement;
+    expect(card.style.width).toBe('130px');
+    expect(card.style.height).toBe('110px');
+  });
+
+  it("renders at the note's stored size", () => {
+    const sizedNote: StickyNoteType = { ...baseNote, width: 200, height: 160 };
+    render(<StickyNote {...defaultProps} note={sizedNote} />);
+    const card = screen.getByTestId('sticky-note-note-1') as HTMLElement;
+    expect(card.style.width).toBe('200px');
+    expect(card.style.height).toBe('160px');
+  });
+
+  it('shrinks the card when the corner handle is dragged inwards', () => {
+    const { rerender } = render(<StickyNote {...defaultProps} />);
+    const card = screen.getByTestId('sticky-note-note-1') as HTMLElement;
+    const handle = screen.getByTestId('sticky-note-resize-note-1');
+
+    fireEvent.mouseDown(handle, { clientX: 230, clientY: 260, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 200, clientY: 230 });
+
+    // the card shrinks live while dragging (130x110 -> 100x80)
+    expect(card.style.width).toBe('100px');
+    expect(card.style.height).toBe('80px');
+
+    fireEvent.mouseUp(window);
+    expect(defaultProps.onResize).toHaveBeenCalledWith('note-1', 100, 80);
+
+    // once the parent persists the new size, the card keeps it
+    rerender(<StickyNote {...defaultProps} note={{ ...baseNote, width: 100, height: 80 }} />);
+    expect(card.style.width).toBe('100px');
+    expect(card.style.height).toBe('80px');
+  });
+
+  it('grows the card when the corner handle is dragged outwards', () => {
+    render(<StickyNote {...defaultProps} />);
+    const card = screen.getByTestId('sticky-note-note-1') as HTMLElement;
+    const handle = screen.getByTestId('sticky-note-resize-note-1');
+
+    fireEvent.mouseDown(handle, { clientX: 230, clientY: 260, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 290, clientY: 330 });
+
+    // 130x110 + 60x70
+    expect(card.style.width).toBe('190px');
+    expect(card.style.height).toBe('180px');
+
+    fireEvent.mouseUp(window);
+    expect(defaultProps.onResize).toHaveBeenCalledWith('note-1', 190, 180);
+  });
+
+  it('clamps the size to the minimum when dragged far inwards', () => {
+    render(<StickyNote {...defaultProps} />);
+    const handle = screen.getByTestId('sticky-note-resize-note-1');
+
+    fireEvent.mouseDown(handle, { clientX: 230, clientY: 260, button: 0 });
+    fireEvent.mouseMove(window, { clientX: -500, clientY: -500 });
+    fireEvent.mouseUp(window);
+
+    expect(defaultProps.onResize).toHaveBeenCalledWith('note-1', 80, 70);
+  });
+
+  it('divides the drag distance by the zoom scale', () => {
+    render(<StickyNote {...defaultProps} zoomScale={2} />);
+    const handle = screen.getByTestId('sticky-note-resize-note-1');
+
+    fireEvent.mouseDown(handle, { clientX: 230, clientY: 260, button: 0 });
+    // +60 client px at 2x zoom = +30 diagram px
+    fireEvent.mouseMove(window, { clientX: 290, clientY: 320 });
+    fireEvent.mouseUp(window);
+
+    expect(defaultProps.onResize).toHaveBeenCalledWith('note-1', 160, 140);
+  });
+
+  it('does not call onResize when the handle is pressed without dragging', () => {
+    render(<StickyNote {...defaultProps} />);
+    const handle = screen.getByTestId('sticky-note-resize-note-1');
+
+    fireEvent.mouseDown(handle, { clientX: 230, clientY: 260, button: 0 });
+    fireEvent.mouseUp(window);
+
+    expect(defaultProps.onResize).not.toHaveBeenCalled();
+  });
+
+  it('does not select the note on the click trailing a resize', () => {
+    const onSelect = vi.fn();
+    render(<StickyNote {...defaultProps} onSelect={onSelect} />);
+    const handle = screen.getByTestId('sticky-note-resize-note-1');
+
+    fireEvent.mouseDown(handle, { clientX: 230, clientY: 260, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 260, clientY: 290 });
+    fireEvent.mouseUp(window);
+
+    fireEvent.click(screen.getByTestId('sticky-note-note-1'));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('keeps the base text size at the default card size', () => {
+    render(<StickyNote {...defaultProps} />);
+    const line = screen.getByText('Test note content') as HTMLElement;
+    expect(line.style.fontSize).toBe('12px');
+  });
+
+  it('scales the text down with a smaller card and up with a larger one', () => {
+    const smallNote: StickyNoteType = { ...baseNote, width: 104, height: 88 }; // scale 0.8
+    const { rerender } = render(<StickyNote {...defaultProps} note={smallNote} />);
+    let line = screen.getByText('Test note content') as HTMLElement;
+    expect(line.style.fontSize).toBe('9.6px'); // 12 * 0.8
+
+    const largeNote: StickyNoteType = { ...baseNote, width: 260, height: 220 }; // scale 2
+    rerender(<StickyNote {...defaultProps} note={largeNote} />);
+    line = screen.getByText('Test note content') as HTMLElement;
+    expect(line.style.fontSize).toBe('24px'); // 12 * 2
+  });
+
+  it('scales the text live while the card is being resized', () => {
+    render(<StickyNote {...defaultProps} />);
+    const card = screen.getByTestId('sticky-note-note-1') as HTMLElement;
+    const handle = screen.getByTestId('sticky-note-resize-note-1');
+
+    fireEvent.mouseDown(handle, { clientX: 230, clientY: 260, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 204, clientY: 238 }); // -> 104x88, scale 0.8
+
+    const line = screen.getByText('Test note content') as HTMLElement;
+    expect(line.style.fontSize).toBe('9.6px'); // 12 * 0.8
+    expect(card.style.width).toBe('104px');
+    expect(card.style.height).toBe('88px');
+
+    fireEvent.mouseUp(window);
   });
 });

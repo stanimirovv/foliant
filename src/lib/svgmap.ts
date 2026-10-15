@@ -718,7 +718,7 @@ export function buildSelectionMap(
   const processedModel = parseModel(processedCode);
   if (rawModel.type !== processedModel.type) return map;
 
-  const { rename } = buildActorRewriteMap(config, options);
+  const { rename } = buildActorRewriteMap(config, options, rawCode);
   const rewriteId = (id: string) => rename.get(id) ?? id;
 
   const signature = (el: ModelElement): string | null => {

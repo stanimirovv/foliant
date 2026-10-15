@@ -7,6 +7,7 @@
 import { parseModel, parseShapeToken, parseParticipantLine, parseFlowchartLine, ParsedFlowchartLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeShape, ParticipantType } from './model';
 import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, ArrowStyleDefaults, DiagramConfig, NoteTagEntry, updateViewsData } from './views';
 import { ANIMATED_ARROW_COLORS } from './styling';
+import { buildSubgraphTagIndex } from './subgraphTags';
 
 export interface EditResult {
   code: string;
@@ -1550,7 +1551,12 @@ export function getArrowTags(code: string, config: DiagramConfig | null, key: st
   const keys = entry?.keys ?? [];
   const keyMode: ArrowKeyMode = entry?.keyMode === 'merged' ? 'merged' : 'clean';
   const originKeys = keyMode === 'merged' ? (config?.actors?.[el.from]?.keys ?? []) : [];
-  return { keys, keyMode, inherited: originKeys.filter(k => !keys.includes(k)) };
+  // A message/edge sitting inside a subgraph also carries the subgraph's tag
+  // (structural, read-only — never stored in CONFIG).
+  const subgraphKeys = buildSubgraphTagIndex(code, model).elementKeys.get(el.key) ?? [];
+  const inherited = Array.from(new Set([...originKeys, ...subgraphKeys]))
+    .filter(k => !keys.includes(k));
+  return { keys, keyMode, inherited };
 }
 
 // The note's own tags (notes carry no tag behavior: no inheritance, so hiding

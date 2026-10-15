@@ -168,8 +168,8 @@ const MESSAGE_RE = new RegExp(`^\\s*([A-Za-z0-9_-]+?)\\s*(-->>|->>|--x|-x|-->o|-
 
 // Blocks (both diagram types). `box` is emitted by transformActors in
 // processed sequence code, so it must be tracked for end-matching.
-const BLOCK_OPEN_RE = /^\s*(alt|opt|loop|par|rect|box|subgraph)(?:\s+(.*))?$/;
-const BLOCK_END_RE = /^\s*end\s*$/;
+export const BLOCK_OPEN_RE = /^\s*(alt|opt|loop|par|rect|box|subgraph)(?:\s+(.*))?$/;
+export const BLOCK_END_RE = /^\s*end\s*$/;
 const BLOCK_CONT_RE = /^\s*(else|and)\b/;
 
 // Flowcharts

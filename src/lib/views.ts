@@ -1,3 +1,5 @@
+import { collectSubgraphTags } from './subgraphTags';
+
 export interface SavedView {
   name: string;
   hiddenPaths: string[];
@@ -92,10 +94,12 @@ export interface DiagramConfig {
 export const VIEWS_PREFIX = '%% VIEWS: ';
 export const CONFIG_PREFIX = '%% CONFIG: '; // We can allow %% CONFIG: for newer files
 
-// All tags (keys) used anywhere in the config: actors, arrows, note tags and
-// sticky notes. Drives the "By Key" filter lists — the diagram editor sidebar
-// and the markdown preview's per-block tag toggles.
-export function collectAvailableKeys(config: DiagramConfig | null): string[] {
+// All tags (keys) used anywhere: actors, arrows, note tags and sticky notes in
+// the config, plus the structural subgraph tags derived from the code itself
+// (a subgraph's title becomes a key even with no `%% CONFIG:` line). Drives the
+// "By Key" filter lists — the diagram editor sidebar and the markdown preview's
+// per-block tag toggles.
+export function collectAvailableKeys(config: DiagramConfig | null, code?: string): string[] {
   const keys = new Set<string>();
   if (config?.actors) {
     Object.values(config.actors).forEach(a => { if (a.keys) a.keys.forEach(k => keys.add(k)); });
@@ -117,6 +121,12 @@ export function collectAvailableKeys(config: DiagramConfig | null): string[] {
   if (config?.notes) {
     for (const n of config.notes) {
       if (n.keys) n.keys.forEach(k => keys.add(k));
+    }
+  }
+  // Subgraph tags are structural and exist without any config entries.
+  if (code) {
+    for (const sg of collectSubgraphTags(code)) {
+      keys.add(sg.key);
     }
   }
   return Array.from(keys);

@@ -67,15 +67,16 @@ export async function renderPipeline(rawCode: string, options: RenderPipelineOpt
     svg,
     processedCode,
     model: parseModel(processedCode),
-    config: rewriteArrowStyles(config, options),
+    config: rewriteArrowStyles(config, options, rawCode),
   };
 }
 
 // Applies the resolved arrow styles + node colors + pan-exclusion marking to
 // a rendered SVG — the same calls DiagramViewer makes after mermaid.render.
-export function applyStyles(svg: string, processedCode: string, config: DiagramConfig | null, options: ActorTransformOptions = {}): string {
+// `rawCode` is needed so arrow styles follow structural subgraph merges.
+export function applyStyles(svg: string, processedCode: string, config: DiagramConfig | null, options: ActorTransformOptions = {}, rawCode?: string): string {
   const model = parseModel(processedCode);
-  const resolved = rewriteArrowStyles(config, options);
+  const resolved = rewriteArrowStyles(config, options, rawCode);
   let out = reorderSequenceLayers(svg);
   out = applyArrowStyles(out, model, resolved);
   out = applyNodeColors(out, resolved);

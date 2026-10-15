@@ -77,7 +77,35 @@ The first line of the `.mmd` file can contain a `%% CONFIG: { ... }` JSON string
 
 - When defining actors, you can assign them a `color` and an array of `keys`. This allows the viewer to provide dynamic toggles to hide these actors by key/color or merge all actors of the same color into a single block. 
 
-## 6. Visual Editing & CONFIG.arrows
+## 6. Subgraph / Box Structural Tags (Levels of Abstraction)
+Every grouping block implicitly puts a tag on all the actors and messages inside it, so a whole system can be shown collapsed or expanded. **No `%% CONFIG:` entry is needed** — the tag is derived from the block's title.
+
+- **Sequence diagrams**: use `box <title>` (mermaid's actor grouping there; `subgraph` is not valid in sequence diagrams). The boxed participants belong to the group.
+- **Flowcharts**: use `subgraph <title>` or `subgraph <id> [<title>]`.
+- The tag key is the **kebab-case slug of the title**: `box Payment Service` → key `payment-service`. A leading CSS color is ignored (`box red Payment Service` → `payment-service`); `#` starts a comment, so `box #ccc Payment Service` yields no tag.
+- An actor belongs to the group where it is **first declared/appears** (the same rule mermaid uses to draw the group box around it). Messages/edges/notes inside the group's span carry the tag too (in sequence diagrams, messages sit outside the `box`, which may only contain participant declarations).
+- In the viewer's **By Key** filter (sidebar, and the markdown preview's per-block tag toggles), the key behaves like any other tag:
+  - **Off** hides the group's actors and messages (an emptied group box is removed).
+  - **Merged** collapses the group into a **single actor labeled with the group's title**; messages between internal actors become self-calls on it.
+  - **Clean** additionally drops those internal self-calls — the high-level view: only the boundary messages remain.
+- Two groups with the same title share one key (two "Payment Service" boxes merge into the same single actor).
+- Subgraph tags combine with manual `keys` under the usual multi-tag rule: an element is hidden only when ALL of its tags are disabled.
+
+**Example:**
+```mermaid
+sequenceDiagram
+    participant Client
+    box Payment Service
+        participant Gateway
+        participant Processor
+    end
+    Client->>Gateway: pay
+    Gateway->>Processor: charge
+    Processor-->>Client: receipt
+```
+Setting `payment-service` to **Clean** renders Client talking to a single "Payment Service" actor (`pay`, `receipt`); **On** shows the Gateway/Processor internals again.
+
+## 7. Visual Editing & CONFIG.arrows
 The app can edit sequence and flowchart diagrams in place (the **Edit** toggle, `?edit=1`): click a participant/node or message/edge to change its label, type, color, width, dash and tags; add participants/messages; delete elements (deleting a participant/node cascades to everything referencing it); and undo/redo (`Ctrl+Z` / `Ctrl+Y`, history capped at 15 entries). Edits auto-save to the `.mmd` file.
 
 Arrow styles and arrow tags are persisted in the `%% CONFIG:` header under `arrows`:

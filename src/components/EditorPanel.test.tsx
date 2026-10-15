@@ -162,6 +162,37 @@ describe('EditorPanel', () => {
     expect(props.onRequestDelete).toHaveBeenCalled();
   });
 
+  it('participant fields show structural subgraph tags as read-only inherited chips', () => {
+    const boxedModel = parseModel(`sequenceDiagram
+    box Payment Service
+        participant A as Alice
+    end`);
+    const boxedA = boxedModel.elements.find(e => e.key === 'p:0')!;
+    const props = makeProps({
+      element: boxedA,
+      selectedElements: [boxedA],
+      elementsTagInfo: [{ element: boxedA, ownTags: [], inheritedTags: ['payment-service'] }],
+    });
+    render(<EditorPanel {...props} />);
+    const chips = screen.getByTestId('participant-tag-chips');
+    expect(chips.textContent).toContain('payment-service');
+    // inherited chips are read-only: no remove button, never written to CONFIG
+    expect(screen.queryByLabelText('Remove tag payment-service')).toBeNull();
+  });
+
+  it('note fields show structural subgraph tags as read-only inherited chips', () => {
+    const props = makeProps({
+      element: note0,
+      selectedElements: [note0],
+      noteTags: [],
+      elementsTagInfo: [{ element: note0, ownTags: [], inheritedTags: ['internals'] }],
+    });
+    render(<EditorPanel {...props} />);
+    const chips = screen.getByTestId('note-tag-chips');
+    expect(chips.textContent).toContain('internals');
+    expect(screen.queryByLabelText('Remove tag internals')).toBeNull();
+  });
+
   it('node fields dispatch the label edit', () => {
     const props = makeProps({ element: nodeA, diagramType: 'flowchart' });
     const { container } = render(<EditorPanel {...props} />);

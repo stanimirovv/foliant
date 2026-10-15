@@ -70,7 +70,9 @@ export default function MermaidBlockPreview({
   // render pipeline.
   const config = useMemo(() => parseViewsData(content), [content]);
   const views = useMemo(() => config?.views ?? [], [config]);
-  const availableKeys = useMemo(() => collectAvailableKeys(config), [config]);
+  // Subgraph tags are structural (derived from the block's own code), so they
+  // appear as hide toggles even when the block has no %% CONFIG line.
+  const availableKeys = useMemo(() => collectAvailableKeys(config, content), [config, content]);
   const showViewControls = Boolean(onViewStateChange) && (views.length > 0 || availableKeys.length > 0);
 
   // The render input: the raw block processed with the selected view / hidden

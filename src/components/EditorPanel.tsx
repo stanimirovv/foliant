@@ -198,6 +198,10 @@ export default function EditorPanel({
 
   const isMultiSelect = Boolean(selectedElements && selectedElements.length > 1);
   const activeElement = isMultiSelect ? null : (element ?? (selectedElements && selectedElements.length === 1 ? selectedElements[0] : null));
+  // Structural (subgraph) tags of the active element, shown as read-only chips.
+  const activeInheritedTags = activeElement
+    ? (elementsTagInfo ?? []).find(item => item.element.key === activeElement.key)?.inheritedTags
+    : undefined;
 
   return (
     <div className="p-4" data-testid="editor-panel">
@@ -239,6 +243,7 @@ export default function EditorPanel({
           config={config}
           actorColors={actorColors}
           actorKeys={actorKeys}
+          inheritedTags={activeInheritedTags}
           onEditLabel={onEditLabel}
           onSetColor={onSetColor}
           onSetParticipantKind={onSetParticipantKind}
@@ -276,6 +281,7 @@ export default function EditorPanel({
           element={activeElement}
           tags={noteTags ?? []}
           actorKeys={actorKeys}
+          inheritedTags={activeInheritedTags}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
         />
@@ -542,6 +548,7 @@ interface ComponentFieldsProps {
   config: DiagramConfig | null;
   actorColors: string[];
   actorKeys: string[];
+  inheritedTags?: string[];     // structural (subgraph) tags, read-only
   onEditLabel: (newLabel: string) => void;
   onSetColor: (color: string) => void;
   onSetParticipantKind?: (kind: ParticipantType) => void;
@@ -552,7 +559,7 @@ interface ComponentFieldsProps {
 }
 
 function ParticipantFields({
-  element, config, actorColors, actorKeys,
+  element, config, actorColors, actorKeys, inheritedTags,
   onEditLabel, onSetColor, onSetParticipantKind, onSetNodeShape, onAddTag, onRemoveTag, onRequestDelete,
 }: ComponentFieldsProps) {
   const [tagInput, setTagInput] = useState('');
@@ -788,8 +795,8 @@ function ParticipantFields({
 
       <div>
         <span className={fieldLabel}>Tags</span>
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-1">
+        {(tags.length > 0 || (inheritedTags ?? []).length > 0) && (
+          <div className="flex flex-wrap gap-1 mb-1" data-testid="participant-tag-chips">
             {tags.map(tag => (
               <span
                 key={tag}
@@ -804,6 +811,15 @@ function ParticipantFields({
                 >
                   <X size={10} />
                 </button>
+              </span>
+            ))}
+            {(inheritedTags ?? []).map(tag => (
+              <span
+                key={tag}
+                title="Inherited from the enclosing subgraph"
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 text-xs"
+              >
+                {tag}
               </span>
             ))}
           </div>
@@ -872,12 +888,13 @@ interface NoteFieldsProps {
   element: NoteElement;
   tags: string[];
   actorKeys: string[];
+  inheritedTags?: string[];     // structural (subgraph) tags, read-only
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
 }
 
 function NoteFields({
-  element, tags, actorKeys, onAddTag, onRemoveTag,
+  element, tags, actorKeys, inheritedTags, onAddTag, onRemoveTag,
 }: NoteFieldsProps) {
   const [tagInput, setTagInput] = useState('');
   const [existingTagSelect, setExistingTagSelect] = useState('');
@@ -906,7 +923,7 @@ function NoteFields({
 
       <div>
         <span className={fieldLabel}>Tags</span>
-        {tags.length > 0 && (
+        {(tags.length > 0 || (inheritedTags ?? []).length > 0) && (
           <div className="flex flex-wrap gap-1 mb-1" data-testid="note-tag-chips">
             {tags.map(tag => (
               <span
@@ -923,6 +940,15 @@ function NoteFields({
                 >
                   <X size={10} />
                 </button>
+              </span>
+            ))}
+            {(inheritedTags ?? []).map(tag => (
+              <span
+                key={tag}
+                title="Inherited from the enclosing subgraph"
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 text-xs"
+              >
+                {tag}
               </span>
             ))}
           </div>

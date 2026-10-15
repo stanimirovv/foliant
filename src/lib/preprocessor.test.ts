@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { processMermaid, transformActors, isPathHidden } from './preprocessor';
+import { processMermaid, transformActors, isPathHidden, ActorTransformOptions } from './preprocessor';
 
 describe('processMermaid', () => {
   it('keeps all lines if no regions are defined', () => {
@@ -283,6 +283,124 @@ describe('transformActors', () => {
     expect(allHidden).not.toContain('participant A');
     expect(allHidden).not.toContain('A->>B: Call');
     expect(allHidden).toContain('participant B');
+  });
+});
+
+describe('transformActors preserves areas/subgraphs (box/rect blocks)', () => {
+  // Participant declarations inside box subgraphs and rect areas must not be
+  // hoisted out of their blocks: that hollows the blocks out and the
+  // areas/subgraphs disappear from the rendered diagram — both while a merge
+  // is active and after it is switched off again.
+  const boxedCode = `sequenceDiagram
+  box Backend
+    participant A
+    participant B
+  end
+  participant C
+  A->>B: Fetch
+  A->>C: Response`;
+  const boxedConfig = {
+    version: 1,
+    actors: {
+      A: { keys: ['backend'] },
+      B: { keys: ['backend'] },
+    },
+  };
+
+  it('leaves a box subgraph untouched when no key is merged (unmerged state)', () => {
+    const result = transformActors(boxedCode, boxedConfig, {});
+    expect(result).toBe(boxedCode);
+  });
+
+  it('keeps the box subgraph when its participants are merged: the merged participant is rewritten in place', () => {
+    // The box title is also a structural tag key, so the merged participant is
+    // labeled with the box's title ("Backend"), not the generic "Merged backend".
+    const result = transformActors(boxedCode, boxedConfig, { mergeByKeys: ['backend'] });
+    expect(result).toBe(`sequenceDiagram
+  participant C
+  box Backend
+    participant MergedKey_backend as Backend
+  end
+  MergedKey_backend->>MergedKey_backend: Fetch
+  MergedKey_backend->>C: Response`);
+  });
+
+  it('keeps a rect area whose participants are merged, and restores it when unmerged', () => {
+    const code = `sequenceDiagram
+  participant C
+  rect rgb(200, 200, 255)
+    participant A
+    participant B
+    A->>B: Fetch
+  end
+  A->>C: Response`;
+    const merged = transformActors(code, boxedConfig, { mergeByKeys: ['backend'] });
+    expect(merged).toBe(`sequenceDiagram
+  participant C
+  rect rgb(200, 200, 255)
+    participant MergedKey_backend as Merged backend
+    MergedKey_backend->>MergedKey_backend: Fetch
+  end
+  MergedKey_backend->>C: Response`);
+    const unmerged = transformActors(code, boxedConfig, {});
+    expect(unmerged).toBe(code);
+  });
+
+  it('keeps a non-merged participant in its box while top-level participants merge into the generated box', () => {
+    const code = `sequenceDiagram
+  participant A
+  participant B
+  box Infra
+    participant D
+  end
+  A->>B: Fetch
+  D->>A: Ping`;
+    const config = {
+      version: 1,
+      actors: {
+        A: { keys: ['backend'] },
+        B: { keys: ['backend'] },
+        D: { keys: ['infra'] },
+      },
+    };
+    const result = transformActors(code, config, { mergeByKeys: ['backend'] });
+    expect(result).toBe(`sequenceDiagram
+    box #ccc BACKEND Zone
+    participant MergedKey_backend as Merged backend
+    end
+  box Infra
+    participant D
+  end
+  MergedKey_backend->>MergedKey_backend: Fetch
+  D->>MergedKey_backend: Ping`);
+  });
+
+  it('declares the merged participant exactly once when a group spans top level and a box', () => {
+    const code = `sequenceDiagram
+  participant A
+  box Backend
+    participant B
+  end
+  A->>B: Fetch`;
+    const result = transformActors(code, boxedConfig, { mergeByKeys: ['backend'] });
+    // The group has a top-level member, so the merged participant is declared
+    // in the generated box; the in-box declaration is dropped as a duplicate.
+    expect(result.match(/participant MergedKey_backend/g)).toHaveLength(1);
+    // The generated box is titled with the group's title (the box's title).
+    expect(result).toContain('box #ccc Backend Zone');
+    expect(result).toContain('MergedKey_backend->>MergedKey_backend: Fetch');
+  });
+
+  it('keeps areas/subgraphs through a merge -> unmerge round trip in the full render pipeline', () => {
+    const render = (options: ActorTransformOptions) =>
+      processMermaid(transformActors(boxedCode, boxedConfig, options), {
+        isRegionVisible: () => true,
+      }).code;
+    const merged = render({ mergeByKeys: ['backend'] });
+    expect(merged).toContain('box Backend');
+    expect(merged).toContain('participant MergedKey_backend as Backend');
+    const unmerged = render({});
+    expect(unmerged).toBe(boxedCode);
   });
 });
 

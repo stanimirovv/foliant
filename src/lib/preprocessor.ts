@@ -1,5 +1,12 @@
-import { DiagramConfig } from './views';
-import { parseModel, parseParticipantLine } from './model';
+import { ActorMetadata, DiagramConfig } from './views';
+import {
+  BLOCK_END_RE,
+  BLOCK_OPEN_RE,
+  parseModel,
+  parseParticipantLine,
+  ParsedParticipantLine,
+} from './model';
+import { buildSubgraphTagIndex, SubgraphTag } from './subgraphTags';
 
 export interface RegionContext {
   type: string;
@@ -46,10 +53,22 @@ interface ParticipantInfo {
   line: string;
 }
 
+// Rebuilds a participant declaration line, preserving indent, keyword and
+// shape metadata while substituting the id and alias.
+function formatParticipantLine(p: ParsedParticipantLine, id: string, alias?: string): string {
+  const metaPart = (p.participantType !== 'participant' && p.participantType !== 'actor')
+    ? ` @{ type: "${p.participantType}" }`
+    : '';
+  return alias
+    ? `${p.indent}${p.keyword} ${id} as ${alias}${metaPart}`
+    : `${p.indent}${p.keyword} ${id}${metaPart}`;
+}
+
 export interface ActorMergeGroup {
   name: string;    // MergedKey_<k>
-  alias: string;   // Merged <k> (raw value)
+  alias: string;   // the subgraph title, or `Merged <k>` (raw value)
   key: string;     // raw tag key
+  title?: string;  // subgraph title, when the group's key comes from a subgraph tag
   actors: string[];
 }
 
@@ -62,43 +81,77 @@ export interface ActorRewriteMap {
 
 // Shared hide/merge computation (EDITING_PLAN.md 4.9). transformActors and
 // rewriteArrowStyles both consume it. Color merging is removed; colors only hide.
-export function buildActorRewriteMap(config: DiagramConfig | null, options: ActorTransformOptions): ActorRewriteMap {
+//
+// When `code` is given, structural subgraph tags join the CONFIG tags: every
+// actor inside a `subgraph` carries the subgraph's tag key, so the whole
+// subgraph hides or merges as one unit. Subgraph tags apply even with no
+// `%% CONFIG:` line at all.
+export function buildActorRewriteMap(config: DiagramConfig | null, options: ActorTransformOptions, code?: string): ActorRewriteMap {
   const rename = new Map<string, string>();
   const hide = new Set<string>();
   const clean = new Set<string>();
   const groups: ActorMergeGroup[] = [];
-  if (!config || !config.actors) return { rename, hide, clean, groups };
+
+  const subgraphIndex = code ? buildSubgraphTagIndex(code) : null;
+  const subgraphByKey = new Map<string, SubgraphTag>();
+  if (subgraphIndex) {
+    for (const sg of subgraphIndex.subgraphs) {
+      if (!subgraphByKey.has(sg.key)) subgraphByKey.set(sg.key, sg);
+    }
+  }
 
   const keyToActors = new Map<string, string[]>();
 
-  for (const [actor, meta] of Object.entries(config.actors)) {
+  // An actor's effective tags are its CONFIG keys plus the subgraph tags of
+  // every subgraph it belongs to (CONFIG keys first, so an explicit tag wins
+  // the merge-group race when both are merged).
+  const considerActor = (actor: string, meta: ActorMetadata | undefined, subgraphKeys: string[]) => {
+    const keys = [...(meta?.keys ?? []), ...subgraphKeys];
     let shouldHide = false;
-    if (meta.color && options.hideColors?.includes(meta.color)) {
+    if (meta?.color && options.hideColors?.includes(meta.color)) {
       shouldHide = true;
     }
-    if (meta.keys && meta.keys.length > 0 && meta.keys.every(k => options.hideKeys?.includes(k))) {
+    if (keys.length > 0 && keys.every(k => options.hideKeys?.includes(k))) {
       shouldHide = true;
     }
 
     if (shouldHide) {
       hide.add(actor);
-      continue;
+      return;
     }
 
-    if (meta.keys) {
-      for (const k of meta.keys) {
-        if (options.mergeByKeys?.includes(k) || options.mergeCleanByKeys?.includes(k)) {
-          if (!keyToActors.has(k)) keyToActors.set(k, []);
-          keyToActors.get(k)!.push(actor);
-          break;
-        }
+    for (const k of keys) {
+      if (options.mergeByKeys?.includes(k) || options.mergeCleanByKeys?.includes(k)) {
+        if (!keyToActors.has(k)) keyToActors.set(k, []);
+        keyToActors.get(k)!.push(actor);
+        break;
       }
+    }
+  };
+
+  if (config?.actors) {
+    for (const [actor, meta] of Object.entries(config.actors)) {
+      considerActor(actor, meta, subgraphIndex?.actorKeys.get(actor) ?? []);
+    }
+  }
+  if (subgraphIndex) {
+    // Actors that appear only inside subgraphs have no CONFIG entry.
+    for (const [actor, subgraphKeys] of subgraphIndex.actorKeys) {
+      if (config?.actors && Object.prototype.hasOwnProperty.call(config.actors, actor)) continue;
+      considerActor(actor, undefined, subgraphKeys);
     }
   }
 
   keyToActors.forEach((actors, key) => {
     const name = `MergedKey_${key.replace(/[^A-Za-z0-9]/g, '')}`;
-    groups.push({ name, alias: `Merged ${key}`, key, actors });
+    const subgraph = subgraphByKey.get(key);
+    groups.push({
+      name,
+      alias: subgraph ? subgraph.title : `Merged ${key}`,
+      key,
+      ...(subgraph ? { title: subgraph.title } : {}),
+      actors,
+    });
     for (const actor of actors) rename.set(actor, name);
     if (options.mergeCleanByKeys?.includes(key)) clean.add(name);
   });
@@ -107,51 +160,56 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
 }
 
 export function transformActors(code: string, config: DiagramConfig | null, options: ActorTransformOptions): string {
+  const subgraphIndex = buildSubgraphTagIndex(code);
+  const hasSubgraphTags = subgraphIndex.subgraphs.length > 0;
   const hasArrowTags = !!config?.arrows?.some(a => (a.keys && a.keys.length > 0) || a.keyMode === 'merged');
   const hasNoteTags = !!config?.noteTags?.some(n => n.keys && n.keys.length > 0);
-  if (!config || (!config.actors && !hasArrowTags && !hasNoteTags)) return code;
+  // Subgraph tags are structural: they apply even with no %% CONFIG at all.
+  if ((!config || (!config.actors && !hasArrowTags && !hasNoteTags)) && !hasSubgraphTags) return code;
 
-  const { hide, clean, groups } = buildActorRewriteMap(config, options);
+  const { hide, clean, groups } = buildActorRewriteMap(config, options, code);
   const actorsToHide = Array.from(hide);
 
   // Message/edge lines whose effective tags include a hidden key are dropped
   // too: arrows follow the by-key filter, but only ever as on/off (shown or
   // hidden) — merging stays an actor-only concept. A line's effective tags are
   // its own keys plus, when the arrow's keyMode is 'merged', the keys of the
-  // service it originates from. (Lines whose origin service carries the hidden
-  // key are already dropped by the hidden-actor check above, so only the own
-  // keys can add drops here; inherited keys are evaluated anyway to keep the
-  // semantics exact.) Notes behave the same way with their own keys only —
+  // service it originates from, plus the structural tags of the subgraphs the
+  // line sits inside. (Lines whose origin service carries the hidden key are
+  // already dropped by the hidden-actor check above, so only the own keys can
+  // add drops here; inherited keys are evaluated anyway to keep the semantics
+  // exact.) Notes behave the same way with their own keys plus subgraph tags —
   // they carry no tag inheritance.
   const hideKeys = options.hideKeys ?? [];
   const hiddenElementLines = new Set<number>();
-  if (hideKeys.length > 0 && (hasArrowTags || hasNoteTags)) {
+  if (hideKeys.length > 0 && (hasArrowTags || hasNoteTags || hasSubgraphTags)) {
     const model = parseModel(code);
     const arrowOccurrences = new Map<string, number>();
     const noteOccurrences = new Map<string, number>();
     for (const el of model.elements) {
       if (el.kind !== 'message' && el.kind !== 'edge' && el.kind !== 'note') continue;
+      const subgraphKeys = subgraphIndex.elementKeys.get(el.key) ?? [];
       let keysToCheck: string[];
       if (el.kind === 'note') {
         const occKey = `${el.over.join('\u0000')}\u0000${el.text}`;
         const occurrence = noteOccurrences.get(occKey) ?? 0;
         noteOccurrences.set(occKey, occurrence + 1);
-        const entry = config.noteTags?.find(n =>
+        const entry = config?.noteTags?.find(n =>
           n.over.length === el.over.length && n.over.every((id, i) => id === el.over[i]) &&
           n.text === el.text &&
           (n.occurrence ?? 0) === occurrence);
-        keysToCheck = entry?.keys ?? [];
+        keysToCheck = Array.from(new Set([...(entry?.keys ?? []), ...subgraphKeys]));
       } else {
         const occKey = `${el.from}\u0000${el.to}\u0000${el.label ?? ''}`;
         const occurrence = arrowOccurrences.get(occKey) ?? 0;
         arrowOccurrences.set(occKey, occurrence + 1);
-        const entry = config.arrows?.find(a =>
+        const entry = config?.arrows?.find(a =>
           a.from === el.from && a.to === el.to &&
           (a.label ?? undefined) === (el.label ?? undefined) &&
           (a.occurrence ?? 0) === occurrence);
         const own = entry?.keys ?? [];
-        const inherited = entry?.keyMode === 'merged' ? (config.actors?.[el.from]?.keys ?? []) : [];
-        keysToCheck = Array.from(new Set([...own, ...inherited]));
+        const inherited = entry?.keyMode === 'merged' ? (config?.actors?.[el.from]?.keys ?? []) : [];
+        keysToCheck = Array.from(new Set([...own, ...inherited, ...subgraphKeys]));
       }
       if (keysToCheck.length > 0 && keysToCheck.every(k => hideKeys.includes(k))) {
         for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenElementLines.add(i);
@@ -162,6 +220,14 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   const isSequenceDiagram = /^\s*sequenceDiagram/m.test(code);
   const lines = code.split('\n');
   const result: string[] = [];
+  // Participant restructuring (below) runs only for sequence diagrams with an
+  // active merge. It needs each output line's block depth and its participant
+  // declaration parsed BEFORE merging renames the id, so group membership is
+  // looked up by the raw actor id.
+  const restructure = isSequenceDiagram && groups.length > 0;
+  const resultDepths: number[] = [];
+  const resultParticipants: (ParsedParticipantLine | null)[] = [];
+  let depth = 0;
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
@@ -181,8 +247,14 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
 
     if (line.trim().startsWith('%% CONFIG:')) {
       result.push(line);
+      if (restructure) {
+        resultDepths.push(depth);
+        resultParticipants.push(null);
+      }
       continue;
     }
+
+    const participant = restructure ? parseParticipantLine(line) : null;
 
     // Apply merging
     for (const group of groups) {
@@ -226,49 +298,89 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
     }
 
     result.push(line);
+    if (restructure) {
+      resultDepths.push(depth);
+      resultParticipants.push(participant);
+      if (BLOCK_OPEN_RE.test(line)) depth++;
+      else if (BLOCK_END_RE.test(line) && depth > 0) depth--;
+    }
   }
 
-  // Extract participants and group by color
+  // Without an active merge there is nothing to regroup: return the line-loop
+  // result untouched so block structures (box subgraphs, rect areas) survive.
+  if (!restructure) {
+    return result.join('\n');
+  }
+
+  // --- Participant restructuring (sequence diagrams with an active merge) ---
+  // Top-level participant declarations are hoisted right after
+  // `sequenceDiagram` (unmerged first, then one generated box per merge key).
+  // Declarations INSIDE blocks (box/rect/alt/...) stay in place so the
+  // enclosing areas/subgraphs survive the merge: the first declaration of an
+  // in-block merge group is rewritten to the merged participant and later
+  // duplicates are dropped.
+  const groupByActor = new Map<string, ActorMergeGroup>();
+  for (const g of groups) {
+    for (const actor of g.actors) groupByActor.set(actor, g);
+  }
+  const groupMap = new Map(groups.map(g => [g.name, g]));
+  const findGroup = (id: string) => groupByActor.get(id) ?? groupMap.get(id);
+
+  // A merge group with at least one top-level declaration keeps the generated
+  // box treatment; its in-block declarations are then dropped, because the
+  // merged participant is declared once, in the generated box.
+  const groupsWithTopLevel = new Set<string>();
+  for (let idx = 0; idx < result.length; idx++) {
+    const p = resultParticipants[idx];
+    if (p && resultDepths[idx] === 0) {
+      const g = findGroup(p.id);
+      if (g) groupsWithTopLevel.add(g.name);
+    }
+  }
+
+  const emittedInPlace = new Set<string>();
   const participants: ParticipantInfo[] = [];
   const restOfCode: string[] = [];
-  const groupMap = new Map(groups.map(g => [g.name, g]));
-  
-  for (const line of result) {
+
+  for (let idx = 0; idx < result.length; idx++) {
+    let line = result[idx];
+    const p = resultParticipants[idx];
+
+    if (p && resultDepths[idx] > 0) {
+      // Participant declared inside a block: keep it inside its area/subgraph.
+      const g = findGroup(p.id);
+      if (g) {
+        if (groupsWithTopLevel.has(g.name) || emittedInPlace.has(g.name)) {
+          continue;  // the merged participant is declared elsewhere
+        }
+        emittedInPlace.add(g.name);
+        line = formatParticipantLine(p, g.name, g.alias);
+      }
+      restOfCode.push(line);
+      continue;
+    }
+
     if (line.trim().startsWith('sequenceDiagram')) {
       restOfCode.push(line);
       continue;
     }
 
-    const parsed = parseParticipantLine(line);
-    if (parsed) {
-      const { indent, keyword, id, alias: parsedAlias, participantType } = parsed;
-      let alias = parsedAlias;
-
-      const mergeGroup = groupMap.get(id);
-      if (mergeGroup) {
-        alias = mergeGroup.alias;
-      }
-
-      const metaPart = (participantType !== 'participant' && participantType !== 'actor')
-        ? ` @{ type: "${participantType}" }`
-        : '';
-      const lineStr = alias
-        ? `${indent}${keyword} ${id} as ${alias}${metaPart}`
-        : `${indent}${keyword} ${id}${metaPart}`;
-
+    if (p) {
+      // Top-level declaration: hoist it; merged members take the group's
+      // generated name and alias.
+      const g = findGroup(p.id);
+      const id = g ? g.name : p.id;
+      const alias = g ? g.alias : p.alias;
       participants.push({
-        type: keyword,
+        type: p.keyword,
         id,
         alias,
-        line: lineStr,
+        line: formatParticipantLine(p, id, alias),
       });
-    } else {
-      restOfCode.push(line);
+      continue;
     }
-  }
 
-  if (!isSequenceDiagram) {
-    return result.join('\n');
+    restOfCode.push(line);
   }
 
   // Now group participants by box/color
@@ -289,7 +401,8 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
       const g = groupMap.get(p.id)!;
       boxId = `key_${g.name}`;
       boxColor = '#ccc';
-      boxTitle = g.key.toUpperCase();
+      // A group keyed by a subgraph tag is labeled with the subgraph's title.
+      boxTitle = g.title ?? g.key.toUpperCase();
     }
 
     if (boxId) {
@@ -401,7 +514,7 @@ function cleanupDanglingSyntax(code: string): string {
     const emptyElseEnd = /^[ \t]*(else|and)\b[^\n]*\n(?:[ \t]*(?:%%.*)?\n)*[ \t]*end[ \t]*(?=\n|$)/gm;
     code = code.replace(emptyElseEnd, 'end');
 
-    const emptyBlock = /^[ \t]*(alt|opt|loop|par|rect|subgraph)\b[^\n]*\n(?:[ \t]*(?:%%.*)?\n)*[ \t]*end[ \t]*(?=\n|$)/gm;
+    const emptyBlock = /^[ \t]*(alt|opt|loop|par|rect|box|subgraph)\b[^\n]*\n(?:[ \t]*(?:%%.*)?\n)*[ \t]*end[ \t]*(?=\n|$)/gm;
     code = code.replace(emptyBlock, '');
   }
 

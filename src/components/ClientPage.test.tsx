@@ -1298,6 +1298,94 @@ sequenceDiagram
     expect(viewer.getAttribute('data-code')).toContain('participant A as Alice');
   }, 10000);
 
+  it('a box subgraph key appears in the sidebar By Key with no CONFIG, and Merged collapses the group into one actor', async () => {
+    // mermaid sequence diagrams group actors with `box`; the key is structural,
+    // derived from the box title, so no CONFIG line is needed.
+    const BOXED = `sequenceDiagram
+    participant Client
+    box Payment Service
+    participant Gateway
+    participant Processor
+    end
+    Client->>Gateway: pay
+    Gateway->>Processor: charge
+    Processor-->>Client: receipt`;
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(BOXED);
+    const { rerender } = render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('Client->>Gateway: pay');
+    }, { timeout: 3000 });
+
+    // the structural subgraph key shows up in the sidebar without any CONFIG
+    await screen.findByText('By Key');
+    const keyItem = screen.getByText('payment-service').closest('li')!;
+    expect(fileContent.current).not.toContain('CONFIG');
+
+    // Merged collapses the whole box into a single actor labeled with the box title
+    fireEvent.click(within(keyItem).getByText('Merged'));
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('merge_key=payment-service'), { scroll: false });
+
+    // simulate the URL change taking effect
+    params.merge_key = 'payment-service';
+    rerender(<ClientPage />);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('participant MergedKey_paymentservice as Payment Service');
+    }, { timeout: 3000 });
+    const code = viewer.getAttribute('data-code') ?? '';
+    // the internal call becomes a self-call on the merged actor
+    expect(code).toContain('MergedKey_paymentservice->>MergedKey_paymentservice: charge');
+    // the boundary messages are rewired to the merged actor
+    expect(code).toContain('Client->>MergedKey_paymentservice: pay');
+    expect(code).toContain('MergedKey_paymentservice-->>Client: receipt');
+    // the raw participants are gone
+    expect(code).not.toContain('participant Gateway');
+    expect(code).not.toContain('participant Processor');
+    // the merge is a URL param only: nothing was written to the file
+    expect(fileContent.current).not.toContain('CONFIG');
+    expect(fileContent.current).toContain('box Payment Service');
+  }, 10000);
+
+  it('hiding a subgraph key in the sidebar removes the group actors and their messages', async () => {
+    const BOXED = `sequenceDiagram
+    participant Client
+    box Payment Service
+    participant Gateway
+    participant Processor
+    end
+    Client->>Gateway: pay
+    Gateway->>Processor: charge
+    Processor-->>Client: receipt`;
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(BOXED);
+    const { rerender } = render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('Client->>Gateway: pay');
+    }, { timeout: 3000 });
+
+    const keyItem = screen.getByText('payment-service').closest('li')!;
+    fireEvent.click(within(keyItem).getByText('Off'));
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('hide_key=payment-service'), { scroll: false });
+
+    // simulate the URL change taking effect
+    params.hide_key = 'payment-service';
+    rerender(<ClientPage />);
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).not.toContain('Gateway');
+    }, { timeout: 3000 });
+    const code = viewer.getAttribute('data-code') ?? '';
+    // only the outside actor survives; every message touched the hidden group
+    expect(code).toContain('participant Client');
+    expect(code).not.toContain('Processor');
+    expect(code).not.toContain('charge');
+    // the emptied box is cleaned up
+    expect(code).not.toContain('box Payment Service');
+  }, 10000);
+
   it('a broken diagram (unclosed region) still renders, shows a warning, and recognized elements stay editable (NFR-01)', async () => {
     const broken = `${DEMO}\n    %% @region-start: flow=checkout`;  // unclosed
     const viewer = await renderInEditMode(broken, 'A->>B: Hello');

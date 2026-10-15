@@ -25,6 +25,7 @@ import {
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
 import { buildSelectionMap } from '@/lib/svgmap';
+import { buildSubgraphTagIndex } from '@/lib/subgraphTags';
 import { rewriteArrowStyles, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS } from '@/lib/styling';
 import { exportSvgToFile } from '@/lib/svgExport';
 import { PendingDelete } from './EditorPanel';
@@ -852,7 +853,9 @@ export default function ClientPage() {
     });
   }, [stickyNotes, hideKeys]);
 
-  const availableKeys = useMemo(() => collectAvailableKeys(viewsData), [viewsData]);
+  // Subgraph tags are structural (derived from the code, not the CONFIG), so
+  // the By Key list reflects the raw file even before any tag is saved.
+  const availableKeys = useMemo(() => collectAvailableKeys(viewsData, rawCode), [viewsData, rawCode]);
 
   // Per-block view/tag selections for the markdown preview's diagram controls,
   // keyed by diagram index. The state lives in the URL (mdview/mdhide params),
@@ -959,17 +962,23 @@ export default function ClientPage() {
   const selectedRawElement = selectedRawElements.length === 1 ? selectedRawElements[0] : null;
 
   const selectedElementsTagInfo = useMemo(() => {
+    // Structural subgraph tags show up as read-only inherited chips: an actor
+    // carries the tags of the subgraphs it belongs to, a message/edge/note the
+    // tags of the subgraphs containing its line.
+    const subgraphIndex = buildSubgraphTagIndex(rawCode);
     return selectedRawElements.map(el => {
       let ownTags: string[] = [];
       let inheritedTags: string[] = [];
       if (el.kind === 'participant' || el.kind === 'node') {
         ownTags = viewsData?.actors?.[el.id]?.keys ?? [];
+        inheritedTags = subgraphIndex.actorKeys.get(el.id) ?? [];
       } else if (el.kind === 'message' || el.kind === 'edge') {
         const info = getArrowTags(rawCode, viewsData, el.key);
         ownTags = info?.keys ?? [];
         inheritedTags = info?.inherited ?? [];
       } else if (el.kind === 'note') {
         ownTags = getNoteTags(rawCode, viewsData, el.key);
+        inheritedTags = subgraphIndex.elementKeys.get(el.key) ?? [];
       } else if (el.kind === 'sticky') {
         ownTags = getStickyNoteTags(viewsData, el.key);
       }
@@ -1030,8 +1039,8 @@ export default function ClientPage() {
     [selectedKeys]
   );
   const resolvedArrowStyles = useMemo(
-    () => rewriteArrowStyles(viewsData, effectiveActorOptions),
-    [viewsData, effectiveActorOptions]
+    () => rewriteArrowStyles(viewsData, effectiveActorOptions, rawCode),
+    [viewsData, effectiveActorOptions, rawCode]
   );
 
   const toggleEditMode = () => {

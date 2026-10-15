@@ -46,11 +46,12 @@ export const ALL_ANIMATED_ARROW_COLORS = [
 ];
 
 // Map every arrows[].from/to through the same actor-rewrite map transformActors
-// uses. Entries whose endpoints were hidden are kept as-is: they are inert,
-// because the arrows themselves are gone with the hidden actors.
-export function rewriteArrowStyles(config: DiagramConfig | null, options: ActorTransformOptions): DiagramConfig | null {
+// uses (including the structural subgraph tags, when `code` is given). Entries
+// whose endpoints were hidden are kept as-is: they are inert, because the
+// arrows themselves are gone with the hidden actors.
+export function rewriteArrowStyles(config: DiagramConfig | null, options: ActorTransformOptions, code?: string): DiagramConfig | null {
   if (!config || !config.arrows || config.arrows.length === 0) return config;
-  const { rename } = buildActorRewriteMap(config, options);
+  const { rename } = buildActorRewriteMap(config, options, code);
   if (rename.size === 0) return config;
 
   let changed = false;

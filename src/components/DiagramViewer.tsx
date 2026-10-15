@@ -1354,6 +1354,7 @@ export default function DiagramViewer({
                         onMove={(id, x, y) => onUpdateNote?.(id, { x, y })}
                         onUpdateText={(id, text) => onUpdateNote?.(id, { text })}
                         onUpdateColor={(id, color) => onUpdateNote?.(id, { color })}
+                        onResize={(id, width, height) => onUpdateNote?.(id, { width, height })}
                         onDelete={(id) => onDeleteNote?.(id)}
                       />
                     ))}
