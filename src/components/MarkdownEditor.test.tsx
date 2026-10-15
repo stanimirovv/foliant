@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import MarkdownEditor from './MarkdownEditor';
+import { looksLikeMermaidDiagram } from './MermaidBlockPreview';
 import mermaid from 'mermaid';
 
 // Both arguments stay declared (and recorded on mock.calls) so tests can
@@ -65,20 +68,23 @@ describe('MarkdownEditor', () => {
     renderMock.mockImplementation(baseRender);
   });
 
-  it('shows the markdown source in the editor and the rendered preview (split view by default)', async () => {
+  it('shows the WYSIWYG preview by default, and the raw source in Edit mode', async () => {
     renderEditor();
 
-    // source pane: the raw markdown (Monaco mock textarea)
-    const source = await screen.findByTestId('markdown-source-pane');
-    expect(source.querySelector('[data-testid="monaco-editor-textarea"]')).toBeTruthy();
-
-    // preview pane: rendered rich text
+    // preview (default): rendered rich text, no source pane
     const preview = await screen.findByTestId('markdown-preview');
+    expect(screen.queryByTestId('markdown-source-pane')).toBeNull();
     expect(within(preview).getByText('Architecture Notes').tagName).toBe('H1');
     expect(within(preview).getByText('bold')).toBeTruthy();
     expect(within(preview).getByText('Trailing prose.')).toBeTruthy();
     // the non-mermaid fenced block renders as code, not as a diagram
     expect(within(preview).getByText('console.log("not a diagram");')).toBeTruthy();
+
+    // Edit mode: the source pane with the raw markdown (Monaco mock textarea)
+    fireEvent.click(screen.getByTestId('markdown-mode-edit'));
+    const source = await screen.findByTestId('markdown-source-pane');
+    expect(source.querySelector('[data-testid="monaco-editor-textarea"]')).toBeTruthy();
+    expect(screen.queryByTestId('markdown-preview-pane')).toBeNull();
   });
 
   it('renders each embedded mermaid block through mermaid.render with the app theme', async () => {
@@ -117,32 +123,49 @@ describe('MarkdownEditor', () => {
     expect(props.onSelectDiagram).toHaveBeenCalledWith(0);
   });
 
-  it('switches between edit, split and preview modes', async () => {
+  it('switches between edit and preview modes (no split mode)', async () => {
     renderEditor();
 
-    // split (default): both panes
-    expect(screen.getByTestId('markdown-source-pane')).toBeTruthy();
-    expect(screen.getByTestId('markdown-preview-pane')).toBeTruthy();
-
-    // preview only
-    fireEvent.click(screen.getByTestId('markdown-mode-preview'));
+    // preview (default): preview pane only
     expect(screen.queryByTestId('markdown-source-pane')).toBeNull();
     expect(screen.getByTestId('markdown-preview-pane')).toBeTruthy();
+
+    // the split mode button is gone
+    expect(screen.queryByTestId('markdown-mode-split')).toBeNull();
 
     // edit only
     fireEvent.click(screen.getByTestId('markdown-mode-edit'));
     expect(screen.getByTestId('markdown-source-pane')).toBeTruthy();
     expect(screen.queryByTestId('markdown-preview-pane')).toBeNull();
 
-    // back to split
-    fireEvent.click(screen.getByTestId('markdown-mode-split'));
-    expect(screen.getByTestId('markdown-source-pane')).toBeTruthy();
+    // back to preview
+    fireEvent.click(screen.getByTestId('markdown-mode-preview'));
+    expect(screen.queryByTestId('markdown-source-pane')).toBeNull();
     expect(screen.getByTestId('markdown-preview-pane')).toBeTruthy();
+  });
+
+  it('migrates a stored split preference to preview mode', async () => {
+    window.localStorage.setItem('mermaid_md_editor_view', 'split');
+    renderEditor();
+
+    expect(screen.queryByTestId('markdown-source-pane')).toBeNull();
+    expect(screen.getByTestId('markdown-preview-pane')).toBeTruthy();
+  });
+
+  it('persists the selected mode to localStorage', async () => {
+    renderEditor();
+
+    fireEvent.click(screen.getByTestId('markdown-mode-edit'));
+    expect(window.localStorage.getItem('mermaid_md_editor_view')).toBe('edit');
+
+    fireEvent.click(screen.getByTestId('markdown-mode-preview'));
+    expect(window.localStorage.getItem('mermaid_md_editor_view')).toBe('preview');
   });
 
   it('reports source edits through onCodeChange', async () => {
     const { props } = renderEditor();
 
+    fireEvent.click(screen.getByTestId('markdown-mode-edit'));
     const textarea = await screen.findByTestId('monaco-editor-textarea');
     fireEvent.change(textarea, { target: { value: '# Changed\n' } });
     expect(props.onCodeChange).toHaveBeenCalledWith('# Changed\n');
@@ -176,8 +199,10 @@ describe('MarkdownEditor', () => {
 
     // the block becomes invalid (e.g. mid-typing): the last good render
     // stays on screen and a small chip marks the syntax error — the diagram
-    // is not replaced by a destructive error box
-    rerender(<MarkdownEditor {...props} code={MD.replace('sequenceDiagram', 'this is not a diagram')} />);
+    // is not replaced by a destructive error box. The broken source still
+    // starts with a diagram keyword so it passes the not-a-diagram guard and
+    // actually reaches mermaid.render.
+    rerender(<MarkdownEditor {...props} code={MD.replace('sequenceDiagram', 'sequenceDiagram\n    this is not a diagram')} />);
     const chip = await screen.findByTestId('md-mermaid-error-chip-0');
     expect(chip.textContent).toContain('Syntax error');
     expect(chip.title).toContain('No diagram type detected');
@@ -202,7 +227,8 @@ describe('MarkdownEditor', () => {
       document.body.appendChild(leak);
       throw new Error('Parse error on line 1');
     });
-    renderEditor({ code: '```mermaid\nthis is not a diagram\n```\n' });
+    // Diagram-looking source (passes the not-a-diagram guard) that fails to render.
+    renderEditor({ code: '```mermaid\nsequenceDiagram\n    this is not a diagram\n```\n' });
 
     await screen.findByTestId('md-mermaid-error-0');
     expect(document.querySelector('div[id^="dmd-mermaid-"]')).toBeNull();
@@ -215,8 +241,156 @@ describe('MarkdownEditor', () => {
     expect(renderMock).not.toHaveBeenCalled();
   });
 
-  it('shows an empty-file note when the document has no content', () => {
+  describe('mermaid content guard (regression: prose must never reach mermaid.render)', () => {
+    it('shows a not-a-diagram note and never calls mermaid.render for prose inside a mermaid fence', async () => {
+      renderEditor({ code: '```mermaid\n# Just prose\nSome text here.\n```\n' });
+      const note = await screen.findByTestId('md-mermaid-not-diagram-0');
+      expect(note.textContent).toContain('not a mermaid diagram');
+      expect(renderMock).not.toHaveBeenCalled();
+    });
+
+    it('still renders diagrams whose first meaningful line is a keyword after %% comments or blank lines', async () => {
+      renderEditor({ code: '```mermaid\n%% a config comment\n\nsequenceDiagram\n    A->>B: Hi\n```\n' });
+      await screen.findByTestId('md-mermaid-svg-0');
+      expect(renderMock).toHaveBeenCalledTimes(1);
+      expect(renderMock.mock.calls[0][1]).toContain('sequenceDiagram');
+    });
+
+    it('an unclosed mermaid fence swallowing document prose shows the not-a-diagram note, not a mermaid error', async () => {
+      // Regression for the reported error: typing "```mermaid" at the top of
+      // the file (unclosed fence) makes mdast consume the rest of the document
+      // as the block content — including the opening prose — which was passed
+      // to mermaid.render, producing "No diagram type detected matching given
+      // configuration for text: # Markdown Demo …".
+      renderEditor({ code: '```mermaid\n' + MD });
+      const note = await screen.findByTestId('md-mermaid-not-diagram-0');
+      expect(note.textContent).toContain('not a mermaid diagram');
+      expect(renderMock).not.toHaveBeenCalled();
+    });
+
+    it('never passes markdown prose to mermaid.render for the committed demo file, even when blocks shift', async () => {
+      const demo = readFileSync(join(process.cwd(), 'diagrams/markdown-demo.md'), 'utf8');
+      const onMarkdownEdit = vi.fn();
+      const { props, rerender } = renderEditor({ code: demo, onMarkdownEdit });
+
+      const assertAllRenderCallsAreDiagrams = () => {
+        expect(renderMock.mock.calls.length).toBeGreaterThan(0);
+        for (const call of renderMock.mock.calls) {
+          expect(looksLikeMermaidDiagram(call[1])).toBe(true);
+        }
+      };
+
+      // initial render: both demo diagrams render as SVGs
+      await screen.findByTestId('md-mermaid-svg-0');
+      await screen.findByTestId('md-mermaid-svg-1');
+      assertAllRenderCallsAreDiagrams();
+
+      // shift every offset after the intro prose by editing it (WYSIWYG save)
+      fireEvent.click(screen.getByTestId('wysiwyg-block-1'));
+      fireEvent.change(screen.getByTestId('wysiwyg-block-editor-1'), {
+        target: { value: 'Edited intro prose, now much longer, shifting every offset after it.' },
+      });
+      fireEvent.click(screen.getByTestId('wysiwyg-block-save-1'));
+      const edited = vi.mocked(onMarkdownEdit).mock.calls[0][0] as string;
+      rerender(<MarkdownEditor {...props} code={edited} />);
+      await screen.findByTestId('md-mermaid-svg-0');
+      await screen.findByTestId('md-mermaid-svg-1');
+      assertAllRenderCallsAreDiagrams();
+
+      // shift again by deleting the first block (the document heading)
+      fireEvent.click(screen.getByTestId('wysiwyg-block-delete-0'));
+      const afterDelete = vi.mocked(onMarkdownEdit).mock.calls[1][0] as string;
+      rerender(<MarkdownEditor {...props} code={afterDelete} />);
+      await screen.findByTestId('md-mermaid-svg-0');
+      await screen.findByTestId('md-mermaid-svg-1');
+      assertAllRenderCallsAreDiagrams();
+    });
+  });
+
+  it('shows an empty-document affordance when the document has no content', () => {
     renderEditor({ code: '' });
-    expect(screen.getByTestId('markdown-preview').textContent).toContain('(empty file)');
+    expect(screen.getByTestId('markdown-preview').textContent).toContain('empty document');
+  });
+
+  it('renders text blocks as WYSIWYG blocks in the preview', async () => {
+    renderEditor();
+    // The heading and prose render inside wysiwyg-block containers
+    expect(screen.getByTestId('wysiwyg-block-0').textContent).toContain('Architecture Notes');
+    expect(screen.getByTestId('wysiwyg-block-1').textContent).toContain('bold');
+  });
+
+  it('clicking a text block in the preview switches it to edit mode', async () => {
+    renderEditor();
+    fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+    expect(screen.getByTestId('wysiwyg-block-editor-0')).toBeTruthy();
+  });
+
+  it('editing a block calls onMarkdownEdit with the updated full document', async () => {
+    const onMarkdownEdit = vi.fn();
+    renderEditor({ onMarkdownEdit });
+
+    fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+    fireEvent.change(screen.getByTestId('wysiwyg-block-editor-0'), { target: { value: '# Changed' } });
+    fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
+
+    expect(onMarkdownEdit).toHaveBeenCalledTimes(1);
+    const newCode = vi.mocked(onMarkdownEdit).mock.calls[0][0] as string;
+    expect(newCode).toContain('# Changed');
+    expect(newCode).not.toContain('# Architecture Notes');
+  });
+
+  it('falls back to onCodeChange when onMarkdownEdit is not provided', async () => {
+    const { props } = renderEditor();
+    // No onMarkdownEdit — WYSIWYG edits go through onCodeChange
+    fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+    fireEvent.change(screen.getByTestId('wysiwyg-block-editor-0'), { target: { value: '# Fallback' } });
+    fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
+
+    expect(props.onCodeChange).toHaveBeenCalled();
+    const newCode = vi.mocked(props.onCodeChange).mock.calls[0][0] as string;
+    expect(newCode).toContain('# Fallback');
+  });
+
+  it('insert buttons appear between blocks in the preview', async () => {
+    renderEditor();
+    // At least one insert button is visible
+    expect(screen.getByTestId('wysiwyg-insert-0')).toBeTruthy();
+  });
+
+  describe('undo/redo buttons', () => {
+    it('shows undo/redo buttons in preview mode when handlers are provided', () => {
+      renderEditor({ onUndo: vi.fn(), onRedo: vi.fn(), canUndo: true, canRedo: false });
+      expect(screen.getByTestId('markdown-undo')).toBeTruthy();
+      expect(screen.getByTestId('markdown-redo')).toBeTruthy();
+    });
+
+    it('hides undo/redo buttons in edit mode', () => {
+      renderEditor({ onUndo: vi.fn(), onRedo: vi.fn(), canUndo: true, canRedo: true });
+      fireEvent.click(screen.getByTestId('markdown-mode-edit'));
+      expect(screen.queryByTestId('markdown-undo')).toBeNull();
+      expect(screen.queryByTestId('markdown-redo')).toBeNull();
+    });
+
+    it('hides undo/redo buttons when handlers are not provided', () => {
+      renderEditor();
+      expect(screen.queryByTestId('markdown-undo')).toBeNull();
+      expect(screen.queryByTestId('markdown-redo')).toBeNull();
+    });
+
+    it('undo button is disabled when canUndo is false', () => {
+      renderEditor({ onUndo: vi.fn(), onRedo: vi.fn(), canUndo: false, canRedo: false });
+      expect((screen.getByTestId('markdown-undo') as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByTestId('markdown-redo') as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('clicking undo/redo calls the handlers', () => {
+      const onUndo = vi.fn();
+      const onRedo = vi.fn();
+      renderEditor({ onUndo, onRedo, canUndo: true, canRedo: true });
+      fireEvent.click(screen.getByTestId('markdown-undo'));
+      expect(onUndo).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByTestId('markdown-redo'));
+      expect(onRedo).toHaveBeenCalledTimes(1);
+    });
   });
 });

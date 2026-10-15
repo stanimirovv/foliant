@@ -16,6 +16,24 @@ export interface MermaidBlockPreviewProps {
   onSelect: () => void;
 }
 
+// Mermaid diagram type keywords (first meaningful token of the diagram source).
+// Used to validate that the content is actually a mermaid diagram before
+// passing it to mermaid.render — guards against upstream bugs that pass
+// non-diagram text (e.g. markdown prose) as block content.
+const MERMAID_DIAGRAM_KEYWORDS = /^(sequenceDiagram|flowchart|graph|classDiagram|stateDiagram|erDiagram|gantt|pie|journey|gitGraph|mindmap|timeline|sankey|quadrantChart|xyChart|block|packet|architecture|kanban|radar|treemap|info|requirementDiagram|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment|agentflow|swimlane)/i;
+
+// Returns true when the content looks like a mermaid diagram: after stripping
+// %% comment lines and blank lines, the first remaining line starts with a
+// known diagram keyword. Exported for tests.
+export function looksLikeMermaidDiagram(content: string): boolean {
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('%%')) continue;
+    return MERMAID_DIAGRAM_KEYWORDS.test(trimmed);
+  }
+  return false;
+}
+
 // Renders one embedded mermaid block inside the markdown preview. The block is
 // a visualization only: editing happens by selecting the diagram (click, or
 // the Files menu), which opens it in the diagram editor. Render is debounced
@@ -44,6 +62,9 @@ export default function MermaidBlockPreview({
 
   const isDark = theme === 'dark';
   const isEmpty = content.trim().length === 0;
+  // Guard: content that is not a mermaid diagram (e.g. markdown prose leaked
+  // in by an upstream bug) is never passed to mermaid.render.
+  const isNotDiagram = !isEmpty && !looksLikeMermaidDiagram(content);
 
   useEffect(() => {
     mermaid.initialize({
@@ -80,7 +101,7 @@ export default function MermaidBlockPreview({
   }, [theme]);
 
   useEffect(() => {
-    if (isEmpty) {
+    if (isEmpty || isNotDiagram) {
       setSvg(null);
       setError(null);
       lastGoodRef.current = null;
@@ -119,11 +140,14 @@ export default function MermaidBlockPreview({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [content, index, theme, isEmpty]);
+  }, [content, index, theme, isEmpty, isNotDiagram]);
 
   // A block that has never rendered successfully gets the full error box;
   // a transient failure keeps the last good render with a small chip.
   const showErrorBox = error !== null && lastGoodRef.current === null;
+  // Content that is not a mermaid diagram (upstream bug guard): show a
+  // friendly note instead of a mermaid syntax-error diagram.
+  const showNotDiagram = isNotDiagram;
 
   return (
     <div
@@ -161,6 +185,13 @@ export default function MermaidBlockPreview({
           className={`md-mermaid-empty ${isDark ? 'text-slate-500' : 'text-gray-400'}`}
         >
           (empty diagram)
+        </div>
+      ) : showNotDiagram ? (
+        <div
+          data-testid={`md-mermaid-not-diagram-${index}`}
+          className={`md-mermaid-empty ${isDark ? 'text-slate-500' : 'text-gray-400'}`}
+        >
+          (not a mermaid diagram — select it to edit)
         </div>
       ) : showErrorBox ? (
         <div data-testid={`md-mermaid-error-${index}`} className="md-mermaid-error">

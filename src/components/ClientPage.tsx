@@ -1022,6 +1022,12 @@ export default function ClientPage() {
     setRawCode(newCode);
   }, []);
 
+  // WYSIWYG block edits (MarkdownEditor): routed through commitEdit so they
+  // participate in the undo/redo stack (Monaco edits keep Monaco's own undo).
+  const handleMarkdownEdit = useCallback((newCode: string) => {
+    commitEdit(newCode);
+  }, [commitEdit]);
+
   const applyEditResult = (result: EditResult) => {
     if (result.warning) {
       setEditWarning(result.warning);
@@ -2168,6 +2174,11 @@ export default function ClientPage() {
                 theme={theme}
                 fileName={currentFile ?? ''}
                 onCodeChange={handleMarkdownChange}
+                onMarkdownEdit={handleMarkdownEdit}
+                onUndo={undo}
+                onRedo={redo}
+                canUndo={historyPast.length > 0}
+                canRedo={historyFuture.length > 0}
                 onSelectDiagram={(index) => {
                   if (currentFile) selectMarkdownDiagram(currentFile, index);
                 }}
