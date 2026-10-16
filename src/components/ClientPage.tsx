@@ -9,7 +9,7 @@ import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText, RotateCcw } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
 import { parseModel, ModelElement, NodeShape, ParticipantType, StickyNoteElement } from '@/lib/model';
@@ -66,6 +66,22 @@ function loadSidebarWidth(key: string, fallback: number): number {
     } catch {}
   }
   return fallback;
+}
+
+// The right sidebar (Properties / Mermaid Source) can be hidden to give the
+// diagram area more room. The toolbar button and the Tab key toggle it; the
+// choice is persisted so it survives reloads.
+const SIDEBAR_VISIBLE_KEY = 'mermaid_sidebar_visible';
+
+function loadSidebarVisible(): boolean {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const stored = window.localStorage.getItem(SIDEBAR_VISIBLE_KEY);
+      if (stored === '0') return false;
+      if (stored === '1') return true;
+    } catch {}
+  }
+  return true;
 }
 
 export default function ClientPage() {
@@ -168,6 +184,7 @@ export default function ClientPage() {
   };
   const [sidebarTab, setSidebarTab] = useState<'properties' | 'source'>('properties');
   const [isSplitView, setIsSplitView] = useState(false);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(() => loadSidebarVisible());
   const [sidebarWidth, setSidebarWidth] = useState(() => loadSidebarWidth(SIDEBAR_WIDTH_KEY, DEFAULT_SIDEBAR_WIDTH));
   const [splitSidebarWidth, setSplitSidebarWidth] = useState(() => loadSidebarWidth(SPLIT_SIDEBAR_WIDTH_KEY, DEFAULT_SPLIT_SIDEBAR_WIDTH));
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
@@ -202,6 +219,18 @@ export default function ClientPage() {
       }
     };
   }, []);
+
+  // Hide/show the whole right sidebar (Properties / Mermaid Source); the
+  // toolbar button and the Tab key both go through this.
+  const toggleSidebarVisibility = useCallback(() => {
+    const next = !isSidebarVisible;
+    setIsSidebarVisible(next);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem(SIDEBAR_VISIBLE_KEY, next ? '1' : '0');
+      } catch {}
+    }
+  }, [isSidebarVisible]);
 
   // --- Sidebar resize (drag the handle on the sidebar's left edge) ---
   const activeSidebarWidth = isSplitView ? splitSidebarWidth : sidebarWidth;
@@ -1332,6 +1361,24 @@ export default function ClientPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [undo, redo]);
 
+  // Tab toggles the right sidebar (Properties / Mermaid Source) on and off,
+  // but only in diagram edit mode. Inside text fields (search box, Monaco)
+  // and while a dialog is open, Tab keeps its native focus behavior.
+  useEffect(() => {
+    if (!editMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (pendingNew || pendingDelete) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' || target.isContentEditable)) return;
+      e.preventDefault();
+      toggleSidebarVisibility();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editMode, pendingNew, pendingDelete, toggleSidebarVisibility]);
+
   const selectedComponent = selectedRawElement && (selectedRawElement.kind === 'participant' || selectedRawElement.kind === 'node')
     ? selectedRawElement
     : null;
@@ -2225,6 +2272,20 @@ export default function ClientPage() {
             >
               <Pencil size={16} />
             </button>
+            {editMode && (
+              <button
+                onClick={toggleSidebarVisibility}
+                title={isSidebarVisible ? 'Hide properties panel (Tab)' : 'Show properties panel (Tab)'}
+                data-testid="toggle-sidebar"
+                className={`p-1.5 rounded border transition-colors ${
+                  isSidebarVisible
+                    ? (isDark ? 'bg-blue-900/40 border-blue-600/50 text-blue-300' : 'bg-blue-50 border-blue-300 text-blue-700')
+                    : (isDark ? 'border-slate-700 text-slate-200 hover:bg-slate-800' : 'border-gray-200 hover:bg-gray-100')
+                }`}
+              >
+                {isSidebarVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+              </button>
+            )}
             </>
             )}
             {editMode && (
@@ -2482,7 +2543,7 @@ export default function ClientPage() {
               />
             )}
           </div>
-          {editMode && (
+          {editMode && isSidebarVisible && (
             <div
               data-testid="editor-sidebar"
               className={`relative flex-shrink-0 border-l flex flex-col ${

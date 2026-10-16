@@ -2352,6 +2352,65 @@ sequenceDiagram
     });
   });
 
+  describe('sidebar visibility toggle', () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it('hides the properties sidebar with the toolbar button and shows it again', async () => {
+      await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      expect(screen.getByTestId('editor-sidebar')).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId('toggle-sidebar'));
+      expect(screen.queryByTestId('editor-sidebar')).toBeNull();
+      expect(window.localStorage.getItem('mermaid_sidebar_visible')).toBe('0');
+
+      fireEvent.click(screen.getByTestId('toggle-sidebar'));
+      expect(screen.getByTestId('editor-sidebar')).toBeTruthy();
+      expect(window.localStorage.getItem('mermaid_sidebar_visible')).toBe('1');
+    });
+
+    it('toggles the sidebar with the Tab key', async () => {
+      await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      expect(screen.getByTestId('editor-sidebar')).toBeTruthy();
+
+      fireEvent.keyDown(document.body, { key: 'Tab' });
+      expect(screen.queryByTestId('editor-sidebar')).toBeNull();
+
+      fireEvent.keyDown(document.body, { key: 'Tab' });
+      expect(screen.getByTestId('editor-sidebar')).toBeTruthy();
+    });
+
+    it('keeps native Tab behavior inside text inputs and with modifier keys', async () => {
+      await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      const searchInput = screen.getByPlaceholderText('Search diagram...');
+      fireEvent.keyDown(searchInput, { key: 'Tab' });
+      expect(screen.getByTestId('editor-sidebar')).toBeTruthy();
+
+      fireEvent.keyDown(document.body, { key: 'Tab', shiftKey: true });
+      expect(screen.getByTestId('editor-sidebar')).toBeTruthy();
+
+      fireEvent.keyDown(document.body, { key: 'Tab', ctrlKey: true });
+      expect(screen.getByTestId('editor-sidebar')).toBeTruthy();
+    });
+
+    it('restores a persisted hidden sidebar on load and shows it via the button', async () => {
+      window.localStorage.setItem('mermaid_sidebar_visible', '0');
+      await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      expect(screen.queryByTestId('editor-sidebar')).toBeNull();
+      // the toggle button stays available so the panel can be brought back
+      fireEvent.click(screen.getByTestId('toggle-sidebar'));
+      expect(screen.getByTestId('editor-sidebar')).toBeTruthy();
+    });
+  });
+
   it('Export to SVG button exports SVG with download link and embedded visuals', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
 
