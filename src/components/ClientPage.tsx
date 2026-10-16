@@ -9,7 +9,7 @@ import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
 import { parseModel, ModelElement, NodeShape, ParticipantType, StickyNoteElement } from '@/lib/model';
@@ -24,6 +24,7 @@ import {
   toggleNumberedSteps, hasNumberedSteps,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
+import { formatRecentDir } from '@/lib/recentDirs';
 import { buildSelectionMap } from '@/lib/svgmap';
 import { buildSubgraphTagIndex } from '@/lib/subgraphTags';
 import { rewriteArrowStyles, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS } from '@/lib/styling';
@@ -328,6 +329,32 @@ export default function ClientPage() {
     }
   }, []);
 
+  // The Recent list shows only the tail of each path (see formatRecentDir), so
+  // it needs to know how wide a row is to decide how many of the last
+  // components would actually be visible. The hidden span measures candidate
+  // labels with the same font the rows use.
+  const recentListRef = useRef<HTMLUListElement | null>(null);
+  const recentMeasureSpanRef = useRef<HTMLSpanElement | null>(null);
+  const [recentListWidth, setRecentListWidth] = useState(0);
+
+  useEffect(() => {
+    const list = recentListRef.current;
+    if (!list) return;
+    const update = () => setRecentListWidth(list.clientWidth);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [recentDirs.length]);
+
+  const measureRecentLabel = (text: string): number => {
+    const span = recentMeasureSpanRef.current;
+    if (!span) return 0;
+    span.textContent = text;
+    return span.getBoundingClientRect().width;
+  };
+
   // Keep the directory input in sync with the active directory: the URL can
   // change without the form (browser back/forward, a pasted link, a recent
   // directory click), and the input must show the directory actually loaded.
@@ -371,6 +398,29 @@ export default function ClientPage() {
     params.set('file', filename);
     params.set('diagram', String(index));
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  // One-shot request to scroll the markdown document to a diagram after
+  // returning from the diagram editor (the top bar's "Back to markdown"
+  // button). MarkdownEditor reports back through handleDiagramScrolled.
+  const [scrollToDiagram, setScrollToDiagram] = useState<number | null>(null);
+  const handleDiagramScrolled = useCallback(() => setScrollToDiagram(null), []);
+  // Which selection the currently loaded rawCode belongs to. The scroll
+  // request is delivered to the markdown editor only once the document for
+  // the current selection has loaded — otherwise the editor would briefly
+  // see the previous selection's content (a single diagram block, without
+  // fences) and mistake the requested diagram for missing.
+  const [loadedSelection, setLoadedSelection] = useState<{ file: string | null; diagram: number | null }>({ file: null, diagram: null });
+  const scrollTarget = loadedSelection.file === currentFile && loadedSelection.diagram === diagramIndex
+    ? scrollToDiagram
+    : null;
+
+  // Return from an embedded diagram to the markdown document, scrolled to
+  // that diagram, so editing can continue in context.
+  const backToMarkdownDoc = () => {
+    if (!currentFile || diagramIndex === null) return;
+    setScrollToDiagram(diagramIndex);
+    selectMarkdownFile(currentFile);
   };
 
   // Hidden paths
@@ -424,11 +474,57 @@ export default function ClientPage() {
 
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Opening the app with no directory selected: load the most recent
+  // directory, but only if it still exists. The check goes through
+  // /api/dir-check because /api/files would create a missing directory, so
+  // it cannot tell "gone" apart from "empty". The flag is set only once the
+  // check has an answer (and synchronously when a dir/file is already chosen),
+  // so the auto-load runs once per mount — also under StrictMode, where the
+  // effect body runs twice but the ref survives between the two runs.
+  const recentDirLoadAttemptedRef = useRef(false);
+
   useEffect(() => {
     let ignore = false;
-    fetch(`/api/files${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`)
-      .then(r => r.json())
-      .then(data => {
+    const run = async () => {
+      if (!dirParam && !currentFile) {
+        if (!recentDirLoadAttemptedRef.current) {
+          let lastRecent: string | null = null;
+          try {
+            const stored = localStorage.getItem('recentDirs');
+            if (stored) {
+              const parsed: unknown = JSON.parse(stored);
+              if (Array.isArray(parsed) && typeof parsed[0] === 'string' && parsed[0]) {
+                lastRecent = parsed[0];
+              }
+            }
+          } catch {}
+          if (lastRecent) {
+            try {
+              const r = await fetch(`/api/dir-check?dir=${encodeURIComponent(lastRecent)}`);
+              const data = await r.json();
+              if (ignore) return;
+              recentDirLoadAttemptedRef.current = true;
+              if (data.exists) {
+                const params = new URLSearchParams(searchParams.toString());
+                params.set('dir', lastRecent);
+                router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                return; // the effect re-runs with the new dir param and loads it
+              }
+            } catch {
+              if (ignore) return;
+              recentDirLoadAttemptedRef.current = true;
+            }
+          } else {
+            recentDirLoadAttemptedRef.current = true;
+          }
+        }
+      } else {
+        // A directory or file is already chosen; never auto-load this mount.
+        recentDirLoadAttemptedRef.current = true;
+      }
+      try {
+        const r = await fetch(`/api/files${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
+        const data = await r.json();
         if (ignore) return;
         if (data.error) {
           // Unreadable directory: say why instead of silently emptying the list.
@@ -450,13 +546,14 @@ export default function ClientPage() {
           params.delete('diagram');
           router.replace(`${pathname}?${params.toString()}`, { scroll: false });
         }
-      })
-      .catch(() => {
+      } catch {
         if (ignore) return;
         setFiles([]);
         setMarkdownFiles([]);
         setFilesError('Failed to read directory');
-      });
+      }
+    };
+    run();
     return () => { ignore = true; };
   }, [currentFile, pathname, router, searchParams, dirParam, refreshKey]);
 
@@ -640,6 +737,7 @@ export default function ClientPage() {
         lastWrittenRef.current = '';
         rawCodeFileRef.current = filename;
         rawCodeDiagramRef.current = index;
+        setLoadedSelection({ file: filename, diagram: index });
         setRawCode('');
         setDebouncedCode('');
       }
@@ -648,6 +746,7 @@ export default function ClientPage() {
     lastWrittenRef.current = content;
     rawCodeFileRef.current = filename;
     rawCodeDiagramRef.current = index;
+    setLoadedSelection({ file: filename, diagram: index });
     setRawCode(content);
     setDebouncedCode(content);
     return true;
@@ -1850,7 +1949,7 @@ export default function ClientPage() {
             {recentDirs.length > 0 && (
               <div className="mb-2">
                 <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>Recent:</span>
-                <ul className="space-y-1 mt-1">
+                <ul className="space-y-1 mt-1" ref={recentListRef}>
                   {recentDirs.map(d => (
                     <li key={d}>
                       <button
@@ -1869,11 +1968,16 @@ export default function ClientPage() {
                         }}
                         title={d}
                       >
-                        {d}
+                        {formatRecentDir(d, recentListWidth, measureRecentLabel)}
                       </button>
                     </li>
                   ))}
                 </ul>
+                <span
+                  ref={recentMeasureSpanRef}
+                  aria-hidden="true"
+                  className="absolute invisible whitespace-nowrap text-xs"
+                />
               </div>
             )}
           </div>
@@ -2441,6 +2545,19 @@ export default function ClientPage() {
           </div>
           <div className="flex items-center space-x-3">
             {isEmbeddedDiagram && diagramIndex !== null && (
+              <button
+                onClick={backToMarkdownDoc}
+                title="Back to the markdown document, scrolled to this diagram"
+                data-testid="back-to-markdown"
+                className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                  isDark ? 'border-slate-700 text-slate-200 hover:bg-slate-800' : 'border-gray-200 text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <ArrowLeft size={14} />
+                <span>Back to markdown</span>
+              </button>
+            )}
+            {isEmbeddedDiagram && diagramIndex !== null && (
               <span
                 data-testid="embedded-diagram-badge"
                 className={`text-xs flex items-center space-x-1 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}
@@ -2508,6 +2625,8 @@ export default function ClientPage() {
                 }}
                 viewStates={mdViewStates}
                 onViewStateChange={handleMarkdownViewStateChange}
+                scrollToDiagram={scrollTarget}
+                onDiagramScrolled={handleDiagramScrolled}
               />
             ) : (
               <DiagramViewer

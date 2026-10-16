@@ -10,6 +10,12 @@ function expandTilde(filepath: string) {
   return filepath;
 }
 
+// Resolve a user-supplied directory path (tilde-expanded, made absolute)
+// without any fallback or side effects.
+export function resolveDirPath(dirParam: string): string {
+  return path.resolve(expandTilde(dirParam));
+}
+
 export function getDiagramsDir(req?: Request) {
   let dirParam = null;
   if (req) {
@@ -17,7 +23,7 @@ export function getDiagramsDir(req?: Request) {
     dirParam = url.searchParams.get('dir');
   }
   if (dirParam) {
-    return path.resolve(expandTilde(dirParam));
+    return resolveDirPath(dirParam);
   }
   if (process.env.DIAGRAMS_DIR) {
     return expandTilde(process.env.DIAGRAMS_DIR);

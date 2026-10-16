@@ -140,6 +140,8 @@ vi.mock('./DiagramViewer', () => ({
 // The MarkdownEditor stub records the document it received and lets tests
 // drive text edits (onCodeChange) and diagram selection (onSelectDiagram). It
 // also records the per-block view/tag states and can report a change for one.
+// The scroll-to-diagram request (Back to markdown button) is recorded as a
+// data attribute and can be reported back as handled.
 vi.mock('./MarkdownEditor', () => ({
   __esModule: true,
   default: (props: {
@@ -149,12 +151,15 @@ vi.mock('./MarkdownEditor', () => ({
     onSelectDiagram: (index: number) => void;
     viewStates?: Map<number, { viewName?: string | null; hideKeys?: string[] }>;
     onViewStateChange?: (index: number, selection: { viewName?: string | null; hideKeys?: string[] }) => void;
+    scrollToDiagram?: number | null;
+    onDiagramScrolled?: () => void;
   }) => (
     <div
       data-testid="markdown-editor"
       data-code={props.code}
       data-file={props.fileName}
       data-viewstates={JSON.stringify(props.viewStates ? Object.fromEntries(props.viewStates) : null)}
+      data-scroll-to-diagram={props.scrollToDiagram != null ? String(props.scrollToDiagram) : null}
     >
       <textarea
         data-testid="markdown-editor-source"
@@ -175,6 +180,12 @@ vi.mock('./MarkdownEditor', () => ({
         onClick={() => props.onViewStateChange?.(0, { viewName: null, hideKeys: ['backend'] })}
       >
         change view state 0
+      </button>
+      <button
+        data-testid="markdown-diagram-scrolled"
+        onClick={() => props.onDiagramScrolled?.()}
+      >
+        diagram scrolled
       </button>
     </div>
   ),
@@ -1721,6 +1732,141 @@ sequenceDiagram
     });
   });
 
+  it('loads the most recent directory on startup when it exists', async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem('recentDirs', JSON.stringify(['/recent/dir', '/older/dir']));
+    currentMockParams = {};
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockImplementation(async (url: unknown) => {
+      if (String(url).startsWith('/api/dir-check')) {
+        return { ok: true, json: async () => ({ exists: true }) };
+      }
+      return { ok: true, json: async () => ({ files: ['demo.mmd'], markdownFiles: [] }) };
+    });
+
+    render(<ClientPage />);
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/?dir=%2Frecent%2Fdir', { scroll: false });
+    });
+    expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/dir-check?dir=%2Frecent%2Fdir'))).toBe(true);
+    // the default directory listing is not fetched first
+    expect(mockFetch.mock.calls.some(c => String(c[0]) === '/api/files')).toBe(false);
+    window.localStorage.clear();
+  });
+
+  it('does not load the most recent directory on startup when it no longer exists', async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem('recentDirs', JSON.stringify(['/gone/dir']));
+    currentMockParams = {};
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockImplementation(async (url: unknown) => {
+      if (String(url).startsWith('/api/dir-check')) {
+        return { ok: true, json: async () => ({ exists: false }) };
+      }
+      return { ok: true, json: async () => ({ files: ['demo.mmd'], markdownFiles: [] }) };
+    });
+
+    render(<ClientPage />);
+
+    // falls through to the default directory and auto-selects its first file
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/?file=demo.mmd', { scroll: false });
+    });
+    expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/dir-check'))).toBe(true);
+    expect(mockFetch.mock.calls.some(c => String(c[0]) === '/api/files')).toBe(true);
+    expect(mockReplace.mock.calls.some(c => String(c[0]).includes('dir='))).toBe(false);
+    window.localStorage.clear();
+  });
+
+  it('does not auto-load a recent directory when the URL already has a dir', async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem('recentDirs', JSON.stringify(['/recent/dir']));
+    mockParams({ dir: '/chosen/dir' });
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockResolvedValue({
+      json: async () => ({ files: ['demo.mmd'], markdownFiles: [] })
+    });
+
+    render(<ClientPage />);
+
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some(c => String(c[0]) === '/api/files?dir=%2Fchosen%2Fdir')).toBe(true);
+    });
+    expect(mockFetch.mock.calls.some(c => String(c[0]).startsWith('/api/dir-check'))).toBe(false);
+    window.localStorage.clear();
+  });
+
+  it('does not auto-load a recent directory when the URL already has a file', async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem('recentDirs', JSON.stringify(['/recent/dir']));
+    currentMockParams = { file: 'demo.mmd' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    mockFetchWithFile(DEMO);
+
+    render(<ClientPage />);
+
+    await waitFor(() => {
+      expect((global.fetch as import('vitest').Mock).mock.calls.some(c => String(c[0]).startsWith('/api/file/'))).toBe(true);
+    });
+    expect((global.fetch as import('vitest').Mock).mock.calls.some(c => String(c[0]).startsWith('/api/dir-check'))).toBe(false);
+    window.localStorage.clear();
+  });
+
+  it('shows only the visible tail of recent directories', async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem('recentDirs', JSON.stringify([
+      '/Users/zlatin/code/project-alpha/diagrams',
+      '/Users/zlatin/code/project-beta/diagrams',
+      '/short/dir',
+    ]));
+    mockParams({ dir: '/current/dir' });
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockResolvedValue({
+      json: async () => ({ files: [], markdownFiles: [] })
+    });
+
+    render(<ClientPage />);
+
+    // jsdom measures 0px for everything, so the last 3 components always fit
+    const alpha = await screen.findByTitle('/Users/zlatin/code/project-alpha/diagrams');
+    expect(alpha.textContent).toBe('…/code/project-alpha/diagrams');
+    expect(screen.getByTitle('/Users/zlatin/code/project-beta/diagrams').textContent)
+      .toBe('…/code/project-beta/diagrams');
+    // short paths are shown in full
+    expect(screen.getByTitle('/short/dir').textContent).toBe('/short/dir');
+    // the full long paths are not rendered as labels (still available on hover)
+    expect(screen.queryByText('/Users/zlatin/code/project-alpha/diagrams')).toBeNull();
+    window.localStorage.clear();
+  });
+
+  it('loads the full path when a recent directory is clicked', async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem('recentDirs', JSON.stringify(['/Users/zlatin/code/project-alpha/diagrams']));
+    mockParams({ dir: '/current/dir' });
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockResolvedValue({
+      json: async () => ({ files: [], markdownFiles: [] })
+    });
+
+    render(<ClientPage />);
+
+    const btn = await screen.findByTitle('/Users/zlatin/code/project-alpha/diagrams');
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith(
+        '/?dir=%2FUsers%2Fzlatin%2Fcode%2Fproject-alpha%2Fdiagrams',
+        { scroll: false }
+      );
+    });
+    expect((screen.getByPlaceholderText('Paste absolute path...') as HTMLInputElement).value)
+      .toBe('/Users/zlatin/code/project-alpha/diagrams');
+    window.localStorage.clear();
+  });
+
   it('copy button copies current mermaid source code and verifies it is valid', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');
 
@@ -2750,6 +2896,45 @@ sequenceDiagram
         const url = mockReplace.mock.calls.at(-1)?.[0] as string;
         expect(url).toContain('file=notes.md');
         expect(url).toContain('diagram=0');
+      });
+    });
+
+    it('the Back to markdown button returns to the document with a scroll request for the diagram', async () => {
+      mockParams({ file: 'notes.md', diagram: '1' });
+      mockMarkdownFetch();
+      const { rerender } = render(<ClientPage />);
+
+      // the embedded diagram editor shows the back button next to the badge
+      await screen.findByTestId('diagram-viewer');
+      const back = await screen.findByTestId('back-to-markdown');
+      expect(screen.getByTestId('embedded-diagram-badge').textContent).toContain('Diagram 2');
+
+      // clicking it drops the diagram param (keeping file/dir)
+      mockReplace.mockClear();
+      fireEvent.click(back);
+      await waitFor(() => {
+        const url = mockReplace.mock.calls.at(-1)?.[0] as string;
+        const params = new URLSearchParams(url.split('?')[1]);
+        expect(params.get('file')).toBe('notes.md');
+        expect(params.get('diagram')).toBeNull();
+        expect(params.get('dir')).toBe('/old/dir');
+      });
+
+      // simulate the navigation: the markdown document view opens with the
+      // one-shot scroll request for diagram 1
+      mockParams({ file: 'notes.md' });
+      rerender(<ClientPage />);
+      const editor = await screen.findByTestId('markdown-editor');
+      await waitFor(() => {
+        expect(editor.getAttribute('data-scroll-to-diagram')).toBe('1');
+      });
+      // the back button is a diagram-editor affordance only
+      expect(screen.queryByTestId('back-to-markdown')).toBeNull();
+
+      // once the editor reports the scroll as handled, the request is cleared
+      fireEvent.click(screen.getByTestId('markdown-diagram-scrolled'));
+      await waitFor(() => {
+        expect(editor.getAttribute('data-scroll-to-diagram')).toBeNull();
       });
     });
 
