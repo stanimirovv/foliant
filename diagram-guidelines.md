@@ -89,7 +89,7 @@ Every grouping block implicitly puts a tag on all the actors and messages inside
   - **Merged** collapses the group into a **single actor labeled with the group's title**; messages between internal actors become self-calls on it.
   - **Clean** additionally drops those internal self-calls — the high-level view: only the boundary messages remain.
 - Two groups with the same title share one key (two "Payment Service" boxes merge into the same single actor).
-- Subgraph tags combine with manual `keys` under the usual multi-tag rule: an element is hidden only when ALL of its tags are disabled.
+- Subgraph tags combine with manual `keys` as two independent groups: an element is hidden when **either** group is fully disabled (so hiding a manual tag hides its actor even inside a box, and hiding the box tag hides the whole group).
 
 **Example:**
 ```mermaid

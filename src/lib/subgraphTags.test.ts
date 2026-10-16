@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { buildSubgraphTagIndex, collectSubgraphTags, slugifySubgraphTitle } from './subgraphTags';
-import { processMermaid, transformActors } from './preprocessor';
+import { processMermaid, transformActors, buildActorRewriteMap } from './preprocessor';
 import { collectAvailableKeys } from './views';
 import { rewriteArrowStyles } from './styling';
 import { buildSelectionMap } from './svgmap';
@@ -276,15 +276,65 @@ describe('transformActors subgraph tags (sequence)', () => {
     expect(hidden).not.toContain('internal note');
   });
 
-  it('combines with CONFIG tags under the multi-tag rule (hidden only when ALL tags are off)', () => {
+  it('combines with CONFIG tags as two independent groups (hidden when either group is off)', () => {
     const config = { version: 1, actors: { Gateway: { keys: ['backend'] } } };
-    // Only the group key off: Gateway also carries 'backend', so it stays.
-    const partial = transformActors(SEQ, config, { hideKeys: ['payment-service'] });
-    expect(partial).toContain('participant Gateway');
-    // Both off: Gateway is hidden.
-    const full = transformActors(SEQ, config, { hideKeys: ['payment-service', 'backend'] });
-    expect(full).not.toContain('participant Gateway');
-    expect(full).not.toContain('participant Processor');
+    // Group key off: whole box hides, including Gateway
+    const groupOff = transformActors(SEQ, config, { hideKeys: ['payment-service'] });
+    expect(groupOff).not.toContain('participant Gateway');
+    expect(groupOff).not.toContain('participant Processor');
+    // Own key off: Gateway hides, but Processor stays
+    const ownOff = transformActors(SEQ, config, { hideKeys: ['backend'] });
+    expect(ownOff).not.toContain('participant Gateway');
+    expect(ownOff).toContain('participant Processor');
+  });
+
+  it('hides boxed actors when either their CONFIG key or the box tag is off (Activity reproduction)', () => {
+    const code = `sequenceDiagram
+    box Activity Sources
+        participant BR
+        participant PR
+    end
+    BR->>PR: ping`;
+    const config = {
+      version: 1,
+      actors: {
+        BR: { keys: ['Activity'] },
+        PR: { keys: ['Activity'] },
+      },
+    };
+    // hideKeys: ['Activity'] -> BR/PR hidden
+    const configOff = transformActors(code, config, { hideKeys: ['Activity'] });
+    expect(configOff).not.toContain('participant BR');
+    expect(configOff).not.toContain('participant PR');
+    expect(configOff).not.toContain('ping');
+
+    // hideKeys: ['activity-sources'] -> BR/PR hidden
+    const boxOff = transformActors(code, config, { hideKeys: ['activity-sources'] });
+    expect(boxOff).not.toContain('participant BR');
+    expect(boxOff).not.toContain('participant PR');
+    expect(boxOff).not.toContain('ping');
+  });
+
+  it('tracks mergedBy with CONFIG keys taking precedence over structural keys', () => {
+    const code = `sequenceDiagram
+    box Enrichment (degrade on failure)
+        participant CashOut
+    end`;
+    const config = {
+      version: 1,
+      actors: {
+        CashOut: { keys: ['enrichment', 'existingDeps'] },
+      },
+    };
+    const bothMerged = buildActorRewriteMap(config, {
+      mergeByKeys: ['enrichment', 'enrichment-degrade-on-failure'],
+    }, code);
+    expect(bothMerged.mergedBy.get('CashOut')).toBe('enrichment');
+
+    const boxMergedOnly = buildActorRewriteMap(config, {
+      mergeByKeys: ['enrichment-degrade-on-failure'],
+    }, code);
+    expect(boxMergedOnly.mergedBy.get('CashOut')).toBe('enrichment-degrade-on-failure');
   });
 
   it('merges groups whose titles slug to the same key into one actor', () => {
@@ -337,6 +387,27 @@ describe('transformActors subgraph tags (flowchart)', () => {
     const rendered = processMermaid(hidden, { isRegionVisible: () => true });
     expect(rendered.code).toBe(`flowchart TD
     Client[Client] --> GW[Gateway]`);
+  });
+
+  it('hides an edge with its own tag inside a flowchart subgraph when only its tag is off', () => {
+    const code = `flowchart TD
+    subgraph pay [Payment Service]
+        A --> B
+        B --> C
+    end`;
+    const config = {
+      version: 1,
+      arrows: [{ from: 'B', to: 'C', keys: ['flaky'] }],
+    };
+    // Hiding the edge's own tag 'flaky' drops the edge even though 'payment-service' is not hidden
+    const hidden = transformActors(code, config, { hideKeys: ['flaky'] });
+    expect(hidden).toContain('A --> B');
+    expect(hidden).not.toContain('B --> C');
+
+    // Hiding the subgraph key drops the whole subgraph
+    const allHidden = transformActors(code, config, { hideKeys: ['payment-service'] });
+    expect(allHidden).not.toContain('A --> B');
+    expect(allHidden).not.toContain('B --> C');
   });
 });
 

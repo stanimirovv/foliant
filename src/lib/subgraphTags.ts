@@ -14,8 +14,9 @@
 //   - flowcharts: `subgraph <title>` / `subgraph <id> [<title>]`.
 //
 // Subgraph tags are structural: they need no `%% CONFIG:` line and never write
-// to the file. They combine with CONFIG tags under the usual multi-tag rule
-// (an element is hidden only when ALL of its tags are disabled).
+// to the file. CONFIG tags and structural tags act as two independent groups:
+// an element is hidden when EITHER group is fully disabled (so hiding a CONFIG
+// tag hides its actor even inside a box, and hiding the box tag hides the whole box).
 
 import { BlockType, DiagramModel, DiagramType, parseModel } from './model';
 

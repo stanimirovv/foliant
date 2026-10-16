@@ -1386,6 +1386,88 @@ sequenceDiagram
     expect(code).not.toContain('box Payment Service');
   }, 10000);
 
+  it('resets all filters when clicking Reset next to By Key', async () => {
+    const DIAGRAM = `sequenceDiagram
+    participant Client
+    box Payment Service
+    participant Gateway
+    end
+    Client->>Gateway: pay`;
+    const params: Record<string, string> = {
+      file: 'demo.mmd',
+      edit: '1',
+      merge_key: 'payment-service',
+      hide_key: 'other',
+    };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DIAGRAM);
+    render(<ClientPage />);
+    await screen.findByText('By Key');
+
+    const resetButton = screen.getByRole('button', { name: 'Reset' });
+    fireEvent.click(resetButton);
+
+    expect(mockReplace).toHaveBeenCalled();
+    const lastCall = mockReplace.mock.calls.at(-1)?.[0] as string;
+    expect(lastCall).not.toContain('merge_key');
+    expect(lastCall).not.toContain('hide_key');
+  });
+
+  it('shows "still merged via" hint when an On/Off key has actors merged by another key, and clicking it sets that key to On', async () => {
+    const DIAGRAM = `%% CONFIG: {"version":1,"actors":{"CashOut":{"keys":["enrichment"]}}}
+sequenceDiagram
+    box Enrichment (degrade on failure)
+    participant CashOut
+    end`;
+    const params: Record<string, string> = {
+      file: 'demo.mmd',
+      edit: '1',
+      merge_key: 'enrichment-degrade-on-failure',
+    };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DIAGRAM);
+    render(<ClientPage />);
+    await screen.findByText('By Key');
+
+    // 'enrichment' is On, but CashOut is merged via 'enrichment-degrade-on-failure'
+    const hint = await screen.findByText(/1 actor still merged via/);
+    expect(hint.textContent).toContain('1 actor still merged via enrichment-degrade-on-failure');
+
+    // Clicking the hint sets 'enrichment-degrade-on-failure' to On (removes it from merge_key)
+    fireEvent.click(hint);
+    expect(mockReplace).toHaveBeenCalled();
+    const lastCall = mockReplace.mock.calls.at(-1)?.[0] as string;
+    expect(lastCall).not.toContain('enrichment-degrade-on-failure');
+  });
+
+  it('shows "overridden by" hint when a Merged key is not winning for any actors, and clicking it sets the winning key to On', async () => {
+    const DIAGRAM = `%% CONFIG: {"version":1,"actors":{"CashOut":{"keys":["enrichment"]}}}
+sequenceDiagram
+    box Enrichment (degrade on failure)
+    participant CashOut
+    end`;
+    const params: Record<string, string> = {
+      file: 'demo.mmd',
+      edit: '1',
+      merge_key: 'enrichment,enrichment-degrade-on-failure',
+    };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DIAGRAM);
+    render(<ClientPage />);
+    await screen.findByText('By Key');
+
+    // 'enrichment-degrade-on-failure' is merged in URL, but overridden by 'enrichment'
+    const hint = await screen.findByText(/overridden by/);
+    expect(hint.textContent).toContain('overridden by enrichment');
+
+    // Clicking the hint sets 'enrichment' to On (removes it from merge_key)
+    fireEvent.click(hint);
+    expect(mockReplace).toHaveBeenCalled();
+    const lastCall = mockReplace.mock.calls.at(-1)?.[0] as string;
+    expect(lastCall).not.toContain('enrichment,');
+    expect(lastCall).toContain('enrichment-degrade-on-failure');
+  });
+
   it('a broken diagram (unclosed region) still renders, shows a warning, and recognized elements stay editable (NFR-01)', async () => {
     const broken = `${DEMO}\n    %% @region-start: flow=checkout`;  // unclosed
     const viewer = await renderInEditMode(broken, 'A->>B: Hello');

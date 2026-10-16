@@ -124,6 +124,22 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Edit the note's text or color from the panel → the card updates and both persist after F5.
 - [ ] Delete a sticky note (the card's trash button) → its CONFIG `notes[]` entry (and its tags) is gone.
 
+## Increment 3e — Subgraph/box structural tags (levels of abstraction)
+
+> Stop here: every `subgraph` (flowcharts) and `box` (sequence diagrams — mermaid's actor grouping there) implicitly tags the actors and messages inside it with a key derived from its title, so the whole group can be hidden or merged into a single actor. No `%% CONFIG:` line is needed.
+
+- [ ] Open a sequence diagram with `box Payment Service` around two participants → the sidebar under Actors → By Key shows a `payment-service` key, without any tag in `%% CONFIG:`.
+- [ ] Set `payment-service` to **Merged** → the boxed actors collapse into a single actor labeled "Payment Service"; messages between them become self-calls on it; messages from outside actors re-point to it. Set it back to **On** → the original actors return exactly.
+- [ ] Set `payment-service` to **Clean** → the internal self-calls disappear too; only the boundary messages remain (the high-level view). Set it back to **Merged** → the self-calls return.
+- [ ] Set `payment-service` to **Off** → the boxed actors and their messages disappear, and the emptied box is removed from the canvas; set it back **On** → everything returns.
+- [ ] Select a boxed participant → the multi-select Tags view shows `payment-service` as a read-only (inherited) chip; it is not removable and never written to `%% CONFIG:`.
+- [ ] A `box` with a color (`box red Payment Service`) still derives `payment-service`; a `box #ccc Payment Service` derives nothing (`#` starts a comment in sequence diagrams).
+- [ ] Flowchart: `subgraph pay [Payment Service]` → By Key shows `payment-service`; **Merged** collapses the subgraph's nodes into one node labeled "Payment Service"; **Clean** also drops the edges between them; **Off** removes the subgraph's nodes and edges (and the emptied subgraph).
+- [ ] Two groups with the same title share one key → **Merged** collapses both into the same single actor.
+- [ ] Combine with a manual tag: hiding the box tag hides the whole box including tagged actors; hiding a manual tag hides its actor even inside the box.
+- [ ] Save a view while a subgraph key is Merged/Clean/Off → the view restores that exact state; the markdown preview's per-block tag toggles list and hide subgraph keys the same way.
+- [ ] URL state: `?merge_key=payment-service` (and `merge_clean_key`, `hide_key`) drive the same collapse/hide without touching the file.
+
 ## Increment 4 — Flowchart editing
 
 > Stop here: nodes and edges are editable with the same panel, and cascade delete keeps the diagram valid.

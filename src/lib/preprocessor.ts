@@ -77,6 +77,8 @@ export interface ActorRewriteMap {
   hide: Set<string>;             // actor ids whose lines are dropped
   clean: Set<string>;            // merged names whose self-calls are dropped
   groups: ActorMergeGroup[];     // merge groups by key
+  mergedBy: Map<string, string>; // actor id -> key that merged it
+  keyActors: Map<string, string[]>; // tag key -> actor ids carrying that tag
 }
 
 // Shared hide/merge computation (EDITING_PLAN.md 4.9). transformActors and
@@ -91,6 +93,8 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
   const hide = new Set<string>();
   const clean = new Set<string>();
   const groups: ActorMergeGroup[] = [];
+  const mergedBy = new Map<string, string>();
+  const keyActors = new Map<string, string[]>();
 
   const subgraphIndex = code ? buildSubgraphTagIndex(code) : null;
   const subgraphByKey = new Map<string, SubgraphTag>();
@@ -105,13 +109,22 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
   // An actor's effective tags are its CONFIG keys plus the subgraph tags of
   // every subgraph it belongs to (CONFIG keys first, so an explicit tag wins
   // the merge-group race when both are merged).
+  // CONFIG tags and structural tags act as two independent groups when hiding:
+  // an actor is hidden when either group is fully Off.
   const considerActor = (actor: string, meta: ActorMetadata | undefined, subgraphKeys: string[]) => {
-    const keys = [...(meta?.keys ?? []), ...subgraphKeys];
+    const ownKeys = meta?.keys ?? [];
+    const keys = [...ownKeys, ...subgraphKeys];
+    for (const k of keys) {
+      if (!keyActors.has(k)) keyActors.set(k, []);
+      keyActors.get(k)!.push(actor);
+    }
+
     let shouldHide = false;
     if (meta?.color && options.hideColors?.includes(meta.color)) {
       shouldHide = true;
     }
-    if (keys.length > 0 && keys.every(k => options.hideKeys?.includes(k))) {
+    const allOff = (ks: string[]) => ks.length > 0 && ks.every(k => options.hideKeys?.includes(k));
+    if (allOff(ownKeys) || allOff(subgraphKeys)) {
       shouldHide = true;
     }
 
@@ -124,6 +137,7 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
       if (options.mergeByKeys?.includes(k) || options.mergeCleanByKeys?.includes(k)) {
         if (!keyToActors.has(k)) keyToActors.set(k, []);
         keyToActors.get(k)!.push(actor);
+        mergedBy.set(actor, k);
         break;
       }
     }
@@ -156,7 +170,7 @@ export function buildActorRewriteMap(config: DiagramConfig | null, options: Acto
     if (options.mergeCleanByKeys?.includes(key)) clean.add(name);
   });
 
-  return { rename, hide, clean, groups };
+  return { rename, hide, clean, groups, mergedBy, keyActors };
 }
 
 export function transformActors(code: string, config: DiagramConfig | null, options: ActorTransformOptions): string {
@@ -172,24 +186,20 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
 
   // Message/edge lines whose effective tags include a hidden key are dropped
   // too: arrows follow the by-key filter, but only ever as on/off (shown or
-  // hidden) — merging stays an actor-only concept. A line's effective tags are
-  // its own keys plus, when the arrow's keyMode is 'merged', the keys of the
-  // service it originates from, plus the structural tags of the subgraphs the
-  // line sits inside. (Lines whose origin service carries the hidden key are
-  // already dropped by the hidden-actor check above, so only the own keys can
-  // add drops here; inherited keys are evaluated anyway to keep the semantics
-  // exact.) Notes behave the same way with their own keys plus subgraph tags —
-  // they carry no tag inheritance.
+  // hidden) — merging stays an actor-only concept. A line's own/inherited CONFIG
+  // keys and its structural subgraph keys act as two independent groups: the line
+  // is dropped when either group is fully Off.
   const hideKeys = options.hideKeys ?? [];
   const hiddenElementLines = new Set<number>();
   if (hideKeys.length > 0 && (hasArrowTags || hasNoteTags || hasSubgraphTags)) {
     const model = parseModel(code);
     const arrowOccurrences = new Map<string, number>();
     const noteOccurrences = new Map<string, number>();
+    const allOff = (ks: string[]) => ks.length > 0 && ks.every(k => hideKeys.includes(k));
     for (const el of model.elements) {
       if (el.kind !== 'message' && el.kind !== 'edge' && el.kind !== 'note') continue;
       const subgraphKeys = subgraphIndex.elementKeys.get(el.key) ?? [];
-      let keysToCheck: string[];
+      let ownKeys: string[];
       if (el.kind === 'note') {
         const occKey = `${el.over.join('\u0000')}\u0000${el.text}`;
         const occurrence = noteOccurrences.get(occKey) ?? 0;
@@ -198,7 +208,7 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
           n.over.length === el.over.length && n.over.every((id, i) => id === el.over[i]) &&
           n.text === el.text &&
           (n.occurrence ?? 0) === occurrence);
-        keysToCheck = Array.from(new Set([...(entry?.keys ?? []), ...subgraphKeys]));
+        ownKeys = entry?.keys ?? [];
       } else {
         const occKey = `${el.from}\u0000${el.to}\u0000${el.label ?? ''}`;
         const occurrence = arrowOccurrences.get(occKey) ?? 0;
@@ -209,9 +219,9 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
           (a.occurrence ?? 0) === occurrence);
         const own = entry?.keys ?? [];
         const inherited = entry?.keyMode === 'merged' ? (config?.actors?.[el.from]?.keys ?? []) : [];
-        keysToCheck = Array.from(new Set([...own, ...inherited, ...subgraphKeys]));
+        ownKeys = Array.from(new Set([...own, ...inherited]));
       }
-      if (keysToCheck.length > 0 && keysToCheck.every(k => hideKeys.includes(k))) {
+      if (allOff(ownKeys) || allOff(subgraphKeys)) {
         for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenElementLines.add(i);
       }
     }

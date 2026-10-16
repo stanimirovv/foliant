@@ -7,7 +7,7 @@ import EditorPanel from './EditorPanel';
 import MarkdownEditor from './MarkdownEditor';
 import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
-import { processMermaid, transformActors, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
+import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
@@ -919,6 +919,11 @@ export default function ClientPage() {
       isRegionVisible: (region) => !isPathHidden(region.path, effectiveHiddenPaths)
     }).code;
   }, [rawCode, viewsData, effectiveActorOptions, effectiveHiddenPaths]);
+
+  const actorRewriteMap = useMemo(
+    () => buildActorRewriteMap(viewsData, effectiveActorOptions, rawCode),
+    [viewsData, effectiveActorOptions, rawCode]
+  );
 
   useEffect(() => {
     setWarnings(procWarnings);
@@ -1932,10 +1937,47 @@ export default function ClientPage() {
               <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2`}>Actors</h2>
               
               <div className="mb-3">
-                <span className={`text-xs font-semibold ${isDark ? 'text-slate-500' : 'text-gray-400'} block mb-1`}>By Key</span>
+                <div className="flex items-center justify-between mb-1">
+                  <span className={`text-xs font-semibold ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>By Key</span>
+                  <button
+                    type="button"
+                    onClick={deselectView}
+                    className={`text-[11px] font-medium transition-colors ${
+                      isDark ? 'text-slate-400 hover:text-slate-200' : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                    title="Reset all filters"
+                  >
+                    Reset
+                  </button>
+                </div>
                 <ul className="space-y-2">
                   {availableKeys.map(k => {
                     const currentState = hideKeys.has(k) ? 'off' : mergeCleanKeys.has(k) ? 'merged_clean' : mergeKeys.has(k) ? 'merged' : 'on';
+                    const actors = actorRewriteMap.keyActors.get(k) ?? [];
+
+                    const stillMergedBy = new Map<string, number>();
+                    if (currentState === 'on' || currentState === 'off') {
+                      for (const actor of actors) {
+                        const winningKey = actorRewriteMap.mergedBy.get(actor);
+                        if (winningKey && winningKey !== k) {
+                          stillMergedBy.set(winningKey, (stillMergedBy.get(winningKey) ?? 0) + 1);
+                        }
+                      }
+                    }
+
+                    const overridingKeys = new Set<string>();
+                    if (currentState === 'merged' || currentState === 'merged_clean') {
+                      const winningCount = actors.filter(actor => actorRewriteMap.mergedBy.get(actor) === k).length;
+                      if (winningCount === 0 && actors.length > 0) {
+                        for (const actor of actors) {
+                          const winner = actorRewriteMap.mergedBy.get(actor);
+                          if (winner && winner !== k) {
+                            overridingKeys.add(winner);
+                          }
+                        }
+                      }
+                    }
+
                     return (
                       <li key={k} className={`text-sm flex flex-col pl-2 border-l-2 ml-1 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
                         <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>{k}</span>
@@ -1966,6 +2008,32 @@ export default function ClientPage() {
                             Clean
                           </button>
                         </div>
+                        {Array.from(stillMergedBy.entries()).map(([winningKey, count]) => (
+                          <button
+                            key={winningKey}
+                            type="button"
+                            onClick={() => setActorState(winningKey, 'on')}
+                            className={`text-left text-[11px] mt-1 transition-colors cursor-pointer hover:underline ${
+                              isDark ? 'text-amber-400 hover:text-amber-300' : 'text-amber-700 hover:text-amber-900'
+                            }`}
+                            title={`Set ${winningKey} to On`}
+                          >
+                            {count} {count === 1 ? 'actor' : 'actors'} still merged via <span className="font-mono">{winningKey}</span>
+                          </button>
+                        ))}
+                        {Array.from(overridingKeys).map(ok => (
+                          <button
+                            key={ok}
+                            type="button"
+                            onClick={() => setActorState(ok, 'on')}
+                            className={`text-left text-[11px] mt-1 transition-colors cursor-pointer hover:underline ${
+                              isDark ? 'text-amber-400 hover:text-amber-300' : 'text-amber-700 hover:text-amber-900'
+                            }`}
+                            title={`Set ${ok} to On`}
+                          >
+                            overridden by <span className="font-mono">{ok}</span>
+                          </button>
+                        ))}
                       </li>
                     );
                   })}
