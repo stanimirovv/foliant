@@ -15,7 +15,6 @@ export interface SourceCodePanelProps {
   onSwitchToVisualMode: () => void;
   onCopy?: () => void;
   viewName?: string | null;
-  onExitView?: () => void;
 }
 
 type MonacoEditorInstance = Parameters<OnMount>[0];
@@ -32,7 +31,6 @@ export default function SourceCodePanel({
   onSwitchToVisualMode,
   onCopy,
   viewName = null,
-  onExitView,
 }: SourceCodePanelProps) {
   const [copied, setCopied] = useState(false);
   const editorRef = useRef<MonacoEditorInstance | null>(null);
@@ -192,7 +190,7 @@ export default function SourceCodePanel({
             <span
               data-testid="view-mode-indicator"
               className="text-[11px] text-gray-500 dark:text-slate-400 italic px-1"
-              title="Exit view to edit diagram code"
+              title="Source code is read-only while a saved view is active"
             >
               View mode
             </span>
@@ -217,32 +215,6 @@ export default function SourceCodePanel({
           )}
         </div>
       </div>
-
-      {/* View Mode Notice Banner */}
-      {viewName && (
-        <div
-          data-testid="view-source-notice"
-          className={`px-3 py-2 border-b text-xs flex items-center justify-between ${
-            isDark ? 'bg-blue-950/40 border-blue-800/60 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-800'
-          }`}
-        >
-          <div className="flex items-center space-x-2">
-            <Eye size={14} className="flex-shrink-0 text-blue-500" />
-            <span>
-              Displaying view <strong>&quot;{viewName}&quot;</strong>. The source code is read-only. Copying will copy this view.
-            </span>
-          </div>
-          {onExitView && (
-            <button
-              onClick={onExitView}
-              data-testid="exit-view-source-btn"
-              className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium border border-blue-400/40 hover:bg-blue-500/10 transition-colors whitespace-nowrap"
-            >
-              Exit View
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Validation Error Banner */}
       {validationError && (

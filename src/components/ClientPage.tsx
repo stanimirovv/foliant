@@ -9,7 +9,7 @@ import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ListOrdered, FileText, RotateCcw } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
 import { parseModel, ModelElement, NodeShape, ParticipantType, StickyNoteElement } from '@/lib/model';
@@ -843,6 +843,11 @@ export default function ClientPage() {
     return viewsData.views.find(v => v.name === selectedViewName) || null;
   }, [viewsData, selectedViewName]);
   const isViewActive = Boolean(activeView);
+  // The built-in "Default" entry in the Saved Views list stands for the full,
+  // unfiltered diagram: it is the active choice when no saved view is applied
+  // and no manual filters are in effect. Selecting it resets everything.
+  const isDefaultViewActive = !activeView && hiddenPaths.size === 0 && hideColors.size === 0
+    && mergeKeys.size === 0 && mergeCleanKeys.size === 0 && hideKeys.size === 0;
 
   const effectiveHiddenPaths = useMemo(() => {
     if (activeView) {
@@ -2058,78 +2063,114 @@ export default function ClientPage() {
                 <Save size={14} />
               </button>
             </div>
-            {(!viewsData || !viewsData.views || viewsData.views.length === 0) ? (
-              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'} italic`}>No saved views</p>
-            ) : (
-              <ul className="space-y-2">
-                {viewsData.views.map(view => {
-                  const isSelected = selectedViewName === view.name;
-                  return (
-                    <li
-                      key={view.name}
-                      data-testid={`saved-view-${view.name}`}
-                      className={`flex items-center justify-between p-2 rounded border text-sm group cursor-pointer transition-colors ${
-                        isSelected
-                          ? (isDark ? 'bg-blue-900/40 border-blue-500 text-blue-200 font-medium' : 'bg-blue-50 border-blue-500 text-blue-800 font-medium')
-                          : (isDark ? 'bg-slate-800/60 border-slate-700 text-slate-200 hover:bg-slate-800' : 'bg-gray-50 border-gray-200 text-gray-800 hover:bg-gray-100')
+            <ul className="space-y-2">
+              <li
+                data-testid="saved-view-__default__"
+                className={`flex items-center justify-between p-2 rounded border text-sm group cursor-pointer transition-colors ${
+                  isDefaultViewActive
+                    ? (isDark ? 'bg-blue-900/40 border-blue-500 text-blue-200 font-medium' : 'bg-blue-50 border-blue-500 text-blue-800 font-medium')
+                    : (isDark ? 'bg-slate-800/60 border-slate-700 text-slate-200 hover:bg-slate-800' : 'bg-gray-50 border-gray-200 text-gray-800 hover:bg-gray-100')
+                }`}
+                onClick={deselectView}
+                title="Show the full, unfiltered diagram"
+              >
+                <span className="truncate font-medium flex-1 mr-2 flex items-center gap-1.5" title="Default (full diagram)">
+                  <span className="truncate">Default</span>
+                  {isDefaultViewActive && (
+                    <span
+                      data-testid="active-view-badge"
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${
+                        isDark ? 'bg-blue-800 text-blue-200' : 'bg-blue-200 text-blue-800'
                       }`}
-                      onClick={() => {
-                        if (isSelected) {
-                          deselectView();
-                        } else {
-                          loadView(view);
-                        }
-                      }}
                     >
-                      <span className="truncate font-medium flex-1 mr-2 flex items-center gap-1.5" title={view.name}>
-                        <span className="truncate">{view.name}</span>
-                        {isSelected && (
-                          <span
-                            data-testid="active-view-badge"
-                            className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${
-                              isDark ? 'bg-blue-800 text-blue-200' : 'bg-blue-200 text-blue-800'
-                            }`}
-                          >
-                            Active
-                          </span>
-                        )}
-                      </span>
-                      <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isSelected) {
-                              deselectView();
-                            } else {
-                              loadView(view);
-                            }
-                          }} 
-                          className={`p-1 rounded transition-colors ${
-                            isSelected
-                              ? (isDark ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-blue-100')
-                              : (isDark ? 'text-emerald-400 hover:bg-slate-700' : 'text-green-600 hover:text-green-700 hover:bg-green-100')
+                      Active
+                    </span>
+                  )}
+                </span>
+                <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deselectView();
+                    }}
+                    className={`p-1 rounded transition-colors ${isDark ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-blue-100'}`}
+                    title="Reset to full diagram"
+                    data-testid="reset-to-default-view-btn"
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                </div>
+              </li>
+              {(viewsData?.views ?? []).map(view => {
+                const isSelected = selectedViewName === view.name;
+                return (
+                  <li
+                    key={view.name}
+                    data-testid={`saved-view-${view.name}`}
+                    className={`flex items-center justify-between p-2 rounded border text-sm group cursor-pointer transition-colors ${
+                      isSelected
+                        ? (isDark ? 'bg-blue-900/40 border-blue-500 text-blue-200 font-medium' : 'bg-blue-50 border-blue-500 text-blue-800 font-medium')
+                        : (isDark ? 'bg-slate-800/60 border-slate-700 text-slate-200 hover:bg-slate-800' : 'bg-gray-50 border-gray-200 text-gray-800 hover:bg-gray-100')
+                    }`}
+                    onClick={() => {
+                      if (isSelected) {
+                        deselectView();
+                      } else {
+                        loadView(view);
+                      }
+                    }}
+                  >
+                    <span className="truncate font-medium flex-1 mr-2 flex items-center gap-1.5" title={view.name}>
+                      <span className="truncate">{view.name}</span>
+                      {isSelected && (
+                        <span
+                          data-testid="active-view-badge"
+                          className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${
+                            isDark ? 'bg-blue-800 text-blue-200' : 'bg-blue-200 text-blue-800'
                           }`}
-                          title={isSelected ? "Exit View" : "Load View"}
-                          data-testid={`load-view-btn-${view.name}`}
                         >
-                          <Play size={14} />
-                        </button>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteView(view.name);
-                          }} 
-                          className={`p-1 rounded transition-colors ${isDark ? 'text-rose-400 hover:bg-slate-700' : 'text-red-500 hover:text-red-600 hover:bg-red-100'}`}
-                          title="Delete View"
-                          data-testid={`delete-view-btn-${view.name}`}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+                          Active
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isSelected) {
+                            deselectView();
+                          } else {
+                            loadView(view);
+                          }
+                        }}
+                        className={`p-1 rounded transition-colors ${
+                          isSelected
+                            ? (isDark ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-blue-100')
+                            : (isDark ? 'text-emerald-400 hover:bg-slate-700' : 'text-green-600 hover:text-green-700 hover:bg-green-100')
+                        }`}
+                        title={isSelected ? "Exit View" : "Load View"}
+                        data-testid={`load-view-btn-${view.name}`}
+                      >
+                        <Play size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteView(view.name);
+                        }}
+                        className={`p-1 rounded transition-colors ${isDark ? 'text-rose-400 hover:bg-slate-700' : 'text-red-500 hover:text-red-600 hover:bg-red-100'}`}
+                        title="Delete View"
+                        data-testid={`delete-view-btn-${view.name}`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {(!viewsData || !viewsData.views || viewsData.views.length === 0) && (
+              <p className={`text-xs mt-2 ${isDark ? 'text-slate-500' : 'text-gray-500'} italic`}>No saved views</p>
             )}
           </div>
         </div>
@@ -2388,35 +2429,6 @@ export default function ClientPage() {
           </div>
         </div>
 
-        {isViewActive && (
-          <div
-            data-testid="active-view-banner"
-            className={`px-4 py-2 border-b flex items-center justify-between text-xs transition-colors ${
-              isDark ? 'bg-blue-950/40 border-blue-900/60 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-900'
-            }`}
-          >
-            <div className="flex items-center space-x-2">
-              <span className="font-semibold px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] tracking-wide uppercase">
-                View Mode
-              </span>
-              <span>
-                Viewing saved view <strong>&quot;{activeView?.name}&quot;</strong>. The source code is read-only and copying the Mermaid will copy this view.
-              </span>
-            </div>
-            <button
-              onClick={deselectView}
-              data-testid="exit-view-banner-btn"
-              className={`text-xs px-2.5 py-1 rounded font-medium border transition-colors ${
-                isDark
-                  ? 'border-blue-700 hover:bg-blue-900/60 text-blue-200'
-                  : 'border-blue-300 hover:bg-blue-100 text-blue-800'
-              }`}
-            >
-              Reset to full diagram
-            </button>
-          </div>
-        )}
-
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 p-4 overflow-hidden relative min-w-0">
             {isMarkdownDoc ? (
@@ -2594,7 +2606,6 @@ export default function ClientPage() {
                         onSwitchToVisualMode={switchToVisualMode}
                         onCopy={handleCopyMermaid}
                         viewName={isViewActive ? activeView?.name : null}
-                        onExitView={deselectView}
                       />
                     </div>
                   </>
@@ -2647,7 +2658,6 @@ export default function ClientPage() {
                       onSwitchToVisualMode={switchToVisualMode}
                       onCopy={handleCopyMermaid}
                       viewName={isViewActive ? activeView?.name : null}
-                      onExitView={deselectView}
                     />
                   </div>
                 )}
