@@ -3135,6 +3135,112 @@ sequenceDiagram
       expect(errorEl.textContent).toContain("Contents aren't saved");
     }, 15000);
   });
+
+  it('never overwrites rawCode or saves viewCode to disk when loading/exiting saved views with SourceCodePanel open', async () => {
+    const USER_BEFORE_DIAGRAM = `%% CONFIG: {"version":1,"actors":{"ServiceA":{"keys":["enrichment","existingDeps"]},"ServiceB":{"keys":["enrichment","existingDeps"]},"ServiceC":{"keys":["enrichment","existingDeps"]},"ServiceD":{"keys":["enrichment","existingDeps"]},"ServiceE":{"keys":["enrichment","existingDeps"]},"ServiceF":{"keys":["enrichment","existingDeps"]},"SourceA":{"keys":["core"]},"SourceB":{"keys":["core"]},"AuxiliaryService":{"color":"#3d1d62","keys":["enrichment","new"]}},"notes":[{"id":"note1","x":698,"y":753,"text":"","color":"yellow"},{"id":"note2","x":-247,"y":-180,"text":"Core data - hard fail\\nEnrichment - degraded mode","color":"yellow"},{"id":"note3","x":-108,"y":-180,"text":"Gateway is a regulated component","color":"yellow"},{"id":"note4","x":28,"y":-181,"text":"Clients have a two-week release cycle and avoid forced upgrades","color":"yellow"}],"arrows":[{"from":"Gateway","to":"AuxiliaryService","label":"GetSupplementaryData","color":"#00ff9d","animation":"pulse","keys":["new"]},{"from":"AuxiliaryService","to":"Gateway","label":"Return Supplementary Data","color":"#00ff9d","animation":"pulse","keys":["new"]},{"from":"AuxiliaryService","to":"Client","label":"Return Lifecycle Statistics","color":"#00ff9d","animation":"pulse","keys":["lifecycle"]},{"from":"Client","to":"AuxiliaryService","label":"Get Lifecycle Statistics","color":"#00ff9d","animation":"pulse","keys":["lifecycle"]}],"views":[{"name":"CurrentState","hiddenPaths":[],"mergeKeys":["core","enrichment"],"hideKeys":["new","lifecycle"]},{"name":"ProposedState","hiddenPaths":[],"mergeKeys":["core","enrichment"],"hideKeys":["lifecycle"]}]}
+sequenceDiagram
+    participant Client
+    participant Gateway
+
+    box rgb(30, 58, 95) Core sources (hard fail)
+        participant SourceA as Category A Reporting API
+        participant SourceB as Category B Reporting API
+    end
+
+    box rgb(74, 60, 20) Enrichment (degrade on failure)
+        participant ServiceA as Service A API
+        participant ServiceB as Service B API
+        participant ServiceC as Service C API
+        participant ServiceD as Service D API
+        participant ServiceE as Service E API
+        participant ServiceF as Service F API
+        participant AuxiliaryService as Auxiliary Service
+    end
+
+    Client->>Gateway: InitializeItemsRequest / ItemsRequest
+
+    alt Type = CategoryA
+        Gateway->>SourceA: Category A items for user (filter, paging, order)
+        SourceA-->>Gateway: Item, components, groups, modifiers, descriptions, entities, feature flags
+        opt capabilities.actions.pullOperations
+            Gateway->>ServiceA: Operations for items
+            ServiceA-->>Gateway: Actions.Operations (status, value, rejection reason)
+        end
+        Gateway->>ServiceA: Action availability for items
+        ServiceA-->>Gateway: Actions.Availability (enabled, full/partial value, status)
+    else Type = CategoryB
+        Gateway->>SourceB: Category B items for user
+        SourceB-->>Gateway: Item, components, modifiers, allocationSources, outcomes, resolutionReference, externalData
+        opt formatting.categoryB.loadPendingRequests
+            Gateway->>SourceB: Pending requests
+            SourceB-->>Gateway: PendingRequests
+        end
+        Gateway->>ServiceE: Groups by external ID
+        ServiceE-->>Gateway: Group data for related record
+        Gateway->>ServiceF: Values for open single items
+        ServiceF-->>Gateway: Item.action (unit value, total value, status)
+    end
+
+    Note over Gateway,ServiceD: For all record IDs referenced by the items
+    Gateway->>ServiceB: Records (served from a 60-second cache)
+    ServiceB-->>Gateway: Records: names, start date, groups, entities, media, category, tags
+    Gateway->>ServiceC: Results for records
+    ServiceC-->>Gateway: Record status, aggregate metrics, detailed metrics, live state
+    Gateway->>ServiceD: Component metrics
+    ServiceD-->>Gateway: Component metricsMetadata (current aggregate value)
+
+    Note over Gateway: Compile response: Items[] = CategoryA or CategoryB; PendingRequests[] for CategoryB; Records{} keyed by recordId; Actions{Availability, Operations} for CategoryA
+    Gateway->>AuxiliaryService: GetSupplementaryData
+    AuxiliaryService->>Gateway: Return Supplementary Data
+    Gateway-->>Client: ItemsResponse { Items, PendingRequests, Records, Actions }
+    Client->>AuxiliaryService: Get Lifecycle Statistics
+    AuxiliaryService->>Client: Return Lifecycle Statistics`;
+
+    const viewer = await renderInEditMode(USER_BEFORE_DIAGRAM, 'participant SourceA as Category A Reporting API');
+
+    // Open Mermaid Source tab so SourceCodePanel is mounted while switching views
+    fireEvent.click(screen.getByTestId('tab-source'));
+    const textarea = await screen.findByTestId('monaco-editor-textarea') as HTMLTextAreaElement;
+    expect(textarea.value).toContain('participant SourceA as Category A Reporting API');
+    expect(textarea.value).toContain('Gateway->>AuxiliaryService: GetSupplementaryData');
+
+    // Select Saved View "CurrentState"
+    fireEvent.click(screen.getByTestId('saved-view-CurrentState'));
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('MergedKey_core');
+      expect(viewer.getAttribute('data-code')).toContain('MergedKey_enrichment');
+      expect(viewer.getAttribute('data-code')).not.toContain(': GetSupplementaryData');
+    });
+
+    // SourceCodePanel shows viewCode in read-only mode
+    expect(textarea.readOnly).toBe(true);
+    expect(textarea.value).toContain('MergedKey_core');
+
+    // Focusing the read-only source editor in view mode must not unlock code editing
+    fireEvent.focus(textarea);
+    expect(screen.getByTestId('code-mode-badge').textContent).toContain('Read-only (View: CurrentState)');
+
+    // Wait past the 800ms auto-save debounce: no POST to /api/file/demo.mmd must ever happen
+    await new Promise(r => setTimeout(r, 950));
+    const mockFetch = global.fetch as import('vitest').Mock;
+    const postCalls = mockFetch.mock.calls.filter(
+      c => String(c[0]).startsWith('/api/file/') && (c[1] as { method?: string } | undefined)?.method === 'POST'
+    );
+    expect(postCalls).toHaveLength(0);
+
+    // Exit the view -> the exact original diagram is restored in both viewer and source panel
+    fireEvent.click(screen.getByTestId('exit-view-source-btn'));
+
+    await waitFor(() => {
+      expect(textarea.value).toBe(USER_BEFORE_DIAGRAM);
+      expect(viewer.getAttribute('data-code')).toContain('participant SourceA as Category A Reporting API');
+      expect(viewer.getAttribute('data-code')).toContain('participant ServiceA as Service A API');
+      expect(viewer.getAttribute('data-code')).toContain('Gateway->>AuxiliaryService: GetSupplementaryData');
+      expect(viewer.getAttribute('data-code')).toContain('Client->>AuxiliaryService: Get Lifecycle Statistics');
+      expect(viewer.getAttribute('data-code')).not.toContain('MergedKey_');
+    });
+  }, 15000);
 });
 
 

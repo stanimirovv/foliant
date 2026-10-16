@@ -41,6 +41,16 @@ export default function SourceCodePanel({
 
   const isDark = theme === 'dark';
   const isReadOnly = Boolean(viewName) || isVisualEditMode;
+  const isReadOnlyRef = useRef(isReadOnly);
+  isReadOnlyRef.current = isReadOnly;
+  const codeRef = useRef(code);
+  codeRef.current = code;
+  const viewNameRef = useRef(viewName);
+  viewNameRef.current = viewName;
+  const isVisualEditModeRef = useRef(isVisualEditMode);
+  isVisualEditModeRef.current = isVisualEditMode;
+  const onSwitchToCodeModeRef = useRef(onSwitchToCodeMode);
+  onSwitchToCodeModeRef.current = onSwitchToCodeMode;
 
   const handleCopy = async () => {
     if (onCopy) {
@@ -59,8 +69,8 @@ export default function SourceCodePanel({
     monacoRef.current = monaco;
 
     editor.onDidFocusEditorText(() => {
-      if (!viewName && isVisualEditMode) {
-        onSwitchToCodeMode();
+      if (!viewNameRef.current && isVisualEditModeRef.current) {
+        onSwitchToCodeModeRef.current();
       }
     });
 
@@ -110,7 +120,8 @@ export default function SourceCodePanel({
   }, [changedLines]);
 
   const handleCodeChange = (value: string | undefined) => {
-    if (value !== undefined) {
+    if (isReadOnlyRef.current) return;
+    if (value !== undefined && value !== codeRef.current) {
       onCodeChange(value);
     }
   };

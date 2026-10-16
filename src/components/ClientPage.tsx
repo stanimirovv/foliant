@@ -259,6 +259,7 @@ export default function ClientPage() {
   }, [isResizingSidebar]);
 
   const switchToCodeMode = () => {
+    if (selectedViewName) return;
     setEditModeKind('code');
     setSidebarTab('source');
     setSelection(null);
@@ -364,6 +365,9 @@ export default function ClientPage() {
 
   useEffect(() => {
     setSelectedViewName(viewParam || null);
+    if (viewParam) {
+      setEditModeKind('visual');
+    }
   }, [viewParam]);
 
   const toggleHiddenPath = (path: string) => {
@@ -1163,6 +1167,7 @@ export default function ClientPage() {
   }, [rawCode, updateChangedLines]);
 
   const handleHandEditCode = useCallback(async (newCode: string) => {
+    if (isViewActive || editModeKind !== 'code') return;
     if (newCode === rawCode) return;
     const diff = computeLineDiff(rawCode, newCode);
     updateChangedLines(diff.changedLines);
@@ -1185,7 +1190,7 @@ export default function ClientPage() {
       const msg = err instanceof Error ? err.message : String(err);
       setSourceValidationError(msg);
     }
-  }, [rawCode, actorOptions, hiddenPaths, commitEdit, updateChangedLines]);
+  }, [isViewActive, editModeKind, rawCode, actorOptions, hiddenPaths, commitEdit, updateChangedLines]);
 
   // Markdown source edits (MarkdownEditor): no diagram validation — the text
   // is saved as-is through the regular auto-save path.

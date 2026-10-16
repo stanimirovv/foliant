@@ -18,12 +18,18 @@ import { vi } from 'vitest';
 vi.mock('@monaco-editor/react', () => {
   return {
     default: ({ value, onChange, options, onMount }: any) => {
+      const prevValueRef = React.useRef(value);
+      const focusCbRef = React.useRef<(() => void) | null>(null);
+
       React.useEffect(() => {
         if (onMount) {
           const fakeEditor = {
             revealLineInCenter: vi.fn(),
             deltaDecorations: vi.fn().mockReturnValue([]),
-            onDidFocusEditorText: (cb: any) => ({ dispose: vi.fn() }),
+            onDidFocusEditorText: (cb: any) => {
+              focusCbRef.current = cb;
+              return { dispose: vi.fn() };
+            },
             getValue: () => value,
             setValue: vi.fn(),
           };
@@ -39,6 +45,18 @@ vi.mock('@monaco-editor/react', () => {
         }
       }, []);
 
+      // Mirror real @monaco-editor/react behavior: when value prop changes while
+      // readOnly is true, @monaco-editor/react calls editor.setValue(value) without
+      // setting preventTriggerChangeEvent, which triggers onChange(value).
+      React.useEffect(() => {
+        if (prevValueRef.current !== value) {
+          prevValueRef.current = value;
+          if (options?.readOnly) {
+            onChange?.(value);
+          }
+        }
+      }, [value, options?.readOnly, onChange]);
+
       return React.createElement(
         'div',
         { 'data-testid': 'monaco-editor-mock' },
@@ -46,6 +64,7 @@ vi.mock('@monaco-editor/react', () => {
           'data-testid': 'monaco-editor-textarea',
           value: value ?? '',
           readOnly: options?.readOnly,
+          onFocus: () => focusCbRef.current?.(),
           onChange: (e: any) => onChange?.(e.target.value),
         })
       );

@@ -209,4 +209,43 @@ describe('SourceCodePanel', () => {
     fireEvent.click(getByTestId('exit-view-source-btn'));
     expect(onExitView).toHaveBeenCalled();
   });
+
+  it('does not call onCodeChange or onSwitchToCodeMode when transitioning into a read-only view after mount', () => {
+    const onCodeChange = vi.fn();
+    const onSwitchToCodeMode = vi.fn();
+
+    const { getByTestId, rerender } = render(
+      <SourceCodePanel
+        code={sampleCode}
+        isVisualEditMode={true}
+        theme="default"
+        onCodeChange={onCodeChange}
+        onSwitchToCodeMode={onSwitchToCodeMode}
+        onSwitchToVisualMode={vi.fn()}
+        viewName={null}
+      />
+    );
+
+    // Rerender with viewCode and viewName="CurrentState" (simulates selecting a Saved View
+    // while SourceCodePanel is already mounted). Real @monaco-editor/react fires onChange
+    // on setValue when readOnly is true — SourceCodePanel must suppress it.
+    rerender(
+      <SourceCodePanel
+        code="sequenceDiagram\n    participant MergedKey_core as Merged core"
+        isVisualEditMode={true}
+        theme="default"
+        onCodeChange={onCodeChange}
+        onSwitchToCodeMode={onSwitchToCodeMode}
+        onSwitchToVisualMode={vi.fn()}
+        viewName="CurrentState"
+      />
+    );
+
+    expect(onCodeChange).not.toHaveBeenCalled();
+
+    // Focusing the editor after viewName became non-null must not call onSwitchToCodeMode
+    // (regression for stale closure in handleEditorDidMount).
+    fireEvent.focus(getByTestId('monaco-editor-textarea'));
+    expect(onSwitchToCodeMode).not.toHaveBeenCalled();
+  });
 });
