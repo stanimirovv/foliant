@@ -4,6 +4,7 @@ import {
   BLOCK_OPEN_RE,
   parseModel,
   parseParticipantLine,
+  parseFlowchartLine,
   ParsedParticipantLine,
 } from './model';
 import { buildSubgraphTagIndex, SubgraphTag } from './subgraphTags';
@@ -181,7 +182,8 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   // Subgraph tags are structural: they apply even with no %% CONFIG at all.
   if ((!config || (!config.actors && !hasArrowTags && !hasNoteTags)) && !hasSubgraphTags) return code;
 
-  const { hide, clean, groups } = buildActorRewriteMap(config, options, code);
+  const { rename, hide, clean, groups } = buildActorRewriteMap(config, options, code);
+  const groupMap = new Map(groups.map(g => [g.name, g]));
   const actorsToHide = Array.from(hide);
 
   // Message/edge lines whose effective tags include a hidden key are dropped
@@ -190,9 +192,10 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   // keys and its structural subgraph keys act as two independent groups: the line
   // is dropped when either group is fully Off.
   const hideKeys = options.hideKeys ?? [];
-  const hiddenElementLines = new Set<number>();
+  const hiddenLines = new Set<number>();
+  const model = parseModel(code);
+
   if (hideKeys.length > 0 && (hasArrowTags || hasNoteTags || hasSubgraphTags)) {
-    const model = parseModel(code);
     const arrowOccurrences = new Map<string, number>();
     const noteOccurrences = new Map<string, number>();
     const allOff = (ks: string[]) => ks.length > 0 && ks.every(k => hideKeys.includes(k));
@@ -222,13 +225,44 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
         ownKeys = Array.from(new Set([...own, ...inherited]));
       }
       if (allOff(ownKeys) || allOff(subgraphKeys)) {
-        for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenElementLines.add(i);
+        for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenLines.add(i);
+      }
+    }
+  }
+
+  const lines = code.split('\n');
+
+  if (actorsToHide.length > 0) {
+    const hiddenActorSet = new Set(actorsToHide);
+    for (const el of model.elements) {
+      if (el.kind === 'participant' || el.kind === 'node') {
+        if (hiddenActorSet.has(el.id)) {
+          for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenLines.add(i);
+        }
+      } else if (el.kind === 'message' || el.kind === 'edge') {
+        if (hiddenActorSet.has(el.from) || hiddenActorSet.has(el.to)) {
+          for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenLines.add(i);
+        }
+      } else if (el.kind === 'note') {
+        if (el.over.some(a => hiddenActorSet.has(a))) {
+          for (let i = el.lineStart; i <= el.lineEnd; i++) hiddenLines.add(i);
+        }
+      }
+    }
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      const actMatch = trimmed.match(/^(?:activate|deactivate)\s+([A-Za-z0-9_-]+)$/);
+      if (actMatch && hiddenActorSet.has(actMatch[1])) {
+        hiddenLines.add(i);
+      }
+      const styleMatch = trimmed.match(/^(?:style|class|click)\s+([A-Za-z0-9_-]+)\b/);
+      if (styleMatch && hiddenActorSet.has(styleMatch[1])) {
+        hiddenLines.add(i);
       }
     }
   }
 
   const isSequenceDiagram = /^\s*sequenceDiagram/m.test(code);
-  const lines = code.split('\n');
   const result: string[] = [];
   // Participant restructuring (below) runs only for sequence diagrams with an
   // active merge. It needs each output line's block depth and its participant
@@ -241,19 +275,8 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
-    let skipLine = false;
 
-    // Check if line mentions a hidden actor
-    for (const actor of actorsToHide) {
-      const regex = new RegExp(`\\b${actor}\\b`);
-      if (regex.test(line)) {
-        skipLine = true;
-        break;
-      }
-    }
-
-    if (skipLine) continue;
-    if (hiddenElementLines.has(i)) continue;
+    if (hiddenLines.has(i)) continue;
 
     if (line.trim().startsWith('%% CONFIG:')) {
       result.push(line);
@@ -266,45 +289,77 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
 
     const participant = restructure ? parseParticipantLine(line) : null;
 
-    // Apply merging
-    for (const group of groups) {
-      for (const actor of group.actors) {
-        if (isSequenceDiagram) {
-          const regex = new RegExp(`\\b${actor}\\b`, 'g');
-          line = line.replace(regex, group.name);
-        } else {
-          const shapeRegex = new RegExp(`\\b${actor}\\b(?:\\s*(?:\\[[^\\]]*\\]|\\(\\([^)]*\\)\\)|\\([^)]*\\)|\\{[^}]*\\}|>[^\\]]*\\]))?`, 'g');
-          line = line.replace(shapeRegex, `${group.name}[${group.alias}]`);
+    if (groups.length > 0) {
+      if (isSequenceDiagram) {
+        if (participant && rename.has(participant.id)) {
+          const g = groupMap.get(rename.get(participant.id)!)!;
+          line = formatParticipantLine(participant, g.name, g.alias);
+        }
+
+        const SEQ_MSG_RE = /^(\s*)([A-Za-z0-9_-]+?)\s*(-->>|->>|--x|-x|-->o|->o|-->\*|->\*|--\)|-\)|-->|->|--|-)([+-]?)\s*([A-Za-z0-9_-]+?)(?:\s*(:\s*.*))?$/;
+        const msgMatch = line.match(SEQ_MSG_RE);
+        if (msgMatch) {
+          const [, indent, from, op, act, to, labelPart] = msgMatch;
+          const newFrom = rename.get(from) ?? from;
+          const newTo = rename.get(to) ?? to;
+          if (newFrom === newTo && clean.has(newFrom)) {
+            continue;
+          }
+          if (newFrom !== from || newTo !== to) {
+            line = `${indent}${newFrom}${op}${act}${newTo}${labelPart ?? ''}`;
+          }
+        }
+
+        const SEQ_NOTE_RE = /^(\s*Note\s+(?:over|left of|right of)\s+)([^:]+)(:.*)$/;
+        const noteMatch = line.match(SEQ_NOTE_RE);
+        if (noteMatch) {
+          const [, prefix, rawActors, text] = noteMatch;
+          const actors = rawActors.split(',').map(s => s.trim());
+          const newActors: string[] = [];
+          for (const a of actors) {
+            const renamed = rename.get(a) ?? a;
+            if (!newActors.includes(renamed)) {
+              newActors.push(renamed);
+            }
+          }
+          line = `${prefix}${newActors.join(', ')}${text}`;
+        }
+
+        const SEQ_ACT_RE = /^(\s*(?:activate|deactivate)\s+)([A-Za-z0-9_-]+)\s*$/;
+        const actMatch = line.match(SEQ_ACT_RE);
+        if (actMatch && rename.has(actMatch[2])) {
+          line = `${actMatch[1]}${rename.get(actMatch[2])!}`;
+        }
+      } else {
+        const isBlockOrDirective = BLOCK_OPEN_RE.test(line) || BLOCK_END_RE.test(line) || line.trim().startsWith('%%') || /^\s*(direction|click|style|classDef|class|linkStyle|accTitle|accDescr)\b/.test(line);
+        if (!isBlockOrDirective) {
+          const fcLine = parseFlowchartLine(line);
+          if (fcLine) {
+            if (fcLine.segments.length === 1 && fcLine.endpoints.length === 2) {
+              const firstMerged = rename.get(fcLine.endpoints[0].id) ?? fcLine.endpoints[0].id;
+              const secondMerged = rename.get(fcLine.endpoints[1].id) ?? fcLine.endpoints[1].id;
+              if (firstMerged === secondMerged && clean.has(firstMerged)) {
+                continue;
+              }
+            }
+
+            const sortedEndpoints = [...fcLine.endpoints].sort((a, b) => b.start - a.start);
+            for (const ep of sortedEndpoints) {
+              const mergedName = rename.get(ep.id);
+              if (mergedName) {
+                const g = groupMap.get(mergedName)!;
+                const rep = `${g.name}[${g.alias}]`;
+                line = line.slice(0, ep.start) + rep + line.slice(ep.end);
+              }
+            }
+          } else {
+            const styleMatch = line.match(/^(\s*(?:style|class|click)\s+)([A-Za-z0-9_-]+)(\b.*)$/);
+            if (styleMatch && rename.has(styleMatch[2])) {
+              line = `${styleMatch[1]}${rename.get(styleMatch[2])!}${styleMatch[3]}`;
+            }
+          }
         }
       }
-    }
-
-    // Matches A->B:, A-->>B:, etc. (Sequence diagrams)
-    const arrowMatch = line.match(/^\s*([A-Za-z0-9_-]+?)\s*(-->>|->>|--x|-x|--\)|-\)|-->|->|--|-)\s*([A-Za-z0-9_-]+)(?:\s*:|\s*$)/);
-    if (arrowMatch && arrowMatch[1] === arrowMatch[3]) {
-      if (clean.has(arrowMatch[1])) {
-        continue;
-      }
-    }
-
-    // Matches flowchart self-calls
-    let isFlowchartSelfCall = false;
-    for (const mergedName of Array.from(clean)) {
-      const nodePattern = `${mergedName}(?:\\s*\\[[^\\]]*\\]|\\s*\\([^)]*\\)|\\s*\\{[^}]*\\}|\\s*>[^\\]]*\\])?`;
-      const edgePattern = `(?:---|-->|==>|==|-.->|-.-|<-->|<==>|x--x|o--o)(?:\\s*\\|.*?\\|)?`;
-      const selfCallRegex = new RegExp(`^\\s*${nodePattern}\\s*${edgePattern}\\s*${nodePattern}\\s*$`);
-      if (selfCallRegex.test(line)) {
-        isFlowchartSelfCall = true;
-        break;
-      }
-    }
-    if (isFlowchartSelfCall) continue;
-
-    // Fix Notes over the same actor
-    const noteMatch = line.match(/^(\s*Note\s+(?:over|left of|right of)\s+)([A-Za-z0-9_-]+),([A-Za-z0-9_-]+)(\s*:.*)$/);
-    if (noteMatch && noteMatch[2] === noteMatch[3]) {
-      // Rewrite "Note over A,A:" to "Note over A:"
-      line = `${noteMatch[1]}${noteMatch[2]}${noteMatch[4]}`;
     }
 
     result.push(line);
@@ -333,7 +388,6 @@ export function transformActors(code: string, config: DiagramConfig | null, opti
   for (const g of groups) {
     for (const actor of g.actors) groupByActor.set(actor, g);
   }
-  const groupMap = new Map(groups.map(g => [g.name, g]));
   const findGroup = (id: string) => groupByActor.get(id) ?? groupMap.get(id);
 
   // A merge group with at least one top-level declaration keeps the generated
@@ -521,12 +575,31 @@ function cleanupDanglingSyntax(code: string): string {
   while (code !== previous) {
     previous = code;
     
-    const emptyElseEnd = /^[ \t]*(else|and)\b[^\n]*\n(?:[ \t]*(?:%%.*)?\n)*[ \t]*end[ \t]*(?=\n|$)/gm;
+    const emptyElseEnd = /^[ \t]*(else|and)\b[^\n]*\n(?:[ \t]*(?:%%.*|direction\s+[A-Za-z]+)?\n)*[ \t]*end[ \t]*(?=\n|$)/gm;
     code = code.replace(emptyElseEnd, 'end');
 
-    const emptyBlock = /^[ \t]*(alt|opt|loop|par|rect|box|subgraph)\b[^\n]*\n(?:[ \t]*(?:%%.*)?\n)*[ \t]*end[ \t]*(?=\n|$)/gm;
+    const emptyBlock = /^[ \t]*(alt|opt|loop|par|rect|box|subgraph)\b[^\n]*\n(?:[ \t]*(?:%%.*|direction\s+[A-Za-z]+)?\n)*[ \t]*end[ \t]*(?=\n|$)/gm;
     code = code.replace(emptyBlock, '');
   }
+
+  // Remove unmatched dangling `end` lines where block depth is 0
+  const lines = code.split('\n');
+  const cleaned: string[] = [];
+  let depth = 0;
+  for (const line of lines) {
+    if (BLOCK_OPEN_RE.test(line)) {
+      depth++;
+      cleaned.push(line);
+    } else if (BLOCK_END_RE.test(line)) {
+      if (depth > 0) {
+        depth--;
+        cleaned.push(line);
+      }
+    } else {
+      cleaned.push(line);
+    }
+  }
+  code = cleaned.join('\n');
 
   code = code.replace(/\n{3,}/g, '\n\n');
   return code.trim();

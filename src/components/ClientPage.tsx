@@ -389,51 +389,6 @@ export default function ClientPage() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
-  const setActorState = (id: string, state: 'on' | 'off' | 'merged' | 'merged_clean') => {
-    setSelectedViewName(null);
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete('view');
-    params.delete('merge_color');
-    params.delete('merge_clean_color');
-
-    const mergeParamName = 'merge_key';
-    const mergeCleanParamName = 'merge_clean_key';
-    const hideParamName = 'hide_key';
-    
-    const currentMerge = new Set(mergeKeys);
-    const currentMergeClean = new Set(mergeCleanKeys);
-    const currentHide = new Set(hideKeys);
-
-    if (state === 'on') {
-      currentMerge.delete(id);
-      currentMergeClean.delete(id);
-      currentHide.delete(id);
-    } else if (state === 'off') {
-      currentMerge.delete(id);
-      currentMergeClean.delete(id);
-      currentHide.add(id);
-    } else if (state === 'merged') {
-      currentHide.delete(id);
-      currentMergeClean.delete(id);
-      currentMerge.add(id);
-    } else if (state === 'merged_clean') {
-      currentHide.delete(id);
-      currentMerge.delete(id);
-      currentMergeClean.add(id);
-    }
-
-    if (currentMerge.size > 0) params.set(mergeParamName, Array.from(currentMerge).join(','));
-    else params.delete(mergeParamName);
-
-    if (currentMergeClean.size > 0) params.set(mergeCleanParamName, Array.from(currentMergeClean).join(','));
-    else params.delete(mergeCleanParamName);
-
-    if (currentHide.size > 0) params.set(hideParamName, Array.from(currentHide).join(','));
-    else params.delete(hideParamName);
-
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  };
-
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -924,6 +879,51 @@ export default function ClientPage() {
     () => buildActorRewriteMap(viewsData, effectiveActorOptions, rawCode),
     [viewsData, effectiveActorOptions, rawCode]
   );
+
+  const setActorState = (id: string, state: 'on' | 'off' | 'merged' | 'merged_clean') => {
+    setSelectedViewName(null);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('view');
+    params.delete('merge_color');
+    params.delete('merge_clean_color');
+
+    const mergeParamName = 'merge_key';
+    const mergeCleanParamName = 'merge_clean_key';
+    const hideParamName = 'hide_key';
+    
+    const currentMerge = new Set(mergeKeys);
+    const currentMergeClean = new Set(mergeCleanKeys);
+    const currentHide = new Set(hideKeys);
+
+    if (state === 'on') {
+      currentMerge.delete(id);
+      currentMergeClean.delete(id);
+      currentHide.delete(id);
+    } else if (state === 'off') {
+      currentMerge.delete(id);
+      currentMergeClean.delete(id);
+      currentHide.add(id);
+    } else if (state === 'merged') {
+      currentHide.delete(id);
+      currentMergeClean.delete(id);
+      currentMerge.add(id);
+    } else if (state === 'merged_clean') {
+      currentHide.delete(id);
+      currentMerge.delete(id);
+      currentMergeClean.add(id);
+    }
+
+    if (currentMerge.size > 0) params.set(mergeParamName, Array.from(currentMerge).join(','));
+    else params.delete(mergeParamName);
+
+    if (currentMergeClean.size > 0) params.set(mergeCleanParamName, Array.from(currentMergeClean).join(','));
+    else params.delete(mergeCleanParamName);
+
+    if (currentHide.size > 0) params.set(hideParamName, Array.from(currentHide).join(','));
+    else params.delete(hideParamName);
+
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
 
   useEffect(() => {
     setWarnings(procWarnings);
