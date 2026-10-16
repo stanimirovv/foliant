@@ -52,8 +52,9 @@ export default function BottomAnimatedArrowBar({
             <button
               type="button"
               data-testid="convert-diagram-bar-btn"
+              disabled
               onClick={onConvertDiagram}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors border border-indigo-200/50 dark:border-indigo-800/50"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 transition-colors border border-indigo-200/50 dark:border-indigo-800/50 opacity-50 cursor-not-allowed"
               title="Deterministically convert all diagram arrows to animated arrows"
             >
               <Sparkles size={12} className="text-indigo-500 dark:text-indigo-400" />

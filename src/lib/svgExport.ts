@@ -341,8 +341,8 @@ text.actor:not([data-colored="true"]) {
       g.setAttribute('data-note-id', note.id);
       g.setAttribute('transform', `translate(${note.x}, ${note.y})`);
 
-      const w = note.width || 160;
-      const h = note.height || 100;
+      const w = note.width || 65;
+      const h = note.height || 55;
       const colors = STICKY_NOTE_HEX[note.color || 'yellow'] || STICKY_NOTE_HEX.yellow;
 
       // Track bounding box expansion

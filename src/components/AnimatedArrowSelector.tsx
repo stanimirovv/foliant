@@ -339,8 +339,9 @@ export default function AnimatedArrowSelector({
           <button
             type="button"
             data-testid="convert-animated-arrows-btn"
+            disabled
             onClick={onConvertDiagram}
-            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-md text-xs font-medium shadow-xs transition-all"
+            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-linear-to-r from-blue-600 to-indigo-600 text-white rounded-md text-xs font-medium shadow-xs transition-all opacity-50 cursor-not-allowed"
             title="Deterministically convert all diagram arrows to animated happy paths and failure flows"
           >
             <Sparkles size={13} className="text-amber-300" />

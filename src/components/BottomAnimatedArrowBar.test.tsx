@@ -39,7 +39,7 @@ describe('BottomAnimatedArrowBar', () => {
     expect(onSelectColor).toHaveBeenCalledWith('#00ff9d');
   });
 
-  it('dispatches onConvertDiagram from the header button', () => {
+  it('renders the Convert Diagram header button as disabled', () => {
     const onConvertDiagram = vi.fn();
     render(
       <BottomAnimatedArrowBar
@@ -50,7 +50,9 @@ describe('BottomAnimatedArrowBar', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('convert-diagram-bar-btn'));
-    expect(onConvertDiagram).toHaveBeenCalledTimes(1);
+    const btn = screen.getByTestId('convert-diagram-bar-btn') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    fireEvent.click(btn);
+    expect(onConvertDiagram).not.toHaveBeenCalled();
   });
 });

@@ -2147,37 +2147,16 @@ sequenceDiagram
     }, { timeout: 3000 });
   }, 25000);
 
-  it('converts entire diagram to animated arrows via bottom bar Convert button', async () => {
+  it('renders the bottom bar Convert Diagram button as disabled', async () => {
     const DEMO_ERR = `sequenceDiagram
     participant A
     participant B
     A->>B: Request
     B-x A: Error occurred`;
-    const viewer = await renderInEditMode(DEMO_ERR, 'A->>B: Request');
+    await renderInEditMode(DEMO_ERR, 'A->>B: Request');
 
-    fireEvent.click(screen.getByTestId('convert-diagram-bar-btn'));
-
-    await waitFor(() => {
-      const code = viewer.getAttribute('data-code') ?? '';
-      const parsed = parseViewsData(code);
-      expect(parsed?.arrows).toHaveLength(2);
-      // Happy path request has positive animation/color
-      expect(parsed?.arrows?.[0]).toMatchObject({
-        from: 'A',
-        to: 'B',
-        label: 'Request',
-        animation: 'flow',
-        color: '#00ff9d',
-      });
-      // Error arrow has broken-receiver animation and error color
-      expect(parsed?.arrows?.[1]).toMatchObject({
-        from: 'B',
-        to: 'A',
-        label: 'Error occurred',
-        animation: 'broken-receiver',
-        color: '#ff2a85',
-      });
-    }, { timeout: 3000 });
+    const btn = screen.getByTestId('convert-diagram-bar-btn') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
   });
 
   it('toggles between Properties tab and Mermaid Source tab', async () => {

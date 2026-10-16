@@ -79,7 +79,7 @@ describe('AnimatedArrowSelector', () => {
     expect(onSelectAnimation).toHaveBeenCalledWith('none');
   });
 
-  it('calls onConvertDiagram when convert diagram button is clicked', () => {
+  it('renders convert diagram button as disabled', () => {
     const onConvertDiagram = vi.fn();
     render(
       <AnimatedArrowSelector
@@ -90,8 +90,10 @@ describe('AnimatedArrowSelector', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('convert-animated-arrows-btn'));
-    expect(onConvertDiagram).toHaveBeenCalledTimes(1);
+    const btn = screen.getByTestId('convert-animated-arrows-btn') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    fireEvent.click(btn);
+    expect(onConvertDiagram).not.toHaveBeenCalled();
   });
 
   it('strictly renders happy path animated arrows in green and negative path animated arrows in red in the preview', () => {

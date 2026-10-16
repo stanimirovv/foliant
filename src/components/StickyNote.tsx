@@ -17,16 +17,16 @@ export interface StickyNoteProps {
   onDelete: (id: string) => void;
 }
 
-export const DEFAULT_NOTE_WIDTH = 130;
-export const DEFAULT_NOTE_HEIGHT = 110;
-const MIN_NOTE_WIDTH = 80;
-const MIN_NOTE_HEIGHT = 70;
-const MAX_NOTE_WIDTH = 600;
-const MAX_NOTE_HEIGHT = 520;
-// Text scales with the smaller relative dimension of the card, clamped so it
-// stays legible at the minimum size and doesn't explode on huge cards.
-const MIN_TEXT_SCALE = 0.6;
-const MAX_TEXT_SCALE = 2.5;
+export const DEFAULT_NOTE_WIDTH = 65;
+export const DEFAULT_NOTE_HEIGHT = 55;
+export const MIN_NOTE_WIDTH = 16;
+export const MIN_NOTE_HEIGHT = 14;
+export const MAX_NOTE_WIDTH = 1200;
+export const MAX_NOTE_HEIGHT = 1000;
+// Card UI and text scale with the smaller relative dimension of the card across
+// the full resize range so tiny notes and huge notes stay proportional.
+const MIN_TEXT_SCALE = 0.1;
+const MAX_TEXT_SCALE = 8;
 
 export const NOTE_COLORS: Record<StickyNoteColor, {
   bg: string;
@@ -81,10 +81,14 @@ export const NOTE_COLORS: Record<StickyNoteColor, {
 
 export const STICKY_NOTE_COLOR_KEYS: StickyNoteColor[] = ['yellow', 'green', 'blue', 'pink', 'orange', 'purple'];
 
-// Font size for note text at a given card scale: the note's fixed px sizes
+function scaledPx(basePx: number, scale: number): string {
+  return `${Math.round(basePx * scale * 10) / 10}px`;
+}
+
+// Font size for note text at a given card scale: the note's base px sizes
 // multiplied by the scale so the text shrinks/grows with the card.
 function scaledFont(basePx: number, scale: number): React.CSSProperties {
-  return { fontSize: `${Math.round(basePx * scale * 10) / 10}px` };
+  return { fontSize: scaledPx(basePx, scale) };
 }
 
 function formatInline(str: string, scale: number): React.ReactNode {
@@ -105,7 +109,11 @@ function formatInline(str: string, scale: number): React.ReactNode {
       parts.push(<em key={match.index}>{token.slice(1, -1)}</em>);
     } else if (token.startsWith('`') && token.endsWith('`')) {
       parts.push(
-        <code key={match.index} className="bg-black/10 px-1 py-0.5 rounded font-mono" style={scaledFont(11, scale)}>
+        <code
+          key={match.index}
+          className="bg-black/10 rounded font-mono"
+          style={{ ...scaledFont(5.5, scale), padding: '0.05em 0.25em' }}
+        >
           {token.slice(1, -1)}
         </code>
       );
@@ -120,7 +128,7 @@ function formatInline(str: string, scale: number): React.ReactNode {
 
 function renderSimpleMarkdown(text: string, scale: number) {
   if (!text || !text.trim()) {
-    return <span className="text-gray-400 italic" style={scaledFont(12, scale)}>Double-click to type thoughts...</span>;
+    return <span className="text-gray-400 italic" style={scaledFont(6, scale)}>Double-click to type thoughts...</span>;
   }
   const lines = text.split('\n');
   return lines.map((line, idx) => {
@@ -129,12 +137,17 @@ function renderSimpleMarkdown(text: string, scale: number) {
     if (checkMatch) {
       const checked = checkMatch[1].toLowerCase() === 'x';
       return (
-        <div key={idx} className="flex items-center gap-1.5 my-0.5" style={scaledFont(12, scale)}>
+        <div
+          key={idx}
+          className="flex items-center"
+          style={{ ...scaledFont(6, scale), gap: '0.5em', margin: '0.15em 0' }}
+        >
           <input
             type="checkbox"
             readOnly
             checked={checked}
-            className="rounded text-amber-600 pointer-events-none w-3 h-3"
+            className="rounded text-amber-600 pointer-events-none shrink-0"
+            style={{ width: '1em', height: '1em' }}
           />
           <span className={checked ? 'line-through opacity-70' : ''}>
             {formatInline(checkMatch[2], scale)}
@@ -146,8 +159,12 @@ function renderSimpleMarkdown(text: string, scale: number) {
     const bulletMatch = line.match(/^[-*]\s+(.*)/);
     if (bulletMatch) {
       return (
-        <div key={idx} className="flex items-start gap-1.5 my-0.5 ml-1" style={scaledFont(12, scale)}>
-          <span className="select-none leading-none mt-1" style={scaledFont(10, scale)}>•</span>
+        <div
+          key={idx}
+          className="flex items-start"
+          style={{ ...scaledFont(6, scale), gap: '0.5em', margin: '0.15em 0', marginLeft: '0.3em' }}
+        >
+          <span className="select-none leading-none" style={{ ...scaledFont(5, scale), marginTop: '0.2em' }}>•</span>
           <span>{formatInline(bulletMatch[1], scale)}</span>
         </div>
       );
@@ -156,14 +173,14 @@ function renderSimpleMarkdown(text: string, scale: number) {
     const headerMatch = line.match(/^#{1,3}\s+(.*)/);
     if (headerMatch) {
       return (
-        <div key={idx} className="font-bold my-0.5" style={scaledFont(12, scale)}>
+        <div key={idx} className="font-bold" style={{ ...scaledFont(6, scale), margin: '0.15em 0' }}>
           {formatInline(headerMatch[1], scale)}
         </div>
       );
     }
     // Regular line
     return (
-      <div key={idx} className="min-h-[1.1rem] leading-relaxed" style={scaledFont(12, scale)}>
+      <div key={idx} className="leading-relaxed" style={{ ...scaledFont(6, scale), minHeight: '1.35em' }}>
         {formatInline(line, scale)}
       </div>
     );
@@ -327,8 +344,8 @@ export default function StickyNote({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Text follows the card's smaller relative dimension, clamped to a legible
-  // range.
+  // Card UI and text follow the card's smaller relative dimension, clamped to a
+  // wide range so tiny and huge notes keep proportional chrome and typography.
   const textScale = Math.min(
     MAX_TEXT_SCALE,
     Math.max(MIN_TEXT_SCALE, Math.min(size.width / DEFAULT_NOTE_WIDTH, size.height / DEFAULT_NOTE_HEIGHT))
@@ -338,12 +355,13 @@ export default function StickyNote({
     <div
       data-testid={`sticky-note-${note.id}`}
       data-selected={selected ? 'true' : undefined}
-      className={`sticky-note-card absolute select-none rounded border shadow-md transition-shadow hover:shadow-lg ${colorConfig.bg} ${colorConfig.border} ${colorConfig.text} flex flex-col ${selected ? 'ring-2 ring-blue-500' : ''}`}
+      className={`sticky-note-card absolute select-none rounded border shadow-md transition-shadow hover:shadow-lg overflow-hidden ${colorConfig.bg} ${colorConfig.border} ${colorConfig.text} flex flex-col ${selected ? 'ring-2 ring-blue-500' : ''}`}
       style={{
         left: `${pos.x}px`,
         top: `${pos.y}px`,
         width: `${size.width}px`,
         height: `${size.height}px`,
+        borderRadius: scaledPx(2, textScale),
         zIndex: isDragging || isResizing ? 50 : 20,
         pointerEvents: 'auto',
       }}
@@ -363,34 +381,47 @@ export default function StickyNote({
       {/* Top Header / Drag Handle */}
       <div
         data-testid={`sticky-note-handle-${note.id}`}
-        className={`sticky-note-handle flex items-center justify-between px-1.5 py-0.5 cursor-grab active:cursor-grabbing border-b border-black/5 ${colorConfig.headerBg}`}
+        className={`sticky-note-handle flex items-center justify-between cursor-grab active:cursor-grabbing border-b border-black/5 shrink-0 overflow-hidden ${colorConfig.headerBg}`}
+        style={{
+          padding: `${scaledPx(1.5, textScale)} ${scaledPx(3, textScale)}`,
+        }}
         onMouseDown={handleDragMouseDown}
       >
-        <div className="flex items-center gap-0.5 opacity-60">
-          <GripHorizontal className="w-3 h-3" />
+        <div className="flex items-center opacity-60 shrink-0">
+          <GripHorizontal style={{ width: scaledPx(6, textScale), height: scaledPx(6, textScale) }} />
         </div>
 
         {/* Inline Mini-Toolbar (Color dots + Delete) */}
         <div
-          className={`flex items-center gap-1 transition-opacity ${
+          className={`flex items-center shrink-0 transition-opacity ${
             showToolbar || isEditing ? 'opacity-100' : 'opacity-0'
           }`}
+          style={{ gap: scaledPx(2, textScale) }}
         >
-          {STICKY_NOTE_COLOR_KEYS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              data-testid={`color-${c}-${note.id}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onUpdateColor(note.id, c);
-              }}
-              className={`w-2 h-2 rounded-full ${NOTE_COLORS[c].dot} border border-black/20 hover:scale-125 transition-transform ${
-                (note.color || 'yellow') === c ? 'ring-1 ring-black/40 ring-offset-0.5' : ''
-              }`}
-              title={c}
-            />
-          ))}
+          {STICKY_NOTE_COLOR_KEYS.map((c) => {
+            const isActiveColor = (note.color || 'yellow') === c;
+            return (
+              <button
+                key={c}
+                type="button"
+                data-testid={`color-${c}-${note.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUpdateColor(note.id, c);
+                }}
+                className={`rounded-full ${NOTE_COLORS[c].dot} border border-black/20 hover:scale-125 transition-transform shrink-0`}
+                style={{
+                  width: scaledPx(4, textScale),
+                  height: scaledPx(4, textScale),
+                  borderWidth: `${Math.max(0.5, Math.round(0.5 * textScale * 10) / 10)}px`,
+                  boxShadow: isActiveColor
+                    ? `0 0 0 ${Math.max(0.5, Math.round(0.75 * textScale * 10) / 10)}px rgba(0,0,0,0.45)`
+                    : undefined,
+                }}
+                title={c}
+              />
+            );
+          })}
           <button
             type="button"
             data-testid={`delete-note-${note.id}`}
@@ -398,18 +429,25 @@ export default function StickyNote({
               e.stopPropagation();
               onDelete(note.id);
             }}
-            className="p-0.5 text-gray-500 hover:text-red-600 rounded transition-colors ml-0.5"
+            className="text-gray-500 hover:text-red-600 rounded transition-colors shrink-0 flex items-center justify-center"
+            style={{
+              padding: scaledPx(1, textScale),
+              marginLeft: scaledPx(1, textScale),
+            }}
             title="Delete note"
           >
-            <Trash2 className="w-2.5 h-2.5" />
+            <Trash2 style={{ width: scaledPx(5, textScale), height: scaledPx(5, textScale) }} />
           </button>
         </div>
       </div>
 
       {/* Note Body: click selects the note (via the card root), double-click edits */}
       <div
-        className="flex-1 p-1.5 overflow-y-auto cursor-text"
-        style={scaledFont(11, textScale)}
+        className="flex-1 overflow-y-auto cursor-text min-h-0"
+        style={{
+          ...scaledFont(5.5, textScale),
+          padding: scaledPx(3, textScale),
+        }}
         onDoubleClick={() => setIsEditing(true)}
       >
         {isEditing ? (
@@ -427,7 +465,7 @@ export default function StickyNote({
             }}
             placeholder="Type your thought..."
             className="w-full h-full bg-transparent resize-none outline-none leading-relaxed font-sans placeholder:text-black/30"
-            style={scaledFont(11, textScale)}
+            style={scaledFont(5.5, textScale)}
           />
         ) : (
           <div className="w-full h-full overflow-y-auto font-sans break-words select-text">
@@ -439,12 +477,25 @@ export default function StickyNote({
       {/* Bottom-right corner resize handle */}
       <div
         data-testid={`sticky-note-resize-${note.id}`}
-        className={`absolute bottom-0 right-0 w-3.5 h-3.5 cursor-nwse-resize flex items-end justify-end pr-0.5 pb-0.5 transition-opacity ${
+        className={`absolute bottom-0 right-0 cursor-nwse-resize flex items-end justify-end transition-opacity ${
           showToolbar || selected ? 'opacity-100' : 'opacity-0'
         }`}
+        style={{
+          width: scaledPx(7, textScale),
+          height: scaledPx(7, textScale),
+          paddingRight: scaledPx(1, textScale),
+          paddingBottom: scaledPx(1, textScale),
+        }}
         onMouseDown={handleResizeMouseDown}
       >
-        <svg width="9" height="9" viewBox="0 0 9 9" className="text-black/30" aria-hidden="true">
+        <svg
+          width="9"
+          height="9"
+          viewBox="0 0 9 9"
+          className="text-black/30"
+          style={{ width: scaledPx(4.5, textScale), height: scaledPx(4.5, textScale) }}
+          aria-hidden="true"
+        >
           <path d="M8 1 L1 8 M8 4.5 L4.5 8 M8 7 L7 8" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round" />
         </svg>
       </div>

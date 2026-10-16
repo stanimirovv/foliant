@@ -1226,8 +1226,8 @@ export default function ClientPage() {
       if (svg) {
         const rect = svg.getBoundingClientRect();
         const offset = (stickyNotes.length % 6) * 20;
-        x = Math.max(20, Math.round(rect.width / 2 - 65 + offset));
-        y = Math.max(20, Math.round(rect.height / 2 - 55 + offset));
+        x = Math.max(20, Math.round(rect.width / 2 - 32 + offset));
+        y = Math.max(20, Math.round(rect.height / 2 - 27 + offset));
       }
     }
     const newNote: StickyNote = {
