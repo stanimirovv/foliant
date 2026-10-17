@@ -27,6 +27,12 @@ export interface MermaidBlockPreviewProps {
   // (the same pipeline the diagram editor uses). Never writes to the file.
   viewState?: DiagramViewSelection;
   onViewStateChange?: (selection: DiagramViewSelection) => void;
+  // One-shot scroll request (the diagram editor's "Back to markdown"
+  // button): when true, scroll this block into view once it has settled
+  // (rendered, or in an error/empty state — those have no async height),
+  // then report back through onScrolled.
+  scrollToMe?: boolean;
+  onScrolled?: () => void;
 }
 
 export { looksLikeMermaidDiagram, MERMAID_DIAGRAM_KEYWORDS } from '@/lib/model';
@@ -54,11 +60,17 @@ export default function MermaidBlockPreview({
   onSelect,
   viewState,
   onViewStateChange,
+  scrollToMe,
+  onScrolled,
 }: MermaidBlockPreviewProps) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Last successful render for the current block, kept across failed renders.
   const lastGoodRef = useRef<string | null>(null);
+  // Scroll request state: the wrapper element and whether the one-shot
+  // scroll has already been handled.
+  const blockRef = useRef<HTMLDivElement>(null);
+  const scrollHandledRef = useRef(false);
 
   const isDark = theme === 'dark';
   const isEmpty = content.trim().length === 0;
@@ -197,6 +209,23 @@ export default function MermaidBlockPreview({
     };
   }, [renderInput.code, index, theme, isEmpty, isNotDiagram]);
 
+  // Scroll-to-diagram request: wait until the block has settled (SVG
+  // rendered, or an error/empty state, which have no async height) so the
+  // scroll lands after the block — and the blocks above it — have their
+  // final heights, then report back so the request is cleared.
+  useEffect(() => {
+    if (!scrollToMe) {
+      scrollHandledRef.current = false;
+      return;
+    }
+    if (scrollHandledRef.current) return;
+    const settled = svg !== null || error !== null || isEmpty || isNotDiagram;
+    if (!settled) return;
+    scrollHandledRef.current = true;
+    blockRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    onScrolled?.();
+  }, [scrollToMe, svg, error, isEmpty, isNotDiagram, onScrolled]);
+
   // A block that has never rendered successfully gets the full error box;
   // a transient failure keeps the last good render with a small chip.
   const showErrorBox = error !== null && lastGoodRef.current === null;
@@ -206,6 +235,7 @@ export default function MermaidBlockPreview({
 
   return (
     <div
+      ref={blockRef}
       data-testid={`md-mermaid-block-${index}`}
       className={`md-mermaid-block group ${
         isDark ? 'border-slate-700 bg-slate-900/60' : 'border-gray-200 bg-gray-50'

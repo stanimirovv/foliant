@@ -140,6 +140,67 @@ describe('Markdown embedded diagrams (e2e)', () => {
       });
   });
 
+  it('returns from an embedded diagram to the markdown document scrolled to that diagram', () => {
+    let dir = '';
+    // Enough prose above the second diagram that the document must scroll
+    // for it to be visible.
+    const padded = [
+      '# Architecture Notes',
+      '',
+      ...Array.from({ length: 40 }, (_, i) => `Filler paragraph ${i + 1} pushing the diagrams below the fold.`),
+      '',
+      '```mermaid',
+      'sequenceDiagram',
+      '    participant A as Alice',
+      '    participant B as Bob',
+      '    A->>B: First diagram',
+      '```',
+      '',
+      '```mermaid',
+      'sequenceDiagram',
+      '    participant A as Alice',
+      '    participant B as Bob',
+      '    A->>B: Second diagram',
+      '```',
+      '',
+    ].join('\n');
+    cy.task<string>('createTempDiagramDir')
+      .then(d => {
+        dir = d;
+        return cy.request('POST', mdFileApi('notes.md', dir), { content: padded });
+      })
+      .then(() => {
+        cy.visit(mdAppUrl(dir, { file: 'notes.md', diagram: '1' }));
+
+        // the diagram editor opens on the embedded diagram
+        cy.get('#diagram-container svg').should('exist');
+        cy.get('#diagram-container').contains('Second diagram').should('exist');
+        cy.get('[data-testid="embedded-diagram-badge"]').should('contain.text', 'Diagram 2');
+
+        // the top bar offers a way back to the markdown document
+        cy.get('[data-testid="back-to-markdown"]').should('be.visible').click();
+
+        // the document view opens without the diagram param
+        cy.url().should('include', 'file=notes.md');
+        cy.url().should('not.include', 'diagram=');
+        cy.get('[data-testid="markdown-editor"]', { timeout: 10000 }).should('be.visible');
+        cy.get('[data-testid="markdown-file-badge"]').should('contain.text', 'notes.md');
+        cy.get('[data-testid="back-to-markdown"]').should('not.exist');
+
+        // the preview is scrolled so the diagram sits inside the pane
+        // (retryable: the scroll runs once the block has rendered)
+        cy.get('[data-testid="md-mermaid-svg-1"] svg', { timeout: 10000 }).should('exist');
+        cy.get('[data-testid="markdown-preview-pane"]').then($pane => {
+          cy.get('[data-testid="md-mermaid-block-1"]').should($block => {
+            const paneRect = ($pane[0] as HTMLElement).getBoundingClientRect();
+            const rect = ($block[0] as HTMLElement).getBoundingClientRect();
+            expect(rect.top).to.be.at.least(paneRect.top - 1);
+            expect(rect.bottom).to.be.at.most(paneRect.bottom + 1);
+          });
+        });
+      });
+  });
+
   it('keeps the last good render when a diagram becomes invalid, and leaks no stray error diagrams', () => {
     let dir = '';
     cy.task<string>('createTempDiagramDir')

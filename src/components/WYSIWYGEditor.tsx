@@ -25,6 +25,11 @@ export interface WYSIWYGEditorProps {
   // the diagram index (the same index onSelectDiagram reports).
   viewStates?: Map<number, DiagramViewSelection>;
   onViewStateChange?: (index: number, selection: DiagramViewSelection) => void;
+  // One-shot "scroll to this diagram" request (the diagram editor's Back to
+  // markdown button): forwarded to the matching MermaidBlockPreview, which
+  // scrolls itself into view once settled and reports back through onScrolled.
+  scrollToIndex?: number | null;
+  onScrolled?: () => void;
 }
 
 // The WYSIWYG document surface: renders the full markdown document as a
@@ -40,6 +45,8 @@ export default function WYSIWYGEditor({
   onSelectDiagram,
   viewStates,
   onViewStateChange,
+  scrollToIndex,
+  onScrolled,
 }: WYSIWYGEditorProps) {
   // Position of a pending (not yet committed) new block, or null.
   const [pendingInsert, setPendingInsert] = useState<number | null>(null);
@@ -169,6 +176,8 @@ export default function WYSIWYGEditor({
               onViewStateChange={onViewStateChange
                 ? (selection) => onViewStateChange(block.index, selection)
                 : undefined}
+              scrollToMe={scrollToIndex != null && block.index === scrollToIndex}
+              onScrolled={onScrolled}
             />
           )}
           {/* Insert button (or pending block) after each block */}

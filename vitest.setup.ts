@@ -25,6 +25,8 @@ vi.mock('@monaco-editor/react', () => {
         if (onMount) {
           const fakeEditor = {
             revealLineInCenter: vi.fn(),
+            setPosition: vi.fn(),
+            focus: vi.fn(),
             deltaDecorations: vi.fn().mockReturnValue([]),
             onDidFocusEditorText: (cb: any) => {
               focusCbRef.current = cb;
@@ -33,6 +35,9 @@ vi.mock('@monaco-editor/react', () => {
             getValue: () => value,
             setValue: vi.fn(),
           };
+          // Expose the instance so tests can assert imperative calls
+          // (revealLineInCenter, setPosition, focus).
+          (window as unknown as { __monacoEditorMock?: unknown }).__monacoEditorMock = fakeEditor;
           const fakeMonaco = {
             Range: class {
               constructor(public startLineNumber: number, public startColumn: number, public endLineNumber: number, public endColumn: number) {}

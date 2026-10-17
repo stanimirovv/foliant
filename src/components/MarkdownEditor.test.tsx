@@ -447,4 +447,74 @@ describe('MarkdownEditor', () => {
       expect(onRedo).toHaveBeenCalledTimes(1);
     });
   });
+
+  // The diagram editor's "Back to markdown" button hands a one-shot
+  // scroll-to-diagram request to the markdown editor (scrollToDiagram) and
+  // expects it reported back (onDiagramScrolled) once handled.
+  describe('scroll-to-diagram (Back to markdown)', () => {
+    type MonacoMock = {
+      revealLineInCenter: ReturnType<typeof vi.fn>;
+      setPosition: ReturnType<typeof vi.fn>;
+      focus: ReturnType<typeof vi.fn>;
+    };
+    const monacoMock = () =>
+      (window as unknown as { __monacoEditorMock: MonacoMock }).__monacoEditorMock;
+
+    let scrollIntoView: ReturnType<typeof vi.fn>;
+    let originalScrollIntoView: typeof Element.prototype.scrollIntoView;
+
+    beforeEach(() => {
+      originalScrollIntoView = Element.prototype.scrollIntoView;
+      scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView =
+        scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
+    });
+    afterEach(() => {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    });
+
+    it('scrolls the preview to the requested diagram once it has rendered, and reports back', async () => {
+      const onDiagramScrolled = vi.fn();
+      renderEditor({ scrollToDiagram: 1, onDiagramScrolled });
+
+      // only the requested block scrolls — into view, centered
+      const block = await screen.findByTestId('md-mermaid-block-1');
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      }, { timeout: 3000 });
+      expect(scrollIntoView.mock.instances[0]).toBe(block);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' });
+      expect(onDiagramScrolled).toHaveBeenCalledTimes(1);
+
+      // the other block never scrolls
+      expect(scrollIntoView.mock.instances).not.toContain(screen.getByTestId('md-mermaid-block-0'));
+    });
+
+    it('reveals the diagram fence line in the source editor (Edit mode) and reports back', async () => {
+      window.localStorage.setItem('mermaid_md_editor_view', 'edit');
+      const onDiagramScrolled = vi.fn();
+      renderEditor({ scrollToDiagram: 1, onDiagramScrolled });
+
+      await screen.findByTestId('markdown-source-pane');
+      // diagram 1's opening fence is line 14 of the fixture document
+      await waitFor(() => {
+        expect(monacoMock().revealLineInCenter).toHaveBeenCalledWith(14);
+      }, { timeout: 3000 });
+      expect(monacoMock().setPosition).toHaveBeenCalledWith({ lineNumber: 14, column: 1 });
+      expect(monacoMock().focus).toHaveBeenCalledTimes(1);
+      expect(onDiagramScrolled).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    });
+
+    it('clears the request without scrolling when the diagram no longer exists', async () => {
+      const onDiagramScrolled = vi.fn();
+      renderEditor({ scrollToDiagram: 7, onDiagramScrolled });
+
+      await screen.findByTestId('md-mermaid-block-0');
+      await waitFor(() => {
+        expect(onDiagramScrolled).toHaveBeenCalledTimes(1);
+      });
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    });
+  });
 });

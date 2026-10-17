@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import Editor from '@monaco-editor/react';
+import { useEffect, useRef, useState } from 'react';
+import Editor, { OnMount } from '@monaco-editor/react';
 import { Code, Eye, FileText, Undo2, Redo2 } from 'lucide-react';
 import WYSIWYGEditor from './WYSIWYGEditor';
 import { DiagramViewSelection } from '@/lib/diagramView';
+import { parseMarkdownBlocks, type MermaidBlockRef } from '@/lib/markdownBlocks';
+
+type MonacoEditorInstance = Parameters<OnMount>[0];
 
 export interface MarkdownEditorProps {
   code: string;
@@ -25,6 +28,11 @@ export interface MarkdownEditorProps {
   // by the mdview/mdhide URL params in ClientPage).
   viewStates?: Map<number, DiagramViewSelection>;
   onViewStateChange?: (index: number, selection: DiagramViewSelection) => void;
+  // One-shot request to scroll the document to the mermaid block at `index`
+  // (the diagram editor's "Back to markdown" button). Reported back through
+  // onDiagramScrolled once handled.
+  scrollToDiagram?: number | null;
+  onDiagramScrolled?: () => void;
 }
 
 type MarkdownViewMode = 'edit' | 'preview';
@@ -62,9 +70,55 @@ export default function MarkdownEditor({
   onSelectDiagram,
   viewStates,
   onViewStateChange,
+  scrollToDiagram,
+  onDiagramScrolled,
 }: MarkdownEditorProps) {
   const [viewMode, setViewMode] = useState<MarkdownViewMode>(loadViewMode);
   const isDark = theme === 'dark';
+
+  // Monaco editor instance (Edit mode) for revealing a line on a scroll
+  // request; editorMounted re-runs the request once the editor is ready.
+  const editorRef = useRef<MonacoEditorInstance | null>(null);
+  const [editorMounted, setEditorMounted] = useState(false);
+  const handleEditorMount: OnMount = (editor) => {
+    editorRef.current = editor;
+    setEditorMounted(true);
+  };
+
+  // One-shot "scroll to diagram N" request (the diagram editor's Back to
+  // markdown button). Preview mode: the matching MermaidBlockPreview scrolls
+  // itself into view once the block has settled and reports back. Edit mode:
+  // reveal the block's opening fence in Monaco. A diagram index that no
+  // longer exists in the document clears the request without scrolling.
+  // The handled guard keeps the request exactly-once: the effect re-runs
+  // when the Monaco editor mounts, but the scroll must happen only once.
+  const scrollHandledForRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (scrollToDiagram == null) return;
+    if (scrollHandledForRef.current === scrollToDiagram) return;
+    const mermaidBlocks = parseMarkdownBlocks(code)
+      .filter((b): b is MermaidBlockRef => b.kind === 'mermaid');
+    const target = mermaidBlocks[scrollToDiagram];
+    if (viewMode === 'edit') {
+      const editor = editorRef.current;
+      if (target && editor) {
+        scrollHandledForRef.current = scrollToDiagram;
+        editor.revealLineInCenter(target.startLine);
+        editor.setPosition({ lineNumber: target.startLine, column: 1 });
+        editor.focus();
+        onDiagramScrolled?.();
+      } else if (!target) {
+        scrollHandledForRef.current = scrollToDiagram;
+        onDiagramScrolled?.();
+      }
+      return;
+    }
+    // Preview mode: a missing diagram never reports back — clear it here.
+    if (!target) {
+      scrollHandledForRef.current = scrollToDiagram;
+      onDiagramScrolled?.();
+    }
+  }, [scrollToDiagram, viewMode, code, editorMounted, onDiagramScrolled]);
 
   const setMode = (mode: MarkdownViewMode) => {
     setViewMode(mode);
@@ -170,6 +224,7 @@ export default function MarkdownEditor({
               language="markdown"
               theme={isDark ? 'vs-dark' : 'light'}
               value={code}
+              onMount={handleEditorMount}
               onChange={(value) => {
                 if (value !== undefined) onCodeChange(value);
               }}
@@ -202,6 +257,8 @@ export default function MarkdownEditor({
                 onSelectDiagram={onSelectDiagram}
                 viewStates={viewStates}
                 onViewStateChange={onViewStateChange}
+                scrollToIndex={scrollToDiagram ?? null}
+                onScrolled={onDiagramScrolled}
               />
             </div>
           </div>
