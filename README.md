@@ -214,6 +214,7 @@ Unlike whiteboard tools that generate arbitrary JSON or proprietary canvas objec
 - **Flowchart Node & Edge Dragging**: In flowcharts, drag from node to node to spawn connections, or drag nodes to reorder them along the layout flow axis (`TD` or `LR`).
 - **Flowchart Chained Edge Editing**: Multi-hop edge declarations (`A --> B --> C --> D`) are fully parsed into distinct, selectable nodes and links. Editing any node, edge label, arrow style, or endpoint in a chain updates that link without breaking or corrupting the rest of the chain.
 - **Precision Hit Paths**: Flowchart edges feature invisible, widened hit paths and hover affordances so even 1px thin or dashed lines can be selected accurately on the first click.
+- **Canvas Keyboard Shortcuts**: `Delete` / `Backspace` deletes the selected element (the same action as the panel's Delete button, including the cascade confirmation for notes), `Escape` clears the canvas selection or cancels an in-progress drag, and `Cmd/Ctrl+Shift+Z` redoes an undone edit (next to `Ctrl+Z` / `Ctrl+Y`). The shortcuts stay inert while typing in a text field.
 
 ### 2. Context-Sensitive Properties Panel
 Clicking any element on the canvas opens the context-sensitive side panel:
@@ -236,7 +237,7 @@ Clicking any element on the canvas opens the context-sensitive side panel:
 ### 3. Safety & Reliability Safeguards
 - **Transient Syntax Error Resilience (Last-Good Render)**: Live edits that temporarily break Mermaid syntax keep the last valid diagram rendered on screen with an unobtrusive syntax error alert chip rather than crashing or throwing unhandled Mermaid DOM errors.
 - **Two-Phase Cascade Deletion**: Deleting an actor or flowchart node detects all dependent messages or edges. A cascade confirmation modal details exactly what will be removed, ensuring no dangling references or broken syntax strings are left behind.
-- **Bounded Undo / Redo**: Full `Ctrl+Z` / `Ctrl+Y` history stack capped at 15 edits. Reverting changes updates both the rendered SVG and the on-disk `.mmd` file.
+- **Bounded Undo / Redo**: Full `Ctrl+Z` / `Ctrl+Y` / `Cmd+Shift+Z` history stack capped at 15 edits. Reverting changes updates both the rendered SVG and the on-disk `.mmd` file.
 - **Serialized Disk Persistence (`serialQueue`)**: All write-through saves pass through an asynchronous serialization queue to prevent race conditions and disk write interleaving.
 - **Debounced Auto-Save & External Live Sync**: Edits auto-save to disk within 1 second. Edits made in external IDEs are detected via `chokidar` and hot-reloaded over SSE without wiping in-flight filter configurations.
 
@@ -345,7 +346,8 @@ Drag the vertical divider on the left edge of the right sidebar to dynamically a
 - **Autonumbering Toggle** (`ListOrdered` icon): Instantly toggles `autonumber` on and off in sequence diagrams without manually modifying the header.
 - **Orientation Switcher** (`ArrowDownUp` icon): Instantly toggles flowchart layout between vertical (`TD`) and horizontal (`LR`).
 - **Copy Mermaid Code** (`Copy` icon): Copies the current, sanitized Mermaid code directly to your clipboard with instant checkmark feedback.
-- **Search & Filter**: Search query highlights matching participants, node IDs, and message labels directly on the rendered SVG.
+- **Search & Filter**: Search query highlights matching participants, node IDs, and message labels directly on the rendered SVG, auto-pans the canvas to the first match, and offers prev/next match navigation (with wrap-around and a `n/total` counter) in the zoom pill.
+- **Zoom Controls & Fit to Screen**: A floating bottom-left canvas pill zooms in/out in absolute 50% steps (clamped to 20%–800%) with a live zoom-level readout, and **Fit to Screen** scales the whole diagram into the viewport (never zooming in past 100%). Mouse-wheel zoom and drag panning keep working as before.
 - **Dark / Light Theme**: Seamlessly maps Mermaid rendering between clean high-contrast dark mode and crisp print-ready light mode.
 
 ### 7. Standalone SVG Export

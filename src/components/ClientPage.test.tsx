@@ -46,6 +46,7 @@ vi.mock('./DiagramViewer', () => ({
     onMoveMessage?: (messageKey: string, position: { type: string; key?: string }) => void;
     notes?: StickyNote[];
     showNotes?: boolean;
+    onSelectNote?: (id: string, options?: { shiftKey?: boolean }) => void;
     onUpdateNote?: (id: string, patch: Partial<StickyNote>) => void;
     onDeleteNote?: (id: string) => void;
   }) => (
@@ -67,6 +68,9 @@ vi.mock('./DiagramViewer', () => ({
           </button>
           <button data-testid="mock-delete-first-note" onClick={() => props.onDeleteNote?.(props.notes![0].id)}>
             delete first note
+          </button>
+          <button data-testid={`select-sticky-${props.notes[0].id}`} onClick={() => props.onSelectNote?.(props.notes![0].id)}>
+            select first sticky note
           </button>
         </>
       )}
@@ -1087,6 +1091,185 @@ sequenceDiagram
     expect((screen.getByTitle('Undo (Ctrl+Z)') as HTMLButtonElement).disabled).toBe(false);
   }, 10000);
 
+  it('Cmd+Shift+Z / Ctrl+Shift+Z trigger redo (macOS standard)', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hello'), { target: { value: 'Hi' } });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+    }, { timeout: 3000 });
+
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+
+    // Cmd+Shift+Z (metaKey + shift, uppercase Z as browsers report it)
+    fireEvent.keyDown(document.body, { key: 'Z', metaKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+    }, { timeout: 3000 });
+
+    // Ctrl+Shift+Z works the same on non-mac keyboards
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    }, { timeout: 3000 });
+    fireEvent.keyDown(document.body, { key: 'Z', ctrlKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hi');
+    }, { timeout: 3000 });
+  }, 15000);
+
+  it('Delete key deletes the selected message without confirmation', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).not.toContain('Hello');
+    }, { timeout: 3000 });
+    // the selection was cleared with the element
+    await screen.findByText(/Click an element in the diagram/);
+  });
+
+  it('Backspace deletes the selected participant and cascades its messages', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-p:0'));
+    await screen.findByDisplayValue('Alice');
+
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).not.toContain('participant A');
+      expect(code).not.toContain('Hello');
+      expect(code).not.toContain('Hi there');
+      expect(code).toContain('participant B as Bob');
+    }, { timeout: 3000 });
+  });
+
+  it('Delete key on a selected note opens the cascade confirm dialog, like the panel button', async () => {
+    const NOTE_DEMO = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    Note over A,B: Retry policy`;
+    const viewer = await renderInEditMode(NOTE_DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-note:0'));
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-selection')).toBe('note:0');
+    });
+
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    expect(await screen.findByTestId('delete-dialog')).toBeTruthy();
+    // cancelling keeps the note
+    fireEvent.click(screen.getByText('Cancel'));
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
+    expect(viewer.getAttribute('data-code')).toContain('Note over A,B: Retry policy');
+
+    // confirming removes it
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    fireEvent.click(await screen.findByTestId('confirm-delete'));
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).not.toContain('Retry policy');
+    }, { timeout: 3000 });
+  });
+
+  it('Delete key removes a selected sticky note', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('add-sticky-note'));
+    await screen.findByTestId('mock-update-first-note');
+    expect(screen.getByTestId('mock-notes-info').getAttribute('data-count')).toBe('1');
+
+    // select the sticky note through its card click path (sticky:<id> key);
+    // the note id lives in the CONFIG line of the debounced processed code
+    let noteId = '';
+    await waitFor(() => {
+      noteId = parseViewsData(viewer.getAttribute('data-code') ?? '')?.notes?.[0]?.id ?? '';
+      expect(noteId).toBeTruthy();
+    }, { timeout: 3000 });
+    fireEvent.click(screen.getByTestId(`select-sticky-${noteId}`));
+    // the panel shows the sticky note editor (sticky keys are not part of the
+    // processed selection map, so the viewer's data-selection stays empty)
+    expect(await screen.findByTestId('sticky-note-text')).toBeTruthy();
+
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-notes-info').getAttribute('data-count')).toBe('0');
+    }, { timeout: 3000 });
+    // the selection was cleared with the note
+    await screen.findByText(/Click an element in the diagram/);
+  });
+
+  it('Delete/Backspace are ignored inside text inputs', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+
+    fireEvent.keyDown(input, { key: 'Delete' });
+    fireEvent.keyDown(input, { key: 'Backspace' });
+    // nothing was deleted and the selection survived
+    expect(viewer.getAttribute('data-code')).toContain('Hello');
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
+    expect(viewer.getAttribute('data-selection')).toBe('m:0');
+  });
+
+  it('Delete with nothing selected does nothing', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    expect(viewer.getAttribute('data-code')).toContain('Hello');
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
+  });
+
+  it('Delete/Backspace do nothing outside edit mode (edit=0)', async () => {
+    mockParams({ file: 'demo.mmd', edit: '0' });
+    mockFetchWithFile(DEMO);
+    render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    });
+
+    // the stub can still report a selection (the real viewer cannot select in
+    // view mode); the keyboard shortcut must stay inert
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    expect(viewer.getAttribute('data-code')).toContain('Hello');
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
+  });
+
+  it('Escape clears the canvas selection without deleting', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    await screen.findByDisplayValue('Hello');
+    expect(viewer.getAttribute('data-selection')).toBe('m:0');
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-selection')).toBe('');
+    });
+    await screen.findByText(/Click an element in the diagram/);
+    // nothing was deleted
+    expect(viewer.getAttribute('data-code')).toContain('Hello');
+  });
+
+  it('Escape inside a text input does not clear the selection', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    const input = await screen.findByDisplayValue('Hello');
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(viewer.getAttribute('data-selection')).toBe('m:0');
+    expect(viewer.getAttribute('data-code')).toContain('Hello');
+  });
+
   it('switching files resets the undo history', async () => {
     const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
     mockGet.mockImplementation((key: string) => params[key] ?? null);
@@ -1134,6 +1317,26 @@ sequenceDiagram
     const body = JSON.parse((postCalls()[0][1] as { body: string }).body);
     expect(body.content).toContain('A->>B: Hello');
     expect(body.content).not.toContain('A->>B: Hi');
+  }, 10000);
+
+  it('undo + redo back to the saved state inside the debounce window does not leave the save indicator stuck at "Saving…"', async () => {
+    await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.change(await screen.findByDisplayValue('Hello'), { target: { value: 'Hi' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
+
+    // Undo then redo within the 800 ms save debounce: the redo lands on the
+    // last-written content, so the undo's pending save is superseded and its
+    // timer cleared — the indicator must settle back to 'Saved' (not stay
+    // stuck at 'Saving…').
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: 'Z', ctrlKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId('save-indicator').textContent).toBe('Saved');
+    }, { timeout: 3000 });
   }, 10000);
 
   it('end to end (create -> change -> verify): three edits, undo twice, redo, future cleared (Step 10)', async () => {

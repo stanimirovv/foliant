@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo, MouseEvent as ReactMouseEvent } from 'react';
 import mermaid from 'mermaid';
-import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { TransformWrapper, TransformComponent, ReactZoomPanPinchContentRef } from 'react-zoom-pan-pinch';
 import { parseModel, ParticipantElement, looksLikeMermaidDiagram } from '@/lib/model';
 import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, PAN_EXCLUDE_CLASS } from '@/lib/styling';
 import {
@@ -16,7 +16,7 @@ import {
 } from '@/lib/svgmap';
 import { DiagramConfig, StickyNote as StickyNoteType } from '@/lib/views';
 import { MessageInsertPosition } from '@/lib/editor';
-import { Lock } from 'lucide-react';
+import { Lock, ZoomIn, ZoomOut, Maximize2, ChevronUp, ChevronDown } from 'lucide-react';
 import StickyNote from './StickyNote';
 
 interface DiagramViewerProps {
@@ -81,6 +81,12 @@ const ENDPOINT_GRAB_RADIUS_SELECTED = 24;
 // already carry their classes.
 export const DIAGRAM_PAN_EXCLUSIONS = [PAN_EXCLUDE_CLASS];
 export const STICKY_PAN_EXCLUSIONS = ['sticky-note-card', 'sticky-note-handle'];
+
+// Canvas zoom range and the pill's step: minScale below 1 lets "Fit to screen"
+// shrink large diagrams (the library default of 1 never zooms out).
+const MIN_ZOOM_SCALE = 0.2;
+const MAX_ZOOM_SCALE = 8;
+const ZOOM_STEP = 0.5;
 
 interface DragState {
   type: 'reorder' | 'message' | 'node' | 'endpoint' | 'connect';
@@ -393,6 +399,13 @@ export default function DiagramViewer({
   onDeleteNote,
 }: DiagramViewerProps) {
   const [svgStr, setSvgStr] = useState<string>('');
+  // Memoized so the object identity is stable across re-renders while svgStr
+  // is unchanged. React diffs host props by identity at commit time and
+  // re-applies innerHTML whenever the dangerouslySetInnerHTML object changes —
+  // with a fresh { __html } literal on every render, each commit would replace
+  // the whole SVG subtree, detaching elements that effects hold onto (search
+  // matches) and wiping their inline highlight.
+  const svgInnerHtml = useMemo(() => ({ __html: svgStr }), [svgStr]);
   const [error, setError] = useState<string | null>(null);
   const [dragOverlay, setDragOverlay] = useState<DragOverlay | null>(null);
   // Hover affordances ("handles connect, body moves"): the sequence connect
@@ -406,6 +419,23 @@ export default function DiagramViewer({
   // the hover target a ~12px band, so unlabeled edges are discoverable).
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const [cursorHint, setCursorHint] = useState<'grab' | 'crosshair' | 'pointer' | null>(null);
+
+  // Zoom pill state: the TransformWrapper instance (zoom in/out/fit/search-pan
+  // actions) and the current scale for the percentage readout.
+  const transformRef = useRef<ReactZoomPanPinchContentRef | null>(null);
+  const [zoomScale, setZoomScale] = useState(1);
+  const zoomScaleRef = useRef(1);
+  const handleTransform = (_ref: unknown, state: { scale: number }) => {
+    if (state.scale !== zoomScaleRef.current) {
+      zoomScaleRef.current = state.scale;
+      setZoomScale(state.scale);
+    }
+  };
+
+  // Search matches (the highlighted text nodes, in document order) and the
+  // active match for the pill's prev/next navigation + auto-pan.
+  const [searchMatches, setSearchMatches] = useState<Element[]>([]);
+  const [searchMatchIndex, setSearchMatchIndex] = useState(0);
 
   // In edit mode, dragging a participant (sequence) or a node (flowchart)
   // must not pan the screen — exclude those elements from TransformWrapper
@@ -534,24 +564,77 @@ export default function DiagramViewer({
     animateMovedElements(svg, prev.positions);
   }, [svgStr]);
 
+  // Search highlight + match collection: matching text nodes are painted red
+  // and collected (in document order) for the zoom pill's match navigation.
+  // Non-matches are always cleared, so clearing the query removes the old
+  // highlight as well.
   useEffect(() => {
-    if (svgStr && searchQuery) {
-      const container = document.getElementById('diagram-container');
-      if (container) {
-        const textNodes = container.querySelectorAll('text');
-        textNodes.forEach((node) => {
-          const content = node.textContent?.toLowerCase() || '';
-          if (searchQuery && content.includes(searchQuery.toLowerCase())) {
-            node.style.fill = 'red';
-            node.style.fontWeight = 'bold';
-          } else {
-            node.style.fill = '';
-            node.style.fontWeight = 'normal';
-          }
-        });
+    const container = document.getElementById('diagram-container');
+    if (!container) return;
+    const query = searchQuery.trim().toLowerCase();
+    const matches: Element[] = [];
+    container.querySelectorAll('text').forEach((node) => {
+      const content = node.textContent?.toLowerCase() || '';
+      if (query && content.includes(query)) {
+        node.style.fill = 'red';
+        node.style.fontWeight = 'bold';
+        matches.push(node);
+      } else {
+        node.style.fill = '';
+        node.style.fontWeight = 'normal';
       }
-    }
+    });
+    setSearchMatches(matches);
+    setSearchMatchIndex(0);
   }, [svgStr, searchQuery]);
+
+  // Search auto-pan: whenever the match list or the active match changes,
+  // center the canvas on it (zoomToElement) at a readable scale — at least the
+  // current zoom, never below 100%, so a match stays legible on huge diagrams.
+  useEffect(() => {
+    if (!searchQuery.trim() || searchMatches.length === 0) return;
+    const target = searchMatches[Math.min(searchMatchIndex, searchMatches.length - 1)];
+    if (!target) return;
+    const scale = Math.min(Math.max(zoomScaleRef.current, 1), MAX_ZOOM_SCALE);
+    // The matches are SVG text elements; zoomToElement's target type only
+    // names HTMLElement, but it just measures the node's bounding rect.
+    transformRef.current?.zoomToElement(target as unknown as HTMLElement, { scale, animationTime: 200 });
+  }, [searchMatches, searchMatchIndex, searchQuery]);
+
+  // Step through the search matches (wraps around); the effect above pans.
+  const stepSearchMatch = (delta: number) => {
+    setSearchMatchIndex(prev => {
+      if (searchMatches.length === 0) return prev;
+      return (prev + delta + searchMatches.length) % searchMatches.length;
+    });
+  };
+
+  // Fit the whole diagram into the viewport: shrink it when it is larger than
+  // the canvas (huge diagrams), but never zoom in past the default 100% view
+  // — small diagrams already fit. Implemented via zoomToElement on the SVG
+  // root: the library's own fitToView measures the wrapper-sized content div
+  // (!w-full !h-full), which would degenerate to a plain 100% reset.
+  const handleFitToScreen = () => {
+    const ref = transformRef.current;
+    const container = document.getElementById('diagram-container');
+    const svgRoot = container?.querySelector('svg');
+    if (!ref || !container || !svgRoot) return;
+    const containerRect = container.getBoundingClientRect();
+    const svgRect = svgRoot.getBoundingClientRect();
+    // The SVG rect carries the current transform; divide it out to get the
+    // untransformed diagram size.
+    const currentScale = zoomScaleRef.current || 1;
+    const svgWidth = svgRect.width / currentScale;
+    const svgHeight = svgRect.height / currentScale;
+    if (!containerRect.width || !containerRect.height || !svgWidth || !svgHeight) return;
+    const fitScale = Math.min(
+      1,
+      Math.max(MIN_ZOOM_SCALE, Math.min(containerRect.width / svgWidth, containerRect.height / svgHeight))
+    );
+    // zoomToElement's target type only names HTMLElement, but it just measures
+    // the node's bounding rect (same cast as the search auto-pan above).
+    ref.zoomToElement(svgRoot as unknown as HTMLElement, { scale: fitScale, animationTime: 200 });
+  };
 
   const selectedProcessedKeys = useMemo(() => {
     if (!selection) return [];
@@ -1265,6 +1348,37 @@ export default function DiagramViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editMode, code, selection, onMoveParticipant, onCreateMessageDrag, onMoveMessageEndpoint, onMoveMessage]);
 
+  // Escape cancels an active canvas drag: the pending mouseup then does
+  // nothing and the selection made on press stays. The event is marked handled
+  // (preventDefault + stopImmediatePropagation — this window listener is
+  // registered before ClientPage's own key handlers, since child effects run
+  // first) so the page-level Escape does not also clear the selection while a
+  // drag is being cancelled. ClientPage additionally skips events that arrive
+  // already defaultPrevented, so the ordering is not load-bearing.
+  useEffect(() => {
+    if (!editMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' || target.isContentEditable)) return;
+      const drag = dragRef.current;
+      if (!drag) return;
+      dragRef.current = null;
+      screenCacheRef.current = null;
+      suppressClickRef.current = true;
+      setDragOverlay(null);
+      setHoverConnectHandle(null);
+      setHoverNode(null);
+      setHoverEdge(null);
+      setCursorHint(null);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editMode]);
+
   // Click delegation: in edit mode, resolve the target to a processed element
   // key (null = empty space -> deselect). Suppressed after a drag.
   const handleDiagramClick = (e: ReactMouseEvent<HTMLDivElement>) => {
@@ -1336,12 +1450,19 @@ export default function DiagramViewer({
         }}
       >
         <TransformWrapper
+          ref={transformRef}
           panning={{ excluded: panExclusions }}
+          minScale={MIN_ZOOM_SCALE}
+          maxScale={MAX_ZOOM_SCALE}
+          // Double-click-to-zoom is disabled: double-clicking a participant,
+          // node or message opens the inline label editor instead.
+          doubleClick={{ disabled: true }}
+          onTransform={handleTransform}
         >
           <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full flex items-center justify-center p-8">
             {svgStr ? (
               <div className="relative inline-block select-none" data-testid="diagram-canvas-root">
-                <div dangerouslySetInnerHTML={{ __html: svgStr }} />
+                <div dangerouslySetInnerHTML={svgInnerHtml} />
                 {showNotes && notes && notes.length > 0 && (
                   <div className="absolute inset-0 pointer-events-none" data-testid="sticky-notes-layer">
                     {notes.map((note) => (
@@ -1373,6 +1494,106 @@ export default function DiagramViewer({
             )}
           </TransformComponent>
         </TransformWrapper>
+      </div>
+      {/* Floating bottom-left canvas control pill: zoom out / level / zoom in
+          / fit to screen, plus search-match navigation (with auto-pan) when a
+          search query is active. Lives outside the TransformWrapper, so it
+          never pans the canvas itself. bottom-12 keeps it clear of the bottom
+          quick-actions bar (BottomAnimatedArrowBar), which occupies the bottom
+          strip of the canvas. */}
+      <div
+        data-testid="zoom-controls"
+        className={`absolute bottom-12 left-3 z-30 flex items-center rounded-full border shadow-lg backdrop-blur-md px-1 py-1 ${
+          theme === 'dark'
+            ? 'bg-slate-900/90 border-slate-700 text-slate-200'
+            : 'bg-white/90 border-gray-200 text-gray-700'
+        }`}
+      >
+        <button
+          type="button"
+          data-testid="zoom-out"
+          title="Zoom out"
+          aria-label="Zoom out"
+          disabled={zoomScale <= MIN_ZOOM_SCALE + 0.001}
+          onClick={() => transformRef.current?.zoomOut(ZOOM_STEP)}
+          className={`p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-100'
+          }`}
+        >
+          <ZoomOut size={14} />
+        </button>
+        <span
+          data-testid="zoom-level"
+          className="w-11 text-center text-xs tabular-nums select-none"
+          title="Zoom level"
+        >
+          {Math.round(zoomScale * 100)}%
+        </span>
+        <button
+          type="button"
+          data-testid="zoom-in"
+          title="Zoom in"
+          aria-label="Zoom in"
+          disabled={zoomScale >= MAX_ZOOM_SCALE - 0.001}
+          onClick={() => transformRef.current?.zoomIn(ZOOM_STEP)}
+          className={`p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-100'
+          }`}
+        >
+          <ZoomIn size={14} />
+        </button>
+        <button
+          type="button"
+          data-testid="zoom-fit"
+          title="Fit to screen"
+          aria-label="Fit to screen"
+          onClick={handleFitToScreen}
+          className={`p-1 rounded transition-colors ${
+            theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-100'
+          }`}
+        >
+          <Maximize2 size={14} />
+        </button>
+        {searchQuery.trim() && (
+          <>
+            <div className={`w-px h-4 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`} />
+            <button
+              type="button"
+              data-testid="search-prev"
+              title="Previous match"
+              aria-label="Previous match"
+              disabled={searchMatches.length === 0}
+              onClick={() => stepSearchMatch(-1)}
+              className={`p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-100'
+              }`}
+            >
+              <ChevronUp size={14} />
+            </button>
+            <span
+              data-testid="search-match-count"
+              className="px-1 text-xs tabular-nums select-none"
+              title="Search matches"
+            >
+              {searchMatches.length === 0
+                ? '0/0'
+                : `${Math.min(searchMatchIndex, searchMatches.length - 1) + 1}/${searchMatches.length}`}
+            </span>
+            <button
+              type="button"
+              data-testid="search-next"
+              title="Next match"
+              aria-label="Next match"
+              disabled={searchMatches.length === 0}
+              onClick={() => stepSearchMatch(1)}
+              className={`p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-100'
+              }`}
+            >
+              <ChevronDown size={14} />
+            </button>
+          </>
+        )}
       </div>
       {hoverConnectHandle && !dragOverlay && (
         <svg

@@ -476,6 +476,46 @@ describe('DiagramViewer drag interactions', () => {
     expect(onCreateMessageDrag).not.toHaveBeenCalled();
   });
 
+  it('Escape cancels an active drag: the overlay disappears and the drop is a no-op', async () => {
+    const onMoveParticipant = vi.fn();
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={onSelect} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockSeqScreenRects(container);
+
+    // Start a reorder drag on C's actor box and move past the drag threshold
+    fireEvent.mouseDown(actorBoxOf(container, 'C'), { button: 0, clientX: 350, clientY: 30 });
+    expect(onSelect).toHaveBeenCalledWith('p:2');
+    fireEvent.mouseMove(window, { clientX: 100, clientY: 200 });
+    await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
+
+    // Escape mid-drag: the overlay is gone and the pending drop never fires
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeNull();
+    expect(container.querySelector('[data-testid="drag-overlay"]')).toBeNull();
+    fireEvent.mouseUp(window, { clientX: 100, clientY: 200 });
+    expect(onMoveParticipant).not.toHaveBeenCalled();
+  });
+
+  it('Escape without an active drag does not interfere with selection', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={onSelect}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    // no drag in progress: Escape is left for the page-level handler
+    const notPrevented = fireEvent.keyDown(window, { key: 'Escape' });
+    expect(notPrevented).toBe(true);
+  });
+
   it('dragging an actor box reorders even when that participant is already selected', async () => {
     const onMoveParticipant = vi.fn();
     const onCreateMessageDrag = vi.fn();
@@ -1819,6 +1859,13 @@ describe('DiagramViewer transition animation (FLIP)', () => {
 });
 
 describe('DiagramViewer sticky notes overlay', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
   it('renders sticky notes layer when notes are provided and showNotes is true', async () => {
     const { container } = render(
       <DiagramViewer
@@ -1899,3 +1946,175 @@ describe('DiagramViewer sticky notes overlay', () => {
   });
 });
 
+
+// --- Zoom controls pill & search-match navigation ---------------------------
+
+describe('DiagramViewer zoom controls & search navigation', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  // Let a zoom animation (200ms) fully settle so the next click starts from
+  // the final scale.
+  const settleZoom = async () => {
+    await act(async () => { await new Promise(r => setTimeout(r, 500)); });
+  };
+
+  const pillButton = (container: HTMLElement, testid: string) =>
+    container.querySelector(`[data-testid="${testid}"]`) as HTMLButtonElement;
+
+  const zoomLevel = (container: HTMLElement) =>
+    container.querySelector('[data-testid="zoom-level"]')!.textContent;
+
+  const scaleOf = (el: HTMLElement) => {
+    const m = /scale\(([\d.]+)\)/.exec(el.style.transform);
+    return m ? parseFloat(m[1]) : NaN;
+  };
+
+  it('renders the zoom pill at 100% with zoom in/out/fit enabled and no search segment when the query is empty', async () => {
+    const { container } = render(<DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />);
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+    });
+    expect(container.querySelector('[data-testid="zoom-controls"]')).toBeTruthy();
+    expect(zoomLevel(container)).toBe('100%');
+    expect(pillButton(container, 'zoom-in').disabled).toBe(false);
+    expect(pillButton(container, 'zoom-out').disabled).toBe(false);
+    expect(pillButton(container, 'zoom-fit').disabled).toBe(false);
+    // no search navigation without a query
+    expect(container.querySelector('[data-testid="search-next"]')).toBeNull();
+    expect(container.querySelector('[data-testid="search-match-count"]')).toBeNull();
+  });
+
+  it('zoom in raises the level by an absolute 0.5 step and zoom out returns to 100%', async () => {
+    const { container } = render(<DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />);
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+    });
+    const component = () => container.querySelector('.react-transform-component') as HTMLElement;
+
+    fireEvent.click(pillButton(container, 'zoom-in'));
+    await waitFor(() => {
+      expect(zoomLevel(container)).toBe('150%');
+    });
+    await settleZoom();
+    expect(scaleOf(component())).toBeCloseTo(1.5, 5);
+
+    fireEvent.click(pillButton(container, 'zoom-out'));
+    await waitFor(() => {
+      expect(zoomLevel(container)).toBe('100%');
+    });
+    await settleZoom();
+    expect(scaleOf(component())).toBeCloseTo(1, 5);
+  });
+
+  it('zoom out clamps at 20% and disables the zoom-out button', async () => {
+    const { container } = render(<DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />);
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+    });
+    fireEvent.click(pillButton(container, 'zoom-out'));
+    await waitFor(() => {
+      expect(zoomLevel(container)).toBe('50%');
+    });
+    await settleZoom();
+    // 0.5 - 0.5 would be 0, clamped to the 20% minimum
+    fireEvent.click(pillButton(container, 'zoom-out'));
+    await waitFor(() => {
+      expect(zoomLevel(container)).toBe('20%');
+    });
+    await settleZoom();
+    fireEvent.click(pillButton(container, 'zoom-out'));
+    await settleZoom();
+    expect(zoomLevel(container)).toBe('20%');
+    expect(pillButton(container, 'zoom-out').disabled).toBe(true);
+    expect(pillButton(container, 'zoom-in').disabled).toBe(false);
+  });
+
+  it('fit to screen shrinks an oversized diagram into the viewport', async () => {
+    const { container } = render(<DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />);
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+    });
+    // the diagram (1000x800) is larger than the canvas (500x400): fit -> 50%
+    mockRect(container.querySelector('#diagram-container svg')!, 0, 0, 1000, 800);
+    mockRect(container.querySelector('#diagram-container')!, 0, 0, 500, 400);
+    fireEvent.click(pillButton(container, 'zoom-fit'));
+    await waitFor(() => {
+      expect(zoomLevel(container)).toBe('50%');
+    });
+    await settleZoom();
+  });
+
+  it('fit to screen never zooms in past 100% for a small diagram', async () => {
+    const { container } = render(<DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />);
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+    });
+    // the diagram (250x200) is smaller than the canvas (500x400): fit keeps
+    // the default 100% view instead of zooming in to fill the canvas
+    mockRect(container.querySelector('#diagram-container svg')!, 0, 0, 250, 200);
+    mockRect(container.querySelector('#diagram-container')!, 0, 0, 500, 400);
+    fireEvent.click(pillButton(container, 'zoom-fit'));
+    await settleZoom();
+    expect(zoomLevel(container)).toBe('100%');
+  });
+
+  it('shows the search match count and cycles next/prev with wrap-around', async () => {
+    const { container, rerender } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+    });
+    rerender(<DiagramViewer code={SEQ_CODE} searchQuery="m" theme="default" />);
+    const count = () => container.querySelector('[data-testid="search-match-count"]')!.textContent;
+    // SEQ_SVG has exactly four text nodes containing "m": m1..m4
+    await waitFor(() => {
+      expect(count()).toBe('1/4');
+    });
+    fireEvent.click(pillButton(container, 'search-next'));
+    expect(count()).toBe('2/4');
+    fireEvent.click(pillButton(container, 'search-prev'));
+    expect(count()).toBe('1/4');
+    // wrap-around backwards from the first match lands on the last
+    fireEvent.click(pillButton(container, 'search-prev'));
+    expect(count()).toBe('4/4');
+    // wrap-around forwards from the last match lands on the first
+    fireEvent.click(pillButton(container, 'search-next'));
+    expect(count()).toBe('1/4');
+    await settleZoom();
+  });
+
+  it('shows 0/0 and disables prev/next when the query matches nothing', async () => {
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="zzz-no-such-text" theme="default" />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="search-match-count"]')!.textContent).toBe('0/0');
+    });
+    expect(pillButton(container, 'search-next').disabled).toBe(true);
+    expect(pillButton(container, 'search-prev').disabled).toBe(true);
+  });
+
+  it('clears the search highlight when the query is removed', async () => {
+    const { container, rerender } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="m2" theme="default" />
+    );
+    const m2 = () => Array.from(container.querySelectorAll('text.messageText'))
+      .find(t => t.textContent === 'm2');
+    await waitFor(() => {
+      expect(styleOf(m2()!).fill).toBe('red');
+    });
+    rerender(<DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" />);
+    await waitFor(() => {
+      expect(styleOf(m2()!).fill).toBe('');
+    });
+  });
+});

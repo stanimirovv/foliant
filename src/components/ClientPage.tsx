@@ -851,7 +851,15 @@ export default function ClientPage() {
   useEffect(() => {
     if (!currentFile) return;
     if (rawCodeFileRef.current !== currentFile || rawCodeDiagramRef.current !== diagramIndex) return;
-    if (rawCode === lastWrittenRef.current) return;
+    if (rawCode === lastWrittenRef.current) {
+      // An edit superseded by a newer one that equals the last written content
+      // (e.g. undo then redo inside the debounce window) clears the previous
+      // run's timer before it fires, but that run already flagged 'saving' —
+      // nothing would ever complete it. Settle the indicator back to 'saved'
+      // (the in-memory content matches the disk); other states are untouched.
+      setSaveStatus(prev => (prev === 'saving' ? 'saved' : prev));
+      return;
+    }
     setSaveStatus('saving');
     setSaveConflict(null);
     setSaveErrorMessage(null);
@@ -1443,18 +1451,20 @@ export default function ClientPage() {
     });
   }, [currentFile, visibleStickyNotes, showNotes, isDark]);
 
-  // Ctrl+Z / Ctrl+Y (Section 4.11). Inside text fields the native input undo
-  // wins; the diagram-level shortcut applies everywhere else.
+  // Ctrl+Z / Ctrl+Y, plus the macOS-standard redo Cmd/Ctrl+Shift+Z
+  // (Section 4.11). Inside text fields the native input undo wins; the
+  // diagram-level shortcut applies everywhere else.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       const key = e.key.toLowerCase();
       if (key !== 'z' && key !== 'y') return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' || target.isContentEditable)) return;
       e.preventDefault();
-      if (key === 'z') undo(); else redo();
+      // Shift+Z is redo (Cmd+Shift+Z); plain Z is undo; Y is always redo.
+      if (key === 'y' || e.shiftKey) redo(); else undo();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -1710,6 +1720,36 @@ export default function ClientPage() {
       .filter((e): e is ModelElement => e !== undefined);
     setPendingDelete({ code: result.code, element: selectedRawElement, cascaded });
   };
+
+  // Canvas keyboard shortcuts: Delete/Backspace runs the same delete as the
+  // panel's Delete button (handleRequestDelete), Escape clears the canvas
+  // selection. Both are skipped inside text fields (native behavior wins
+  // there) and while visual edits are locked (editing source code). Escape
+  // during an active canvas drag is handled by DiagramViewer, which cancels
+  // the drag and marks the event as handled so the selection survives.
+  const handleRequestDeleteRef = useRef(handleRequestDelete);
+  handleRequestDeleteRef.current = handleRequestDelete;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      const inField = Boolean(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' || target.isContentEditable));
+      if (inField) return;
+      if (e.key === 'Escape') {
+        if (selectedKeys.length === 0) return;
+        e.preventDefault();
+        setSelection(null);
+        return;
+      }
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (!editMode || isVisualLocked || selectedKeys.length === 0) return;
+      e.preventDefault();
+      handleRequestDeleteRef.current();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editMode, isVisualLocked, selectedKeys]);
 
   const handleConfirmDelete = () => {
     if (!pendingDelete) return;

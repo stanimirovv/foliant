@@ -43,6 +43,13 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Clicking a message selects it: the panel shows Label / Type / Color / Width / Dash / Delete.
 - [ ] Clicking empty canvas clears the selection and hides the panel.
 - [ ] Toggling Edit off adds `edit=0` to the URL and hides the selection and the panel; the diagram is unchanged. Toggling again removes the param and re-enables edit mode.
+- [ ] With a message selected, press `Delete` (or `Backspace`) → the message disappears immediately (no dialog) and the selection clears; the file auto-saves the deletion. Same for a selected participant (its messages cascade away).
+- [ ] With a note selected, press `Delete` → the cascade confirm dialog appears; `Cancel` keeps the note, `Delete` removes it.
+- [ ] With a sticky note selected, press `Delete` → the note card disappears and its CONFIG entry is gone.
+- [ ] With nothing selected, `Delete`/`Backspace` do nothing (and inside a text input they keep their native behavior).
+- [ ] With an element selected, press `Escape` → the selection clears (highlight gone, panel back to the empty state) and nothing is deleted.
+- [ ] Start a participant drag (press, move past the 5px threshold), press `Escape` mid-drag → the drag overlay disappears; releasing the mouse applies nothing (the file is unchanged).
+- [ ] `Delete`/`Backspace` do nothing outside edit mode (`edit=0`) or while visual edits are locked (editing source code).
 
 ## Increment 2 — Participant editing (sequence)
 
@@ -196,6 +203,7 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 > Stop here: undo/redo steps one edit at a time and the history is bounded.
 
 - [ ] Make three edits → Ctrl+Z twice → the canvas reverts step by step → Ctrl+Y → reapplies.
+- [ ] Make an edit → Ctrl+Z → `Ctrl+Shift+Z` (macOS: `Cmd+Shift+Z`) → the edit is reapplied; the save indicator returns to "Saved" (an undo+redo inside the save debounce window must not leave it stuck at "Saving…").
 - [ ] The toolbar Undo/Redo buttons do the same.
 - [ ] Undo after auto-save → the file on disk reverts too.
 - [ ] Make a new edit after undo → the redo stack is cleared (Ctrl+Y does nothing).
@@ -221,6 +229,12 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] The selection highlight survives re-renders.
 - [ ] Search still highlights matches while in edit mode.
 - [ ] Switch to dark theme in edit mode → panel, highlight, and styled arrows remain visible and correct.
+- [ ] The floating bottom-left zoom pill shows `100%` initially; **Zoom In** steps to `150%`, `200%`, … and **Zoom Out** steps back down; the level readout always matches the applied scale.
+- [ ] Zoom out repeatedly → the level clamps at `20%` and the Zoom Out button disables; Zoom In re-enables it.
+- [ ] Zoom deep into a large diagram (part of it off-screen) → **Fit to Screen** → the whole diagram is visible again and the readout returns to `100%` (fit never zooms in past 100% for a small diagram).
+- [ ] Zoom to 400% on a tall diagram so the first message is above the viewport → type in the search box → the canvas auto-pans to center the first match, the pill shows `1/10`, and the matched text is red/bold.
+- [ ] With an active query, **Next/Prev match** cycle `1/10 → 2/10 → … → 10/10 → 1/10` (wrapping both ways), panning to each newly active match; the query also lands in the URL (`?q=…`).
+- [ ] Type a query with no matches → the pill shows `0/0` and prev/next are disabled; clearing the query removes the match segment from the pill and the red highlight disappears.
 
 ## Increment 11 — Persistence & reload
 
