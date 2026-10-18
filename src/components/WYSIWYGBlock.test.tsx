@@ -121,6 +121,30 @@ describe('WYSIWYGBlock', () => {
       expect(props.onSave).toHaveBeenCalledWith(0, 'Edited on blur');
     });
 
+    it('blur to a toolbar control keeps edit mode without saving', () => {
+      const { props } = renderBlock(makeBlock({ source: 'Original' }));
+      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      const textarea = screen.getByTestId('wysiwyg-block-editor-0');
+      const select = screen.getByTestId('wysiwyg-block-type-0');
+      fireEvent.change(textarea, { target: { value: 'Edited' } });
+      // Focus moves to the type select (inside the block) — e.g. the user
+      // clicked it to change the block type.
+      fireEvent.blur(textarea, { relatedTarget: select });
+      expect(props.onSave).not.toHaveBeenCalled();
+      const stillEditing = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
+      expect(stillEditing.value).toBe('Edited');
+      expect(screen.getByTestId('wysiwyg-block-type-0')).toBeTruthy();
+    });
+
+    it('blur to outside the block saves', () => {
+      const { props } = renderBlock(makeBlock({ source: 'Original' }));
+      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      const textarea = screen.getByTestId('wysiwyg-block-editor-0');
+      fireEvent.change(textarea, { target: { value: 'Edited outside' } });
+      fireEvent.blur(textarea, { relatedTarget: document.body });
+      expect(props.onSave).toHaveBeenCalledWith(0, 'Edited outside');
+    });
+
     it('cancel button reverts without calling onSave', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
       fireEvent.click(screen.getByTestId('wysiwyg-block-0'));

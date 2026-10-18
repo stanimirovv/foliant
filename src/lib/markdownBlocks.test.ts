@@ -3,6 +3,9 @@ import {
   parseMarkdownBlocks,
   replaceBlockSource,
   insertBlockAfter,
+  insertMermaidBlock,
+  scaffoldMermaidBlock,
+  MERMAID_DIAGRAM_TEMPLATES,
   deleteBlock,
   convertBlockType,
   type TextBlock,
@@ -473,6 +476,117 @@ describe('integration: parse → mutate → re-parse', () => {
       expect(blocks[0].content).toContain('# Title');
       expect(blocks[0].content).toContain('prose paragraph');
       expect(blocks[0].content).toContain('sequenceDiagram');
+    }
+  });
+});
+
+describe('scaffoldMermaidBlock', () => {
+  it('wraps the sequence template in a valid ```mermaid fence', () => {
+    const source = scaffoldMermaidBlock('sequence');
+    expect(source.startsWith('```mermaid\n')).toBe(true);
+    expect(source.endsWith('\n```')).toBe(true);
+    expect(source).toContain(MERMAID_DIAGRAM_TEMPLATES.sequence);
+    // the scaffold parses as exactly one mermaid block
+    const blocks = parseMarkdownBlocks(source);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].kind).toBe('mermaid');
+    if (blocks[0].kind === 'mermaid') {
+      expect(blocks[0].content).toBe(MERMAID_DIAGRAM_TEMPLATES.sequence);
+      expect(blocks[0].index).toBe(0);
+    }
+  });
+
+  it('wraps the flowchart template in a valid ```mermaid fence', () => {
+    const source = scaffoldMermaidBlock('flowchart');
+    expect(source.startsWith('```mermaid\n')).toBe(true);
+    expect(source.endsWith('\n```')).toBe(true);
+    expect(source).toContain(MERMAID_DIAGRAM_TEMPLATES.flowchart);
+    const blocks = parseMarkdownBlocks(source);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].kind).toBe('mermaid');
+  });
+});
+
+describe('insertMermaidBlock', () => {
+  it('inserts into an empty document at position 0', () => {
+    const { code, diagramIndex } = insertMermaidBlock('', 0, 'sequence');
+    expect(code).toBe(scaffoldMermaidBlock('sequence'));
+    expect(diagramIndex).toBe(0);
+    expect(parseMarkdownBlocks(code).map(b => b.kind)).toEqual(['mermaid']);
+  });
+
+  it('inserts before the first block at position 0', () => {
+    const { code, diagramIndex } = insertMermaidBlock(MD, 0, 'flowchart');
+    expect(code.indexOf('```mermaid')).toBe(0);
+    expect(code.indexOf('```mermaid')).toBeLessThan(code.indexOf('# Architecture Notes'));
+    expect(diagramIndex).toBe(0);
+    // the document gains exactly one mermaid block, as block 0
+    const blocks = parseMarkdownBlocks(code);
+    expect(blocks.length).toBe(parseMarkdownBlocks(MD).length + 1);
+    expect(blocks[0].kind).toBe('mermaid');
+    if (blocks[0].kind === 'mermaid') expect(blocks[0].index).toBe(0);
+  });
+
+  it('inserts between two text blocks, preserving surrounding content', () => {
+    // MD blocks: 0=heading, 1=intro, 2=mermaid, 3=middle, 4=mermaid, ...
+    // Position 2 = after the intro, before the first mermaid block.
+    const { code, diagramIndex } = insertMermaidBlock(MD, 2, 'sequence');
+    const headingPos = code.indexOf('# Architecture Notes');
+    const introPos = code.indexOf('Intro prose');
+    const fencePos = code.indexOf('```mermaid');
+    const firstDiagramPos = code.indexOf('A->>B: First diagram');
+    // heading → intro → new fence → original first mermaid
+    expect(headingPos).toBeLessThan(introPos);
+    expect(introPos).toBeLessThan(fencePos);
+    expect(fencePos).toBeLessThan(firstDiagramPos);
+    // no mermaid block sits before the insertion point → new diagram index 0
+    expect(diagramIndex).toBe(0);
+    const blocks = parseMarkdownBlocks(code);
+    const mermaid = blocks.filter((b): b is MermaidBlockRef => b.kind === 'mermaid');
+    expect(mermaid.map(b => b.index)).toEqual([0, 1, 2]);
+    // the new diagram is diagram 0; the original diagrams shifted by one
+    expect(mermaid[0].content).toContain('participant A as Alice');
+    expect(mermaid[1].content).toContain('A->>B: First diagram');
+    expect(mermaid[2].content).toContain('A --> B');
+  });
+
+  it('computes the diagram index from the mermaid blocks before the position', () => {
+    // Insert after the first mermaid block (block 2) → the new diagram is
+    // diagram 1; the existing second mermaid shifts to diagram 2.
+    const { code, diagramIndex } = insertMermaidBlock(MD, 3, 'flowchart');
+    expect(diagramIndex).toBe(1);
+    const mermaid = parseMarkdownBlocks(code).filter((b): b is MermaidBlockRef => b.kind === 'mermaid');
+    expect(mermaid.map(b => b.index)).toEqual([0, 1, 2]);
+    // the original first diagram kept its content at index 0
+    expect(mermaid[0].content).toContain('A->>B: First diagram');
+    // the new flowchart scaffold is diagram 1
+    expect(mermaid[1].content).toContain('B -->|Reply| A');
+    // the original second flowchart shifted to index 2
+    expect(mermaid[2].content).toContain('A --> B');
+    expect(mermaid[2].content).not.toContain('Reply');
+  });
+
+  it('appends after the last block at position blocks.length', () => {
+    const blockCount = parseMarkdownBlocks(MD).length;
+    const { code, diagramIndex } = insertMermaidBlock(MD, blockCount, 'sequence');
+    // MD's last block is "Trailing prose."; the second mermaid is diagram 1
+    expect(diagramIndex).toBe(2);
+    expect(code.lastIndexOf('```mermaid')).toBeGreaterThan(code.indexOf('Trailing prose.'));
+    expect(code.trimEnd().endsWith('```')).toBe(true);
+    const mermaid = parseMarkdownBlocks(code).filter((b): b is MermaidBlockRef => b.kind === 'mermaid');
+    expect(mermaid.map(b => b.index)).toEqual([0, 1, 2]);
+  });
+
+  it('throws RangeError for an out-of-range position', () => {
+    const blockCount = parseMarkdownBlocks(MD).length;
+    expect(() => insertMermaidBlock(MD, blockCount + 1, 'sequence')).toThrow(RangeError);
+    expect(() => insertMermaidBlock(MD, -1, 'sequence')).toThrow(RangeError);
+  });
+
+  it('the result re-parses with consistent offsets', () => {
+    const { code } = insertMermaidBlock(MD, 4, 'flowchart');
+    for (const block of parseMarkdownBlocks(code)) {
+      expect(code.slice(block.startOffset, block.endOffset)).toBe(block.source);
     }
   });
 });

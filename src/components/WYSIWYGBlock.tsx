@@ -94,6 +94,7 @@ export default function WYSIWYGBlock({
   const [isEditing, setIsEditing] = useState(initialEditing);
   const [draft, setDraft] = useState(block.source);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const blockRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'dark';
   const isEmpty = !block.source.trim();
 
@@ -130,6 +131,15 @@ export default function WYSIWYGBlock({
       setDraft(block.source);
       setIsEditing(false);
     }
+  };
+
+  // Blur saves the draft — but only when focus leaves the block entirely.
+  // Clicking a toolbar control (type select, save, cancel) moves focus out of
+  // the textarea; exiting edit mode there would unmount the control mid-click.
+  const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && blockRef.current?.contains(next)) return;
+    handleSave();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -180,6 +190,7 @@ export default function WYSIWYGBlock({
 
   return (
     <div
+      ref={blockRef}
       data-testid={`wysiwyg-block-${blockIndex}`}
       className={`wysiwyg-block group ${isEditing ? 'wysiwyg-active' : ''} ${
         isDark ? 'text-slate-100' : 'text-gray-900'
@@ -262,7 +273,7 @@ export default function WYSIWYGBlock({
             setDraft(e.target.value);
             autoSize(e.target);
           }}
-          onBlur={handleSave}
+          onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder="Type markdown…"
           rows={1}

@@ -1920,6 +1920,81 @@ sequenceDiagram
     expect(postCalls()).toHaveLength(1);
   }, 10000);
 
+  it('creating an architecture document makes a .md file with an embedded diagram and opens it', async () => {
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    mockFetchWithFile(DEMO);
+    render(<ClientPage />);
+    await screen.findByTestId('diagram-viewer');
+
+    // create a brand-new architecture document through the dialog
+    fireEvent.click(screen.getByTestId('new-diagram'));
+    fireEvent.change(screen.getByTestId('new-diagram-name'), { target: { value: 'arch' } });
+    fireEvent.change(screen.getByTestId('new-diagram-type'), { target: { value: 'markdown' } });
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+
+    // the file was created through the API with the architecture document template
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    const [createUrl, createInit] = postCalls()[0];
+    expect(String(createUrl)).toContain('/api/file/arch.md');
+    const createBody = JSON.parse((createInit as { body: string }).body);
+    expect(createBody.content).toContain('# Architecture');
+    expect(createBody.content).toContain('```mermaid');
+    expect(createBody.content).toContain('sequenceDiagram');
+    // the app navigated to the new document (no diagram param)
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('file=arch.md'), { scroll: false });
+    });
+    // the markdown file is listed in the Files menu
+    expect(await screen.findByTestId('md-file-arch.md')).toBeTruthy();
+  }, 15000);
+
+  it('creating an architecture document normalizes the name and rejects duplicates', async () => {
+    const params: Record<string, string> = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => params[key] ?? null);
+    // the directory already contains notes.md
+    filesState.list = ['demo.mmd'];
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
+      if (init?.method === 'POST') {
+        fileContent.current = JSON.parse(init.body ?? '{}').content ?? '';
+        const m = String(url).match(/^\/api\/file\/([^?]+)/);
+        if (m && !filesState.list.includes(m[1])) filesState.list.push(m[1]);
+        return { ok: true, json: async () => ({}) };
+      }
+      return {
+        ok: true,
+        json: async () => {
+          if (String(url).startsWith('/api/file/')) return { content: fileContent.current };
+          return { files: [...filesState.list], markdownFiles: ['notes.md'] };
+        },
+      };
+    });
+    render(<ClientPage />);
+    await screen.findByTestId('diagram-viewer');
+
+    fireEvent.click(screen.getByTestId('new-diagram'));
+    // the user types the extension too: it must not be doubled
+    fireEvent.change(screen.getByTestId('new-diagram-name'), { target: { value: 'arch.md' } });
+    fireEvent.change(screen.getByTestId('new-diagram-type'), { target: { value: 'markdown' } });
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    expect(String(postCalls()[0][0])).toContain('/api/file/arch.md');
+    expect(String(postCalls()[0][0])).not.toContain('arch.md.md');
+
+    // a duplicate of an existing markdown file is rejected
+    fireEvent.click(screen.getByTestId('new-diagram'));
+    fireEvent.change(screen.getByTestId('new-diagram-name'), { target: { value: 'notes' } });
+    fireEvent.change(screen.getByTestId('new-diagram-type'), { target: { value: 'markdown' } });
+    fireEvent.click(screen.getByTestId('new-diagram-create'));
+    expect((await screen.findByTestId('new-diagram-error')).textContent).toBe('notes.md already exists');
+  }, 15000);
+
   it('shows an error when the directory cannot be read', async () => {
     mockParams({ dir: '/bad/dir' });
     const mockFetch = global.fetch as import('vitest').Mock;
@@ -3311,6 +3386,79 @@ sequenceDiagram
         expect(url).toContain('file=notes.md');
         expect(url).toContain('diagram=1');
       });
+    });
+
+    // The WYSIWYG insert-diagram flow: a whole-document edit (the scaffolded
+    // mermaid block) is committed and the new diagram is opened right away.
+    // The diagram editor loads the block from disk, so the pending document
+    // edit must be persisted before the block is read back — otherwise the
+    // content clear on selection switch cancels the debounced auto-save and
+    // the insert is lost.
+    it('persists a pending document edit before opening an embedded diagram', async () => {
+      // A stateful fake disk: whole-file GET/POST, and the embedded-diagram
+      // endpoint extracts the block from the current disk content (the real
+      // extractMermaidBlocks, like the API route).
+      const disk = { content: MD_DOC };
+      const filePosts: string[] = [];
+      const mockFetch = global.fetch as import('vitest').Mock;
+      mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
+        const u = String(url);
+        if (init?.method === 'POST' && u.startsWith('/api/file/notes.md')) {
+          const body = JSON.parse(init.body ?? '{}');
+          filePosts.push(body.content ?? '');
+          disk.content = body.content ?? '';
+          return { ok: true, json: async () => ({}) };
+        }
+        if (u.startsWith('/api/markdown/diagram?')) {
+          const index = Number(new URL(`http://test${u}`).searchParams.get('index'));
+          const block = extractMermaidBlocks(disk.content)[index];
+          return { ok: true, json: async () => block ? { file: 'notes.md', index, content: block.content } : { error: 'Diagram index out of range' } };
+        }
+        if (u.startsWith('/api/markdown/diagrams')) {
+          return { ok: true, json: async () => ({ file: 'notes.md', diagrams: [{ index: 0, title: 'sequenceDiagram', startLine: 5, endLine: 7 }] }) };
+        }
+        if (u.startsWith('/api/files')) {
+          return { ok: true, json: async () => ({ files: ['demo.mmd'], markdownFiles: ['notes.md'] }) };
+        }
+        if (u.startsWith('/api/file/notes.md')) {
+          return { ok: true, json: async () => ({ content: disk.content }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+
+      mockParams({ file: 'notes.md' });
+      const { rerender } = render(<ClientPage />);
+      const editor = await screen.findByTestId('markdown-editor');
+      await waitFor(() => {
+        expect(editor.getAttribute('data-code')).toBe(MD_DOC);
+      });
+
+      // A pending whole-document edit (e.g. a just-inserted diagram block)
+      const edited = `${MD_DOC}\`\`\`mermaid\nflowchart TD\n    X[X] --> Y[Y]\n\`\`\`\n`;
+      fireEvent.change(screen.getByTestId('markdown-editor-source'), { target: { value: edited } });
+
+      // Open diagram 1 (the just-inserted flowchart) — the same selection the
+      // WYSIWYG insert flow makes right after committing the edit.
+      fireEvent.click(screen.getByTestId('markdown-select-diagram-1'));
+      mockParams({ file: 'notes.md', diagram: '1' });
+      rerender(<ClientPage />);
+
+      // The diagram editor loads the block — from the flushed disk content
+      const viewer = await screen.findByTestId('diagram-viewer');
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('flowchart TD');
+      }, { timeout: 3000 });
+      expect(viewer.getAttribute('data-code')).not.toContain('# Notes');
+
+      // The pending document edit was persisted BEFORE the block was loaded:
+      // the flush POST precedes the diagram GET, and the disk holds the edit.
+      expect(filePosts).toContain(edited);
+      const flushPostIdx = mockFetch.mock.calls.findIndex(c =>
+        String(c[0]).startsWith('/api/file/notes.md') && (c[1] as { method?: string } | undefined)?.method === 'POST'
+      );
+      const diagramGetIdx = mockFetch.mock.calls.findIndex(c => String(c[0]).startsWith('/api/markdown/diagram?'));
+      expect(flushPostIdx).toBeGreaterThanOrEqual(0);
+      expect(diagramGetIdx).toBeGreaterThan(flushPostIdx);
     });
 
     it('switching from a markdown document to an embedded diagram never passes markdown prose to DiagramViewer', async () => {

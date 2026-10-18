@@ -691,13 +691,23 @@ path[data-et="edge"].edge-hover {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
 
-/* Insert "+" button between blocks */
+/* Insert "+" button between blocks. z-index keeps the (translated-up) button
+   and its menu above the neighbouring blocks, which are position: relative
+   and would otherwise cover the button's clickable area. */
 .wysiwyg-insert-row {
   display: flex;
   justify-content: center;
   height: 0;
   overflow: visible;
   position: relative;
+  z-index: 5;
+}
+
+/* The row whose menu is open must outrank the sibling rows below it — they
+   share z-index 5 and later DOM order would paint their "+" buttons over the
+   open menu. */
+.wysiwyg-insert-row-open {
+  z-index: 30;
 }
 
 .wysiwyg-insert-btn {
@@ -726,6 +736,44 @@ path[data-et="edge"].edge-hover {
 
 .theme-dark .wysiwyg-insert-btn:hover {
   border-color: #3b82f6;
+}
+
+/* Insert menu (text block / sequence diagram / flowchart), opened by the "+" button */
+.wysiwyg-insert-menu {
+  position: absolute;
+  top: 1.6em;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 11em;
+  padding: 0.25em;
+  border: 1px solid;
+  border-radius: 0.5em;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.wysiwyg-insert-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  width: 100%;
+  padding: 0.3em 0.55em;
+  border: none;
+  border-radius: 0.375em;
+  background: transparent;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  color: inherit;
+}
+
+.wysiwyg-insert-menu-item svg {
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 
 /* Mermaid blocks inside the WYSIWYG editor get a small top margin */

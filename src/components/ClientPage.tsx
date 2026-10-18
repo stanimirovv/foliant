@@ -32,16 +32,29 @@ import { exportSvgToFile } from '@/lib/svgExport';
 import { PendingDelete } from './EditorPanel';
 import type { MdDiagramMeta } from '@/lib/markdownTypes';
 import { createSerialQueue } from '@/lib/serialQueue';
+import { extractMermaidBlocks } from '@/lib/markdown';
+import { MERMAID_DIAGRAM_TEMPLATES, scaffoldMermaidBlock } from '@/lib/markdownBlocks';
 
 // Undo/redo history depth: capped so both stacks stay small (10-15 steps).
 const HISTORY_LIMIT = 15;
 
-// Starter content for the New Diagram dialog (the user picks the file name
-// and the diagram type).
-const NEW_DIAGRAM_TEMPLATES: Record<'sequence' | 'flowchart', string> = {
-  sequence: 'sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: Hello\n    B-->>A: Hi there',
-  flowchart: 'flowchart TD\n    A[Alice] --> B[Bob]\n    B -->|Reply| A',
-};
+// Starter content for the New file dialog (the user picks the file name and
+// the kind: a standalone .mmd diagram or a .md architecture document).
+const NEW_DIAGRAM_TEMPLATES: Record<'sequence' | 'flowchart', string> = MERMAID_DIAGRAM_TEMPLATES;
+
+// A new .md architecture document: a heading, a prose placeholder, and a
+// scaffolded sequence diagram the user can open and edit right away.
+const NEW_MARKDOWN_DOC_TEMPLATE = [
+  '# Architecture',
+  '',
+  'Describe the system here.',
+  '',
+  scaffoldMermaidBlock('sequence'),
+  '',
+].join('\n');
+
+// The kinds the New file dialog can create.
+type NewFileKind = 'sequence' | 'flowchart' | 'markdown';
 
 const RICH_ARROW_LAST_POSITIVE_COLOR_KEY = 'mermaid_rich_arrow_last_positive_color';
 const RICH_ARROW_LAST_ERROR_COLOR_KEY = 'mermaid_rich_arrow_last_error_color';
@@ -117,8 +130,9 @@ export default function ClientPage() {
   // so the confirm dialog can list the cascaded elements; the new code is
   // applied only on confirm.
   const [pendingDelete, setPendingDelete] = useState<(PendingDelete & { code: string }) | null>(null);
-  // New Diagram dialog: create a brand-new .mmd in the current directory
-  // (the user picks the file name and the diagram type) and open it.
+  // New file dialog: create a brand-new .mmd diagram or .md architecture
+  // document in the current directory (the user picks the file name and the
+  // kind) and open it.
   const [pendingNew, setPendingNew] = useState(false);
 
   // Auto-save state (EDITING_PLAN.md Section 4.10): lastWrittenRef holds the
@@ -129,6 +143,11 @@ export default function ClientPage() {
   const lastWrittenRef = useRef<string | null>(null);
   const rawCodeFileRef = useRef<string | null>(null); // which file rawCode belongs to
   const rawCodeDiagramRef = useRef<number | null>(null); // which embedded diagram (index) rawCode belongs to
+  // Always-current rawCode for effects that must not re-run on every keystroke
+  // (e.g. the load effect, which flushes a pending document edit before
+  // opening an embedded diagram).
+  const rawCodeRef = useRef(rawCode);
+  rawCodeRef.current = rawCode;
   const saveSeqRef = useRef(0);                       // only the latest save applies its result
   const loadSeqRef = useRef(0);                       // only the latest load applies its result
   const saveQueueRef = useRef(createSerialQueue());   // client-side FIFO queue for persistence calls
@@ -764,7 +783,38 @@ export default function ClientPage() {
       // A markdown file without a diagram selection loads the whole document
       // into the rich markdown editor; a diagram selection loads just that
       // embedded block.
-      loadFile(currentFile, diagramIndex);
+      //
+      // Opening an embedded diagram from the document view first persists a
+      // pending whole-document edit: the diagram editor loads the block's
+      // source from disk, and the content clear above cancels the debounced
+      // auto-save — without the flush a just-inserted diagram block would
+      // never reach disk and the insert would be lost. The write is serialized
+      // through the save queue so it cannot interleave with an in-flight save.
+      const pendingDocEdit = diagramIndex !== null
+        && rawCodeFileRef.current === currentFile
+        && rawCodeDiagramRef.current === null
+        && rawCodeRef.current !== lastWrittenRef.current;
+      // Capture the pending document eagerly: the content clear above
+      // re-renders (and with it rawCodeRef) before the queued save task runs.
+      const docEditToFlush = pendingDocEdit ? { content: rawCodeRef.current, diagramIndex } : null;
+      const flush = docEditToFlush !== null
+        ? saveQueueRef.current.run(async () => {
+            const res = await postFile(currentFile, docEditToFlush.content);
+            if (res.ok) {
+              // Pre-seed the marker with the target block's source — exactly
+              // what the diagram API returns for it — so the SSE echo of this
+              // write is recognized as our own once the block loads.
+              const block = extractMermaidBlocks(docEditToFlush.content)[docEditToFlush.diagramIndex];
+              lastWrittenRef.current = block ? block.content : docEditToFlush.content;
+            } else {
+              setSaveStatus('error');
+              setSaveErrorMessage(res.message || "Contents aren't saved");
+            }
+          })
+        : Promise.resolve();
+      flush.then(() => {
+        loadFile(currentFile, diagramIndex);
+      });
       setSelection(null);
       setPendingDelete(null);
     } else {
@@ -787,7 +837,7 @@ export default function ClientPage() {
     }
     setChangedLines([]);
     setSourceValidationError(null);
-  }, [currentFile, diagramIndex, loadFile]);
+  }, [currentFile, diagramIndex, loadFile, postFile]);
 
   useEffect(() => {
     const evtSource = new EventSource(`/api/events${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
@@ -1772,21 +1822,29 @@ export default function ClientPage() {
 
   const handleCancelDelete = () => setPendingDelete(null);
 
-  // Creates a new diagram file through the API and navigates to it. Returns
-  // a validation/API error message, or null on success.
-  const createNewDiagram = async (rawName: string, type: 'sequence' | 'flowchart'): Promise<string | null> => {
-    const base = rawName.trim().replace(/\.mmd$/i, '');
+  // Creates a new file through the API and navigates to it: a standalone .mmd
+  // diagram (sequence/flowchart template) or a .md architecture document (with
+  // an embedded diagram scaffold). Returns a validation/API error message, or
+  // null on success.
+  const createNewFile = async (rawName: string, kind: NewFileKind): Promise<string | null> => {
+    const isMarkdown = kind === 'markdown';
+    const base = rawName.trim().replace(isMarkdown ? /\.(md|markdown)$/i : /\.mmd$/i, '');
     if (!base) return 'Enter a file name';
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(base)) {
       return 'Use letters, numbers, dashes and underscores only';
     }
-    const name = `${base}.mmd`;
-    if (files.includes(name)) return `${name} already exists`;
-    const createRes = await postFile(name, NEW_DIAGRAM_TEMPLATES[type]);
+    const name = isMarkdown ? `${base}.md` : `${base}.mmd`;
+    if (files.includes(name) || markdownFiles.includes(name)) return `${name} already exists`;
+    const content = isMarkdown ? NEW_MARKDOWN_DOC_TEMPLATE : NEW_DIAGRAM_TEMPLATES[kind];
+    const createRes = await postFile(name, content);
     if (!createRes.ok) {
       return 'Could not create the file';
     }
-    setFiles(prev => [...prev, name].sort());
+    if (isMarkdown) {
+      setMarkdownFiles(prev => [...prev, name].sort());
+    } else {
+      setFiles(prev => [...prev, name].sort());
+    }
     setPendingNew(false);
     const params = new URLSearchParams(searchParams.toString());
     params.set('file', name);
@@ -2038,7 +2096,7 @@ export default function ClientPage() {
               <Folder size={14} className="mr-1" /> Files
               <button
                 data-testid="new-diagram"
-                title="New diagram"
+                title="New file"
                 onClick={() => setPendingNew(true)}
                 className={`ml-auto normal-case font-normal ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500 hover:text-blue-600'} flex items-center space-x-0.5`}
               >
@@ -2901,7 +2959,7 @@ export default function ClientPage() {
 
       {pendingNew && (
         <NewDiagramDialog
-          onCreate={createNewDiagram}
+          onCreate={createNewFile}
           onCancel={() => setPendingNew(false)}
         />
       )}
@@ -2913,18 +2971,18 @@ function NewDiagramDialog({
   onCreate,
   onCancel,
 }: {
-  onCreate: (name: string, type: 'sequence' | 'flowchart') => Promise<string | null>;
+  onCreate: (name: string, kind: NewFileKind) => Promise<string | null>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState('');
-  const [type, setType] = useState<'sequence' | 'flowchart'>('sequence');
+  const [kind, setKind] = useState<NewFileKind>('sequence');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (busy) return;
     setBusy(true);
-    const err = await onCreate(name, type);
+    const err = await onCreate(name, kind);
     setBusy(false);
     if (err) setError(err);
   };
@@ -2935,14 +2993,14 @@ function NewDiagramDialog({
       data-testid="new-diagram-dialog"
     >
       <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg shadow-xl p-4 w-80">
-        <h3 className="text-sm font-semibold mb-2">New diagram</h3>
+        <h3 className="text-sm font-semibold mb-2">New file</h3>
         <label className="block mb-2">
           <span className="text-xs text-gray-500 dark:text-slate-400">File name</span>
           <input
             type="text"
             data-testid="new-diagram-name"
             className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="my-diagram"
+            placeholder={kind === 'markdown' ? 'my-document' : 'my-diagram'}
             value={name}
             onChange={(e) => { setName(e.target.value); setError(null); }}
             onKeyDown={(e) => {
@@ -2958,11 +3016,12 @@ function NewDiagramDialog({
           <select
             data-testid="new-diagram-type"
             className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            value={type}
-            onChange={(e) => setType(e.target.value as 'sequence' | 'flowchart')}
+            value={kind}
+            onChange={(e) => setKind(e.target.value as NewFileKind)}
           >
-            <option value="sequence">Sequence diagram</option>
-            <option value="flowchart">Flowchart</option>
+            <option value="sequence">Sequence diagram (.mmd)</option>
+            <option value="flowchart">Flowchart (.mmd)</option>
+            <option value="markdown">Architecture document (.md)</option>
           </select>
         </label>
         {error && (

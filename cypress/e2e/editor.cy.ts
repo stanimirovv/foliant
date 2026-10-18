@@ -249,4 +249,35 @@ describe('Visual editing (e2e)', () => {
       });
     });
   });
+
+  it('new file: the dialog creates a .md architecture document and opens it in the markdown editor', () => {
+    const name = `e2e-new-doc-${Date.now()}.md`;
+    cy.task<string>('createTempDiagramDir').then((dir) => {
+      // an empty directory: no file selected yet
+      cy.visit(`/?dir=${encodeURIComponent(dir)}`);
+      cy.get('[data-testid="new-diagram"]').should('be.visible').click();
+      // the user types the name without the extension: it is normalized
+      cy.get('[data-testid="new-diagram-name"]').type(name.replace(/\.md$/, ''));
+      cy.get('[data-testid="new-diagram-type"]').select('markdown');
+      cy.get('[data-testid="new-diagram-create"]').click();
+
+      // the app navigates to the new document and shows the WYSIWYG editor
+      cy.url().should('include', `file=${name}`);
+      cy.get('[data-testid="wysiwyg-editor"]', { timeout: 10000 }).should('be.visible');
+      cy.get('[data-testid="wysiwyg-block-0"]').should('contain.text', 'Architecture');
+      // the embedded diagram renders as a preview SVG
+      cy.get('[data-testid="md-mermaid-svg-0"] svg', { timeout: 10000 }).should('exist');
+      // the file is listed in the Files menu as a markdown file
+      cy.get('[data-testid="md-file-' + name + '"]').should('contain.text', name);
+
+      // the file exists on disk with the architecture document template
+      cy.request(fileApi(name, dir)).then((res) => {
+        const content = (res.body as { content: string }).content;
+        expect(content).to.contain('# Architecture');
+        expect(content).to.contain('```mermaid');
+        expect(content).to.contain('sequenceDiagram');
+        expect(content).to.contain('A->>B: Hello');
+      });
+    });
+  });
 });

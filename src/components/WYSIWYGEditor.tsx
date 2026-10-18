@@ -1,15 +1,17 @@
 'use client';
 
-import { useMemo, useState, useCallback } from 'react';
-import { Plus } from 'lucide-react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { Plus, Type, ArrowRightLeft, Workflow } from 'lucide-react';
 import WYSIWYGBlock from './WYSIWYGBlock';
 import MermaidBlockPreview from './MermaidBlockPreview';
 import {
   parseMarkdownBlocks,
   replaceBlockSource,
   insertBlockAfter,
+  insertMermaidBlock,
   deleteBlock,
   type TextBlock,
+  type DiagramInsertType,
 } from '@/lib/markdownBlocks';
 import { DiagramViewSelection } from '@/lib/diagramView';
 
@@ -50,6 +52,9 @@ export default function WYSIWYGEditor({
 }: WYSIWYGEditorProps) {
   // Position of a pending (not yet committed) new block, or null.
   const [pendingInsert, setPendingInsert] = useState<number | null>(null);
+  // Position of the insert menu currently open (the "+" popover with the
+  // block-type choices), or null. At most one menu is open at a time.
+  const [openInsertMenu, setOpenInsertMenu] = useState<number | null>(null);
   const isDark = theme === 'dark';
 
   const blocks = useMemo(() => parseMarkdownBlocks(code), [code]);
@@ -68,8 +73,19 @@ export default function WYSIWYGEditor({
   // blocks.length = after the last). The block is not committed to the
   // document until the user types and saves.
   const handleInsert = useCallback((position: number) => {
+    setOpenInsertMenu(null);
     setPendingInsert(position);
   }, []);
+
+  // Insert a scaffolded mermaid block (sequence diagram / flowchart) at
+  // `position` and open it in the diagram editor right away: the scaffold is
+  // committed through onMarkdownEdit, then the new diagram is selected.
+  const handleInsertDiagram = useCallback((position: number, type: DiagramInsertType) => {
+    const { code: newCode, diagramIndex } = insertMermaidBlock(code, position, type);
+    setOpenInsertMenu(null);
+    onMarkdownEdit(newCode);
+    onSelectDiagram(diagramIndex);
+  }, [code, onMarkdownEdit, onSelectDiagram]);
 
   // Commit a pending insert: splice the typed source into the document.
   const handleInsertSave = useCallback((position: number, newSource: string) => {
@@ -83,10 +99,31 @@ export default function WYSIWYGEditor({
     setPendingInsert(null);
   }, []);
 
-  // Clicking the container background (not a block) dismisses a pending insert.
+  // Clicking the container background (not a block) dismisses a pending
+  // insert and closes any open insert menu.
   const handleBackgroundClick = () => {
     setPendingInsert(null);
+    setOpenInsertMenu(null);
   };
+
+  // While an insert menu is open, an outside click or Escape closes it.
+  useEffect(() => {
+    if (openInsertMenu === null) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('.wysiwyg-insert-menu, .wysiwyg-insert-btn')) return;
+      setOpenInsertMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenInsertMenu(null);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openInsertMenu]);
 
   // A synthetic empty text block for a pending insert.
   const pendingBlock: TextBlock = {
@@ -123,7 +160,15 @@ export default function WYSIWYGEditor({
             >
               (empty document — click + to add content)
             </div>
-            <InsertButton position={0} isDark={isDark} onInsert={handleInsert} />
+            <InsertButton
+              position={0}
+              isDark={isDark}
+              isOpen={openInsertMenu === 0}
+              onToggle={() => setOpenInsertMenu(openInsertMenu === 0 ? null : 0)}
+              onClose={() => setOpenInsertMenu(null)}
+              onInsert={handleInsert}
+              onInsertDiagram={handleInsertDiagram}
+            />
           </>
         )}
       </div>
@@ -148,7 +193,15 @@ export default function WYSIWYGEditor({
           onCancel={handleInsertCancel}
         />
       ) : (
-        <InsertButton position={0} isDark={isDark} onInsert={handleInsert} />
+        <InsertButton
+          position={0}
+          isDark={isDark}
+          isOpen={openInsertMenu === 0}
+          onToggle={() => setOpenInsertMenu(openInsertMenu === 0 ? null : 0)}
+          onClose={() => setOpenInsertMenu(null)}
+          onInsert={handleInsert}
+          onInsertDiagram={handleInsertDiagram}
+        />
       )}
 
       {blocks.map((block, i) => (
@@ -192,7 +245,15 @@ export default function WYSIWYGEditor({
               onCancel={handleInsertCancel}
             />
           ) : (
-            <InsertButton position={i + 1} isDark={isDark} onInsert={handleInsert} />
+            <InsertButton
+              position={i + 1}
+              isDark={isDark}
+              isOpen={openInsertMenu === i + 1}
+              onToggle={() => setOpenInsertMenu(openInsertMenu === i + 1 ? null : i + 1)}
+              onClose={() => setOpenInsertMenu(null)}
+              onInsert={handleInsert}
+              onInsertDiagram={handleInsertDiagram}
+            />
           )}
         </div>
       ))}
@@ -200,29 +261,83 @@ export default function WYSIWYGEditor({
   );
 }
 
-// The "+" button between blocks. Appears on hover of the gap area.
+// The "+" button between blocks. Appears on hover of the gap area. Clicking
+// it opens a small menu with the block choices: a plain text block (edited
+// inline), or a scaffolded mermaid block (sequence diagram / flowchart) that
+// is inserted and opened in the diagram editor right away.
 function InsertButton({
   position,
   isDark,
+  isOpen,
+  onToggle,
+  onClose,
   onInsert,
+  onInsertDiagram,
 }: {
   position: number;
   isDark: boolean;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
   onInsert: (position: number) => void;
+  onInsertDiagram: (position: number, type: DiagramInsertType) => void;
 }) {
+  const itemClass = `wysiwyg-insert-menu-item ${isDark ? 'text-slate-200 hover:bg-slate-700' : 'text-gray-700 hover:bg-gray-100'}`;
   return (
-    <div className="wysiwyg-insert-row group/insert">
+    <div className={`wysiwyg-insert-row group/insert${isOpen ? ' wysiwyg-insert-row-open' : ''}`}>
       <button
         data-testid={`wysiwyg-insert-${position}`}
         onClick={(e) => {
           e.stopPropagation();
-          onInsert(position);
+          onToggle();
         }}
         title="Insert block"
+        aria-expanded={isOpen}
         className={`wysiwyg-insert-btn ${isDark ? 'text-slate-500 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-400 hover:text-blue-600 hover:bg-gray-100'}`}
       >
         <Plus size={14} />
       </button>
+      {isOpen && (
+        <div
+          data-testid={`wysiwyg-insert-menu-${position}`}
+          className={`wysiwyg-insert-menu ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            data-testid={`wysiwyg-insert-text-${position}`}
+            className={itemClass}
+            onClick={() => {
+              onClose();
+              onInsert(position);
+            }}
+          >
+            <Type size={12} />
+            Text block
+          </button>
+          <button
+            data-testid={`wysiwyg-insert-diagram-sequence-${position}`}
+            className={itemClass}
+            onClick={() => {
+              onClose();
+              onInsertDiagram(position, 'sequence');
+            }}
+          >
+            <ArrowRightLeft size={12} />
+            Sequence Diagram
+          </button>
+          <button
+            data-testid={`wysiwyg-insert-diagram-flowchart-${position}`}
+            className={itemClass}
+            onClick={() => {
+              onClose();
+              onInsertDiagram(position, 'flowchart');
+            }}
+          >
+            <Workflow size={12} />
+            Flowchart
+          </button>
+        </div>
+      )}
     </div>
   );
 }

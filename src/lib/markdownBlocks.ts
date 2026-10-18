@@ -206,6 +206,42 @@ export function convertBlockType(source: string, targetType: BlockType): string 
   }
 }
 
+// Diagram types that can be scaffolded as a new mermaid block.
+export type DiagramInsertType = 'sequence' | 'flowchart';
+
+// Starter content for a freshly scaffolded diagram. Also used by the
+// ClientPage "+ New" dialog as the initial content of standalone .mmd files.
+export const MERMAID_DIAGRAM_TEMPLATES: Record<DiagramInsertType, string> = {
+  sequence: 'sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: Hello\n    B-->>A: Hi there',
+  flowchart: 'flowchart TD\n    A[Alice] --> B[Bob]\n    B -->|Reply| A',
+};
+
+// The full fenced-block source for a freshly scaffolded diagram: a valid
+// ```mermaid block ready to be spliced into a markdown document.
+export function scaffoldMermaidBlock(type: DiagramInsertType): string {
+  return '```mermaid\n' + MERMAID_DIAGRAM_TEMPLATES[type] + '\n```';
+}
+
+// Insert a scaffolded mermaid block at block `position` (0 = before the first
+// block, blocks.length = after the last — the same positions the WYSIWYG
+// insert buttons report). Returns the new full document and the diagram index
+// of the new block (0-based among mermaid blocks, matching the diagram URL
+// param and onSelectDiagram), so the caller can open it in the diagram editor
+// right away.
+export function insertMermaidBlock(
+  markdown: string,
+  position: number,
+  type: DiagramInsertType,
+): { code: string; diagramIndex: number } {
+  const blocks = parseMarkdownBlocks(markdown);
+  if (position < 0 || position > blocks.length) {
+    throw new RangeError(`No insert position ${position} (document has ${blocks.length} blocks)`);
+  }
+  const code = insertBlockAfter(markdown, position - 1, scaffoldMermaidBlock(type));
+  const diagramIndex = blocks.slice(0, position).filter(b => b.kind === 'mermaid').length;
+  return { code, diagramIndex };
+}
+
 // Delete the block at `blockIndex`. Also consumes trailing blank lines up to
 // the next block (or end of document) to avoid leaving double blank lines.
 // When deleting the last block, also consumes preceding blank lines back to

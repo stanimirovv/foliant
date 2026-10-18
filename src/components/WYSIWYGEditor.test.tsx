@@ -189,12 +189,19 @@ describe('WYSIWYGEditor', () => {
   });
 
   describe('inserting a block', () => {
-    it('clicking + shows a pending block in edit mode without modifying the document', () => {
+    it('clicking + opens a menu; choosing Text block shows a pending block without modifying the document', () => {
       const { props } = renderEditor();
       fireEvent.click(screen.getByTestId('wysiwyg-insert-0'));
 
-      // A textarea appears (pending block in edit mode)
+      // The menu is open, no pending block yet
+      expect(screen.getByTestId('wysiwyg-insert-menu-0')).toBeTruthy();
+      expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
+
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-text-0'));
+
+      // A textarea appears (pending block in edit mode), the menu is closed
       expect(screen.getByTestId('wysiwyg-block-editor-0')).toBeTruthy();
+      expect(screen.queryByTestId('wysiwyg-insert-menu-0')).toBeNull();
       // The document is not modified yet
       expect(props.onMarkdownEdit).not.toHaveBeenCalled();
     });
@@ -202,6 +209,7 @@ describe('WYSIWYGEditor', () => {
     it('typing in a pending block and saving inserts it into the document', () => {
       const { props } = renderEditor();
       fireEvent.click(screen.getByTestId('wysiwyg-insert-0'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-text-0'));
 
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'New first paragraph.' } });
@@ -220,6 +228,7 @@ describe('WYSIWYGEditor', () => {
     it('cancelling a pending insert does not modify the document', () => {
       const { props } = renderEditor();
       fireEvent.click(screen.getByTestId('wysiwyg-insert-1'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-text-1'));
 
       // Pending block appears
       expect(screen.getByTestId('wysiwyg-block-editor-1')).toBeTruthy();
@@ -233,6 +242,7 @@ describe('WYSIWYGEditor', () => {
       const { props } = renderEditor();
       // Insert after block 0 (the heading) → position 1
       fireEvent.click(screen.getByTestId('wysiwyg-insert-1'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-text-1'));
 
       const textarea = screen.getByTestId('wysiwyg-block-editor-1');
       fireEvent.change(textarea, { target: { value: 'Inserted paragraph.' } });
@@ -252,6 +262,7 @@ describe('WYSIWYGEditor', () => {
       const { props } = renderEditor();
       // 6 blocks → insert at position 6 (after the last)
       fireEvent.click(screen.getByTestId('wysiwyg-insert-6'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-text-6'));
 
       const textarea = screen.getByTestId('wysiwyg-block-editor-6');
       fireEvent.change(textarea, { target: { value: 'Appended paragraph.' } });
@@ -270,6 +281,7 @@ describe('WYSIWYGEditor', () => {
     it('insert into an empty document works', () => {
       const { props } = renderEditor({ code: '' });
       fireEvent.click(screen.getByTestId('wysiwyg-insert-0'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-text-0'));
 
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'First content.' } });
@@ -278,6 +290,142 @@ describe('WYSIWYGEditor', () => {
       expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
       const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
       expect(newCode).toContain('First content.');
+    });
+  });
+
+  describe('insert menu behavior', () => {
+    it('opening the menu does not modify the document; Escape dismisses it', () => {
+      const { props } = renderEditor();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-2'));
+      expect(screen.getByTestId('wysiwyg-insert-menu-2')).toBeTruthy();
+      expect(props.onMarkdownEdit).not.toHaveBeenCalled();
+      expect(props.onSelectDiagram).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      expect(screen.queryByTestId('wysiwyg-insert-menu-2')).toBeNull();
+      expect(props.onMarkdownEdit).not.toHaveBeenCalled();
+    });
+
+    it('clicking + again toggles the menu closed', () => {
+      renderEditor();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-2'));
+      expect(screen.getByTestId('wysiwyg-insert-menu-2')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-2'));
+      expect(screen.queryByTestId('wysiwyg-insert-menu-2')).toBeNull();
+    });
+
+    it('only one menu is open at a time', () => {
+      renderEditor();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-0'));
+      expect(screen.getByTestId('wysiwyg-insert-menu-0')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-3'));
+      expect(screen.queryByTestId('wysiwyg-insert-menu-0')).toBeNull();
+      expect(screen.getByTestId('wysiwyg-insert-menu-3')).toBeTruthy();
+    });
+
+    it('the menu offers text, sequence diagram, and flowchart choices', () => {
+      renderEditor();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-1'));
+      const menu = screen.getByTestId('wysiwyg-insert-menu-1');
+      expect(menu.textContent).toContain('Text block');
+      expect(menu.textContent).toContain('Sequence Diagram');
+      expect(menu.textContent).toContain('Flowchart');
+    });
+  });
+
+  describe('inserting a diagram', () => {
+    it('+ Sequence Diagram scaffolds a mermaid block and opens it in the diagram editor', () => {
+      const { props } = renderEditor();
+      // Insert after block 0 (the heading) → position 1
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-1'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-diagram-sequence-1'));
+
+      // The document gains a scaffolded ```mermaid block, committed once
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      expect(newCode).toContain('```mermaid');
+      expect(newCode).toContain('sequenceDiagram');
+      expect(newCode).toContain('participant A as Alice');
+      // between the heading and the intro prose
+      const headingPos = newCode.indexOf('# Architecture Notes');
+      const fencePos = newCode.indexOf('```mermaid');
+      const introPos = newCode.indexOf('Intro prose');
+      expect(headingPos).toBeLessThan(fencePos);
+      expect(fencePos).toBeLessThan(introPos);
+      // surrounding content preserved
+      expect(newCode).toContain('A->>B: First diagram');
+      expect(newCode).toContain('Trailing prose.');
+
+      // The new diagram is opened in the diagram editor: no mermaid block
+      // sits before position 1, so the new diagram is diagram 0.
+      expect(props.onSelectDiagram).toHaveBeenCalledTimes(1);
+      expect(props.onSelectDiagram).toHaveBeenCalledWith(0);
+
+      // The menu is closed
+      expect(screen.queryByTestId('wysiwyg-insert-menu-1')).toBeNull();
+
+      // The new document parses with the new mermaid block at block index 1
+      const blocks = parseMarkdownBlocks(newCode);
+      expect(blocks.length).toBe(parseMarkdownBlocks(MD).length + 1);
+      expect(blocks[1].kind).toBe('mermaid');
+      const mermaid = blocks.filter(b => b.kind === 'mermaid');
+      expect(mermaid.map(b => (b.kind === 'mermaid' ? b.index : -1))).toEqual([0, 1, 2]);
+    });
+
+    it('+ Flowchart between two existing diagrams opens the computed diagram index', () => {
+      const { props } = renderEditor();
+      // MD: block 2 = mermaid (diagram 0), block 4 = mermaid (diagram 1).
+      // Insert after block 2 → position 3 → one mermaid before → diagram 1.
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-3'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-diagram-flowchart-3'));
+
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      expect(newCode).toContain('flowchart TD');
+      expect(newCode).toContain('B -->|Reply| A');
+      // inserted between the first mermaid and the middle prose
+      const firstDiagramPos = newCode.indexOf('A->>B: First diagram');
+      const newFencePos = newCode.indexOf('B -->|Reply| A');
+      const middlePos = newCode.indexOf('Middle prose.');
+      expect(firstDiagramPos).toBeLessThan(newFencePos);
+      expect(newFencePos).toBeLessThan(middlePos);
+
+      expect(props.onSelectDiagram).toHaveBeenCalledWith(1);
+
+      const mermaid = parseMarkdownBlocks(newCode).filter(b => b.kind === 'mermaid');
+      expect(mermaid.map(b => (b.kind === 'mermaid' ? b.index : -1))).toEqual([0, 1, 2]);
+      if (mermaid[1].kind === 'mermaid') {
+        expect(mermaid[1].content).toContain('B -->|Reply| A');
+      }
+    });
+
+    it('inserting a sequence diagram into an empty document opens diagram 0', () => {
+      const { props } = renderEditor({ code: '' });
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-0'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-diagram-sequence-0'));
+
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      expect(newCode).toBe('```mermaid\nsequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: Hello\n    B-->>A: Hi there\n```');
+      expect(props.onSelectDiagram).toHaveBeenCalledWith(0);
+    });
+
+    it('after inserting, the new document renders the mermaid block preview', () => {
+      const { props, rerender } = renderEditor();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-1'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-diagram-sequence-1'));
+      const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+
+      rerender(<WYSIWYGEditor {...props} code={newCode} />);
+      // block 1 is now the new mermaid block (rendered by the preview mock);
+      // the intro prose shifted to block 2
+      expect(screen.queryByTestId('wysiwyg-block-1')).toBeNull();
+      expect(screen.getByTestId('wysiwyg-block-2').textContent).toContain('bold');
+      // three mermaid previews: the new scaffold (diagram 0) plus the two
+      // existing diagrams shifted to indexes 1 and 2
+      expect(screen.getByTestId('mock-mermaid-block-0').textContent).toContain('sequenceDiagram');
+      expect(screen.getByTestId('mock-mermaid-block-1').textContent).toContain('sequenceDiagram');
+      expect(screen.getByTestId('mock-mermaid-block-2').textContent).toContain('flowchart TD');
     });
   });
 

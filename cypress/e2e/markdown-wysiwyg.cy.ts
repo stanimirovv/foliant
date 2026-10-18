@@ -85,8 +85,10 @@ describe('WYSIWYG markdown editor (e2e)', () => {
         cy.visit(wysiwygAppUrl(dir, { file: 'notes.md' }));
         cy.get('[data-testid="wysiwyg-editor"]', { timeout: 10000 }).should('be.visible');
 
-        // Click the insert button after block 0 (the heading) → position 1
+        // Click the insert button after block 0 (the heading) → position 1,
+        // then choose "Text block" from the insert menu
         cy.get('[data-testid="wysiwyg-insert-1"]').click();
+        cy.get('[data-testid="wysiwyg-insert-text-1"]').click();
 
         // A pending block appears in edit mode
         cy.get('[data-testid="wysiwyg-block-editor-1"]').should('be.visible').type('Inserted paragraph.');
@@ -106,6 +108,95 @@ describe('WYSIWYG markdown editor (e2e)', () => {
           const introPos = md.indexOf('Edited intro prose.') >= 0 ? md.indexOf('Edited intro prose.') : md.indexOf('Intro prose');
           expect(headingPos).to.be.lessThan(insertedPos);
           expect(insertedPos).to.be.lessThan(introPos);
+        });
+      });
+  });
+
+  it('inserts a sequence diagram via the + menu and opens it in the diagram editor', () => {
+    let dir = '';
+    // A prose-only document: no mermaid blocks yet.
+    const PROSE_MD = [
+      '# Architecture Notes',
+      '',
+      'Intro prose that must survive.',
+      '',
+      'Trailing prose.',
+      '',
+    ].join('\n');
+    cy.task<string>('createTempDiagramDir')
+      .then(d => {
+        dir = d;
+        return cy.request('POST', wysiwygFileApi('notes.md', dir), { content: PROSE_MD });
+      })
+      .then(() => {
+        cy.visit(wysiwygAppUrl(dir, { file: 'notes.md' }));
+        cy.get('[data-testid="wysiwyg-editor"]', { timeout: 10000 }).should('be.visible');
+
+        // blocks: 0=heading, 1=intro, 2=trailing → insert after the intro
+        cy.get('[data-testid="wysiwyg-insert-2"]').click();
+        cy.get('[data-testid="wysiwyg-insert-diagram-sequence-2"]').click();
+
+        // The new diagram opens right into the visual diagram editor
+        cy.url().should('include', 'file=notes.md');
+        cy.url().should('include', 'diagram=0');
+        cy.get('#diagram-container svg', { timeout: 10000 }).should('exist');
+        cy.get('#diagram-container').contains('Alice').should('exist');
+        cy.get('#diagram-container').contains('Hello').should('exist');
+        wysiwygSaved();
+      })
+      .then(() => {
+        // The scaffolded block was persisted into the markdown file
+        return cy.request('GET', wysiwygFileApi('notes.md', dir)).then(res => {
+          const md = res.body.content as string;
+          expect(md).to.contain('```mermaid');
+          expect(md).to.contain('sequenceDiagram');
+          expect(md).to.contain('A->>B: Hello');
+          // surrounding content preserved, block between intro and trailing
+          const introPos = md.indexOf('Intro prose that must survive.');
+          const fencePos = md.indexOf('```mermaid');
+          const trailingPos = md.indexOf('Trailing prose.');
+          expect(introPos).to.be.lessThan(fencePos);
+          expect(fencePos).to.be.lessThan(trailingPos);
+        });
+      });
+  });
+
+  it('inserts a flowchart between existing diagrams and opens the computed diagram index', () => {
+    let dir = '';
+    cy.task<string>('createTempDiagramDir')
+      .then(d => {
+        dir = d;
+        return cy.request('POST', wysiwygFileApi('notes.md', dir), { content: WYSIWYG_MD });
+      })
+      .then(() => {
+        cy.visit(wysiwygAppUrl(dir, { file: 'notes.md' }));
+        cy.get('[data-testid="wysiwyg-editor"]', { timeout: 10000 }).should('be.visible');
+
+        // WYSIWYG_MD blocks: 0=heading, 1=intro, 2=mermaid (diagram 0),
+        // 3=middle, 4=trailing. Insert after the existing mermaid → position 3
+        // → one mermaid block before it → the new flowchart is diagram 1.
+        cy.get('[data-testid="wysiwyg-insert-3"]').click();
+        cy.get('[data-testid="wysiwyg-insert-diagram-flowchart-3"]').click();
+
+        // The diagram editor opens on the NEW diagram (index 1), not the
+        // existing one (index 0)
+        cy.url().should('include', 'diagram=1');
+        cy.get('#diagram-container svg', { timeout: 10000 }).should('exist');
+        cy.get('#diagram-container').contains('Reply').should('exist');
+        wysiwygSaved();
+      })
+      .then(() => {
+        return cy.request('GET', wysiwygFileApi('notes.md', dir)).then(res => {
+          const md = res.body.content as string;
+          // the flowchart scaffold sits between the first diagram and the
+          // middle prose
+          const firstDiagramPos = md.indexOf('A->>B: First diagram');
+          const newFencePos = md.indexOf('B -->|Reply| A');
+          const middlePos = md.indexOf('Middle prose with **bold** text.');
+          expect(firstDiagramPos).to.be.lessThan(newFencePos);
+          expect(newFencePos).to.be.lessThan(middlePos);
+          // the original diagram is untouched
+          expect(md).to.contain('sequenceDiagram');
         });
       });
   });
@@ -264,8 +355,9 @@ describe('WYSIWYG markdown editor (e2e)', () => {
         cy.visit(wysiwygAppUrl(dir, { file: 'empty.md' }));
         cy.get('[data-testid="wysiwyg-empty"]', { timeout: 10000 }).should('contain.text', 'empty document');
 
-        // Click + and type
+        // Click +, choose "Text block", and type
         cy.get('[data-testid="wysiwyg-insert-0"]').click();
+        cy.get('[data-testid="wysiwyg-insert-text-0"]').click();
         cy.get('[data-testid="wysiwyg-block-editor-0"]').type('First content.');
         cy.get('[data-testid="wysiwyg-block-save-0"]').click();
 
