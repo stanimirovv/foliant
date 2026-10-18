@@ -215,6 +215,7 @@ Unlike whiteboard tools that generate arbitrary JSON or proprietary canvas objec
 - **Flowchart Chained Edge Editing**: Multi-hop edge declarations (`A --> B --> C --> D`) are fully parsed into distinct, selectable nodes and links. Editing any node, edge label, arrow style, or endpoint in a chain updates that link without breaking or corrupting the rest of the chain.
 - **Precision Hit Paths**: Flowchart edges feature invisible, widened hit paths and hover affordances so even 1px thin or dashed lines can be selected accurately on the first click.
 - **Canvas Keyboard Shortcuts**: `Delete` / `Backspace` deletes the selected element (the same action as the panel's Delete button, including the cascade confirmation for notes), `Escape` clears the canvas selection or cancels an in-progress drag, and `Cmd/Ctrl+Shift+Z` redoes an undone edit (next to `Ctrl+Z` / `Ctrl+Y`). The shortcuts stay inert while typing in a text field.
+- **Double-Click Inline Label Editing**: Double-click any participant box, flowchart node, or message/edge label directly on the canvas to edit it in place — a small floating input opens over the element (sized to its on-screen text, so it stays aligned at any zoom). `Enter` or clicking away commits; `Escape` cancels. The edit runs through the same pipeline as the properties panel: the `.mmd` file is rewritten, the change joins the undo/redo stack, and it auto-saves.
 
 ### 2. Context-Sensitive Properties Panel
 Clicking any element on the canvas opens the context-sensitive side panel:

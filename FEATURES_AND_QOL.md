@@ -60,18 +60,20 @@ The application is a local-first Next.js 14 visual editor and architectural view
 - Also fixed while testing this: the SVG host `<div>` re-created its `dangerouslySetInnerHTML` object on every render, and React diffs host props by identity at commit time — so **every** re-render re-applied `innerHTML` and replaced the whole SVG subtree, detaching the search-match elements (auto-pan became a no-op) and wiping their highlight. The object is now memoized on `[svgStr]`, so the SVG survives unrelated re-renders.
 - Covered by unit tests (`DiagramViewer.test.tsx`) and `cypress/e2e/zoom-controls.cy.ts`.
 
+### 3. Double-Click Inline Label Editing on the Canvas — DONE
+- Double-clicking a participant box (top or bottom, box or stick figure), flowchart node, or message/edge label on the SVG canvas opens a floating `<input>` directly over the clicked element's label (`[data-testid="inline-label-editor"]` in [`DiagramViewer`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/components/DiagramViewer.tsx)), sized to the label's screen rect and font-matched to the on-screen text size, so it stays aligned at any zoom. `Enter` or clicking away commits; `Escape` cancels; an unchanged label is not reported.
+- The new [`labelElementForKey`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/lib/svgmap.ts) helper in `svgmap.ts` resolves the label element for a processed key (preferring the actually-clicked visual, e.g. a bottom actor box), and [`ClientPage`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/components/ClientPage.tsx) maps the processed key back to the raw element through `buildSelectionMap` and runs the same `renameParticipant` / `editMessageLabel` → `applyEditResult` pipeline as the properties panel — so the `.mmd` rewrite, undo stack, and auto-save behave identically. Notes and sticky notes are excluded (sticky notes keep their own double-click editor); the editor only opens in edit mode and not while visual edits are locked.
+- Also fixed while testing this: `react-zoom-pan-pinch` `preventDefault()`s mousedown while panning, so clicking the canvas never blurred the input — the canvas now commits the open editor on mousedown (capture phase).
+- Covered by unit tests (`svgmap.test.ts`, `DiagramViewer.test.tsx`, `ClientPage.test.tsx`) and `cypress/e2e/inline-label-edit.cy.ts`.
+
 ---
 
-## ✨ 3 Remaining Quality-of-Life (QoL) Improvements
+## ✨ 2 Remaining Quality-of-Life (QoL) Improvements
 
-### 1. Double-Click Inline Label Editing on the Canvas
-- **Current gap**: Clicking a participant, node, or message selects it, requiring the user to move their mouse to the right [`EditorPanel`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/components/EditorPanel.tsx) (which might even be hidden via `Tab`) to edit its label.
-- **Fix**: Double-clicking any participant box, flowchart node, or message text on the SVG canvas should open a small floating inline input directly over the SVG element's bounding box (just like [`StickyNote`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/components/StickyNote.tsx) already does on double-click).
-
-### 2. Replace Native `window.prompt` / `window.confirm` in Saved Views & Add "Update Active View"
+### 1. Replace Native `window.prompt` / `window.confirm` in Saved Views & Add "Update Active View"
 - **Current gap**: [`saveCurrentView`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/components/ClientPage.tsx#L1777-L1812) uses `window.prompt('Enter view name:')` and [`deleteView`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/components/ClientPage.tsx#L1814-L1835) uses `window.confirm(...)`, whereas `New Diagram` and `Delete Element` use styled inline modals. Furthermore, if you load a saved view, tweak a filter, and want to update that view, you have to click Save and manually re-type the exact view name into `window.prompt`.
 - **Fix**: Replace the browser prompts with an inline popover/input, and show a 1-click **"Update View"** button on the active view when filter state diverges from the saved view.
 
-### 3. PNG / Clipboard Image Export alongside SVG Export
+### 2. PNG / Clipboard Image Export alongside SVG Export
 - **Current gap**: [`exportSvgToFile`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/lib/svgExport.ts) exports a standalone `.svg` file, and [`handleCopyMermaid`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/components/ClientPage.tsx#L1409-L1430) copies raw Mermaid syntax. However, pasting diagrams into Slack, Jira, Google Docs, or PR comments usually requires a high-DPI PNG image on the clipboard (`Copy as PNG` / `Export PNG`).
 - **Fix**: Add a **"Copy PNG" / "Export PNG"** option next to [`Export SVG`](file:///Users/zlatinstanimirov/code/mermaid-sequence-viewer/src/components/ClientPage.tsx#L2530-L2543) that renders the serialized SVG onto an offscreen `<canvas>` (at `2x` scale) and writes it to `navigator.clipboard.write` or downloads a `.png`.

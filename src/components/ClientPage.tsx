@@ -1541,6 +1541,17 @@ export default function ClientPage() {
     applyEditResult(fn(rawCode, viewsData, selectedRawElement.key, newLabel));
   };
 
+  // Double-click inline label edit on the canvas: the viewer reports the
+  // processed key of the double-clicked element; map it to the raw element
+  // and run the same label-edit pipeline as the properties panel.
+  const handleInlineLabelEdit = (processedKey: string, newLabel: string) => {
+    const rawEl = selectionMap.get(processedKey);
+    if (!rawEl) return;
+    if (rawEl.kind !== 'participant' && rawEl.kind !== 'node' && rawEl.kind !== 'message' && rawEl.kind !== 'edge') return;
+    const fn = (rawEl.kind === 'participant' || rawEl.kind === 'node') ? renameParticipant : editMessageLabel;
+    applyEditResult(fn(rawCode, viewsData, rawEl.key, newLabel));
+  };
+
   const handleSetColor = (color: string) => {
     const trimmed = color.trim().toLowerCase();
     if (trimmed) {
@@ -2689,6 +2700,7 @@ export default function ClientPage() {
                 onSelectNote={handleSelectNote}
                 onUpdateNote={handleUpdateNote}
                 onDeleteNote={handleDeleteNote}
+                onLabelEdit={handleInlineLabelEdit}
               />
             )}
             {!isVisualLocked && !isMarkdownDoc && (

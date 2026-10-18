@@ -7,6 +7,7 @@ import { parseModel, ParticipantElement, looksLikeMermaidDiagram } from '@/lib/m
 import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, PAN_EXCLUDE_CLASS } from '@/lib/styling';
 import {
   elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf, zipModelToSvg, EDGE_HIT_CLASS,
+  labelElementForKey,
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
   nearestParticipantAtX, nearestMessageKeyAt,
   sequenceConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
@@ -45,6 +46,9 @@ interface DiagramViewerProps {
   onSelectNote?: (id: string, options?: { shiftKey?: boolean }) => void;
   onUpdateNote?: (id: string, patch: Partial<Omit<StickyNoteType, 'id'>>) => void;
   onDeleteNote?: (id: string) => void;
+  // Double-click inline label editing: reports the processed key of the
+  // double-clicked participant/node/message/edge and the edited label.
+  onLabelEdit?: (key: string, label: string) => void;
 }
 
 // Minimum mouse movement (px) before a press becomes a drag.
@@ -397,6 +401,7 @@ export default function DiagramViewer({
   onSelectNote,
   onUpdateNote,
   onDeleteNote,
+  onLabelEdit,
 }: DiagramViewerProps) {
   const [svgStr, setSvgStr] = useState<string>('');
   // Memoized so the object identity is stable across re-renders while svgStr
@@ -436,6 +441,37 @@ export default function DiagramViewer({
   // active match for the pill's prev/next navigation + auto-pan.
   const [searchMatches, setSearchMatches] = useState<Element[]>([]);
   const [searchMatchIndex, setSearchMatchIndex] = useState(0);
+
+  // Double-click inline label editing: a floating input over the clicked
+  // element's label text (Enter/blur commits, Escape cancels), mirroring the
+  // StickyNote double-click-to-edit pattern. The rect is captured in viewport
+  // coordinates at open time.
+  const [labelEdit, setLabelEdit] = useState<{
+    key: string;
+    initial: string;
+    value: string;
+    placeholder: string;
+    rect: { left: number; top: number; width: number; height: number };
+    fontSize: number;
+  } | null>(null);
+  const labelEditRef = useRef(labelEdit);
+  labelEditRef.current = labelEdit;
+  // Guards against double-commit: Enter commits, then the unmount blur fires.
+  const labelEditDoneRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Enter/blur commits (once — the unmount after Enter also fires blur);
+  // Escape cancels. An unchanged label is not reported (the edit pipeline
+  // no-ops on identical code anyway).
+  const finishLabelEdit = (commit: boolean) => {
+    const current = labelEditRef.current;
+    if (!current || labelEditDoneRef.current) return;
+    labelEditDoneRef.current = true;
+    setLabelEdit(null);
+    if (commit && current.value !== current.initial) {
+      onLabelEdit?.(current.key, current.value);
+    }
+  };
 
   // In edit mode, dragging a participant (sequence) or a node (flowchart)
   // must not pan the screen — exclude those elements from TransformWrapper
@@ -821,6 +857,11 @@ export default function DiagramViewer({
   // Capture phase: stopPropagation prevents TransformWrapper from starting a
   // pan when the press is on a participant/node element (or near a lifeline).
   const handleMouseDownCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    // An open inline label editor commits when the mouse is pressed anywhere
+    // on the canvas: the TransformWrapper pan handler preventDefaults
+    // mousedown, so the input would never blur (and thus never commit) on a
+    // canvas click.
+    if (labelEditRef.current) finishLabelEdit(true);
     if ((e.target as Element).closest('.sticky-note-card')) {
       return;
     }
@@ -1379,6 +1420,38 @@ export default function DiagramViewer({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [editMode]);
 
+  // Double-click delegation: in edit mode, double-clicking a participant box,
+  // flowchart node, or message/edge label opens a floating inline input over
+  // the clicked label (just like StickyNote's double-click-to-edit). Notes and
+  // sticky notes are excluded — sticky notes have their own inline editor.
+  const handleDiagramDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!editMode || isVisualLocked || !onLabelEdit) return;
+    if ((e.target as Element).closest('.sticky-note-card')) return;
+    const ctx = getSvgAndModel();
+    if (!ctx) return;
+    const key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model, { x: e.clientX, y: e.clientY });
+    if (!key) return;
+    const el = ctx.model.elements.find(el => el.key === key);
+    if (!el || (el.kind !== 'participant' && el.kind !== 'node' && el.kind !== 'message' && el.kind !== 'edge')) return;
+    const labelEl = labelElementForKey(ctx.svgRoot, ctx.model, key, e.target as Element);
+    if (!labelEl) return;
+    const rect = labelEl.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    // Match the on-screen text size (content font size × pan/zoom × viewBox).
+    const computed = parseFloat(getComputedStyle(labelEl).fontSize);
+    const fontSize = Math.min(Math.max((Number.isFinite(computed) ? computed : 14) * contentScaleOf(ctx.svgRoot), 10), 64);
+    const initial = el.kind === 'participant' ? (el.alias ?? '') : (el.label ?? '');
+    labelEditDoneRef.current = false;
+    setLabelEdit({
+      key,
+      initial,
+      value: initial,
+      placeholder: el.kind === 'participant' ? el.id : 'Label',
+      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      fontSize,
+    });
+  };
+
   // Click delegation: in edit mode, resolve the target to a processed element
   // key (null = empty space -> deselect). Suppressed after a drag.
   const handleDiagramClick = (e: ReactMouseEvent<HTMLDivElement>) => {
@@ -1409,6 +1482,7 @@ export default function DiagramViewer({
 
   return (
     <div
+      ref={rootRef}
       className={`w-full h-full relative overflow-hidden rounded border transition-colors ${
         theme === 'dark'
           ? 'bg-slate-950 border-slate-800/80 text-slate-100 theme-dark'
@@ -1440,6 +1514,7 @@ export default function DiagramViewer({
         className={`w-full h-full select-none ${editMode ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
         style={cursorHint ? { cursor: cursorHint } : undefined}
         onClick={handleDiagramClick}
+        onDoubleClick={handleDiagramDoubleClick}
         onMouseDownCapture={handleMouseDownCapture}
         onMouseMove={handleContainerMouseMove}
         onMouseLeave={() => {
@@ -1595,6 +1670,51 @@ export default function DiagramViewer({
           </>
         )}
       </div>
+      {/* Floating inline label editor (double-click on a participant box,
+          flowchart node, or message/edge label in edit mode). Sits outside
+          #diagram-container so canvas click/drag/pinch handlers never see its
+          events; positioned over the clicked label's screen rect, converted to
+          this root's coordinate space. Enter/blur commits, Escape cancels. */}
+      {labelEdit && (() => {
+        const rootRect = rootRef.current?.getBoundingClientRect();
+        return (
+          <input
+            data-testid="inline-label-editor"
+            autoFocus
+            value={labelEdit.value}
+            placeholder={labelEdit.placeholder}
+            onChange={(e) => setLabelEdit({ ...labelEdit, value: e.target.value })}
+            onFocus={(e) => e.target.select()}
+            onBlur={() => finishLabelEdit(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                finishLabelEdit(true);
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                finishLabelEdit(false);
+              }
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            className={`absolute z-40 rounded border-2 px-1 text-center shadow-lg outline-none select-text overflow-hidden ${
+              theme === 'dark'
+                ? 'bg-slate-900 border-blue-500 text-slate-100 placeholder:text-slate-500'
+                : 'bg-white border-blue-500 text-gray-900 placeholder:text-gray-400'
+            }`}
+            style={{
+              left: labelEdit.rect.left - (rootRect?.left ?? 0),
+              top: labelEdit.rect.top - (rootRect?.top ?? 0),
+              width: labelEdit.rect.width,
+              height: labelEdit.rect.height,
+              fontSize: labelEdit.fontSize,
+              lineHeight: `${labelEdit.rect.height}px`,
+            }}
+          />
+        );
+      })()}
       {hoverConnectHandle && !dragOverlay && (
         <svg
           data-testid="connect-handle-overlay"

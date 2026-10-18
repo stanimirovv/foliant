@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { parseModel, DiagramModel, ParticipantElement, MessageElement } from './model';
-import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, SvgZip, EDGE_HIT_CLASS } from './svgmap';
+import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, labelElementForKey, SvgZip, EDGE_HIT_CLASS } from './svgmap';
 import { addEdgeHitPaths } from './styling';
 import { transformActors, processMermaid } from './preprocessor';
 import { DiagramConfig } from './views';
@@ -727,3 +727,122 @@ describe('arrow decorator selection & complex.mmd arrow selection', () => {
   });
 });
 
+
+describe('labelElementForKey (inline label editing)', () => {
+  it('sequence: participant key resolves to the zipped (top) actor-box text', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const el = labelElementForKey(svg, model, 'p:0');
+    expect(el?.matches('text.actor')).toBe(true);
+    expect(el?.textContent).toBe('A');
+    expect(el?.closest('[data-et="participant"]')?.getAttribute('data-id')).toBe('A');
+  });
+
+  it('sequence: a clicked bottom actor box resolves to that box\'s own text', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const bottomRect = svg.querySelector('rect.actor-bottom[name="C"]');
+    expect(bottomRect).toBeTruthy();
+    const el = labelElementForKey(svg, model, 'p:2', bottomRect ?? undefined);
+    expect(el?.matches('text.actor')).toBe(true);
+    expect(el?.textContent).toBe('C');
+    // the bottom box's text, not the zipped top group's
+    expect(el?.closest('[data-et="participant"]')).toBeNull();
+    // without a target, the canonical (top box) label is returned
+    expect(labelElementForKey(svg, model, 'p:2')?.closest('[data-et="participant"]')).toBeTruthy();
+  });
+
+  it('sequence: a clicked stick figure resolves to its own text', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const man = svg.querySelector('g.actor-man[name="B"]');
+    expect(man).toBeTruthy();
+    const el = labelElementForKey(svg, model, 'p:1', man ?? undefined);
+    expect(el?.matches('text.actor')).toBe(true);
+    expect(el?.textContent).toBe('B');
+  });
+
+  it('sequence: a clicked tspan inside the actor text resolves to that text', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const tspan = svg.querySelector('g[data-et="participant"][data-id="A"] text.actor tspan');
+    expect(tspan).toBeTruthy();
+    const el = labelElementForKey(svg, model, 'p:0', tspan ?? undefined);
+    expect(el?.matches('text.actor')).toBe(true);
+    expect(el?.textContent).toBe('A');
+  });
+
+  it('sequence: message key resolves to the messageText preceding its line', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const el = labelElementForKey(svg, model, 'm:1');
+    expect(el?.matches('text.messageText')).toBe(true);
+    expect(el?.textContent).toBe('m2');
+    expect(el?.nextElementSibling?.matches('[data-et="message"]')).toBe(true);
+  });
+
+  it('sequence: a self-call message (path) resolves to its messageText too', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const el = labelElementForKey(svg, model, 'm:2');
+    expect(el?.matches('text.messageText')).toBe(true);
+    expect(el?.textContent).toBe('m3');
+  });
+
+  it('sequence: clicking the messageText itself returns that same element', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const text = svg.querySelectorAll('text.messageText')[1];
+    expect(labelElementForKey(svg, model, 'm:1', text)).toBe(text);
+  });
+
+  it('sequence: notes and unknown keys are not inline-editable', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    expect(labelElementForKey(svg, model, 'note:0')).toBeNull();
+    expect(labelElementForKey(svg, model, 'nope')).toBeNull();
+  });
+
+  it('flowchart: node key resolves to its nodeLabel span', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const model = flowModel();
+    const el = labelElementForKey(svg, model, 'n:2');
+    expect(el?.matches('span.nodeLabel')).toBe(true);
+    expect(el?.textContent).toBe('Charlie');
+  });
+
+  it('flowchart: clicking a node shape resolves to that node\'s own label', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const model = flowModel();
+    const polygon = svg.querySelector('g.node[id$="-C-7"] polygon');
+    expect(polygon).toBeTruthy();
+    const el = labelElementForKey(svg, model, 'n:2', polygon ?? undefined);
+    expect(el?.matches('span.nodeLabel')).toBe(true);
+    expect(el?.textContent).toBe('Charlie');
+    expect(el?.closest('g.node')?.getAttribute('id')).toContain('-C-7');
+  });
+
+  it('flowchart: edge key resolves to its edgeLabel span via data-id', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const model = flowModel();
+    const el = labelElementForKey(svg, model, 'e:1');
+    expect(el?.matches('span.edgeLabel')).toBe(true);
+    expect(el?.textContent).toBe('Reply');
+  });
+
+  it('flowchart: clicking the edge label group resolves to its edgeLabel span', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const model = flowModel();
+    const labelG = svg.querySelector('g.edgeLabel');
+    expect(labelG).toBeTruthy();
+    const el = labelElementForKey(svg, model, 'e:1', labelG ?? undefined);
+    expect(el?.matches('span.edgeLabel')).toBe(true);
+    expect(el?.textContent).toBe('Reply');
+  });
+
+  it('flowchart: an unlabeled edge has no label element', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const model = flowModel();
+    expect(labelElementForKey(svg, model, 'e:0')).toBeNull();
+  });
+});

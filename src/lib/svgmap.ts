@@ -434,6 +434,78 @@ export function svgElementForKey(svg: Element, model: DiagramModel, key: string)
   return null;
 }
 
+// The SVG element that renders the editable label text for the given model
+// element key — sequence participant → the actor-box `text.actor` (top and
+// bottom boxes and stick figures all render the same alias), message → the
+// `text.messageText` preceding its line, flowchart node → the `span.nodeLabel`,
+// edge → the `span.edgeLabel` in the label group carrying the edge's data-id.
+// When `target` (the double-click target) sits inside a different visual of the
+// same element (e.g. a bottom actor box, or a node's shape rect), that visual's
+// own label element wins, so the inline editor opens right where the user
+// clicked. Returns null for notes (not inline-editable) and unknown keys.
+export function labelElementForKey(
+  svg: Element,
+  model: DiagramModel,
+  key: string,
+  target?: Element | null,
+): Element | null {
+  const zip = zipModelToSvg(svg, model);
+  const zippedFor = (kind: string, zipped: (Element | null)[]): Element | null => {
+    const list = ofKind(model, kind);
+    const i = list.findIndex(e => e.key === key);
+    return i >= 0 ? zipped[i] ?? null : null;
+  };
+
+  if (model.type === 'sequence') {
+    if (ofKind<ParticipantElement>(model, 'participant').some(p => p.key === key)) {
+      const actorText = target?.closest('text.actor');
+      if (actorText) return actorText;
+      const rect = target?.closest('rect.actor');
+      const rectText = rect?.parentElement?.querySelector('text.actor');
+      if (rectText) return rectText;
+      const manText = target?.closest('g.actor-man')?.querySelector('text.actor');
+      if (manText) return manText;
+      return zippedFor('participant', zip.participants)?.querySelector('text.actor') ?? null;
+    }
+    const line = zippedFor('message', zip.messages);
+    if (line) {
+      const own = target?.closest('text.messageText');
+      if (own) return own;
+      const parent = line.parentElement;
+      if (parent) {
+        const text = toArray(parent.querySelectorAll('text.messageText'))
+          .find(t => t.nextElementSibling === line);
+        if (text) return text;
+      }
+    }
+    return null;
+  }
+
+  if (model.type === 'flowchart') {
+    if (ofKind<NodeElement>(model, 'node').some(n => n.key === key)) {
+      const holder = target?.closest('g.node') ?? zippedFor('node', zip.nodes);
+      return holder?.querySelector('g.label span.nodeLabel')
+        ?? holder?.querySelector('span.nodeLabel')
+        ?? null;
+    }
+    const edge = zippedFor('edge', zip.edges);
+    if (edge && ofKind<EdgeElement>(model, 'edge').some(e => e.key === key)) {
+      const ownLabel = target?.closest('g.edgeLabel');
+      if (ownLabel) {
+        return ownLabel.querySelector('span.edgeLabel') ?? ownLabel.querySelector('g.label') ?? ownLabel;
+      }
+      const dataId = edge.getAttribute('data-id');
+      if (!dataId) return null;
+      const label = toArray(svg.querySelectorAll('g.edgeLabel g.label[data-id]'))
+        .find(l => l.getAttribute('data-id') === dataId);
+      return label?.querySelector('span.edgeLabel') ?? label ?? null;
+    }
+    return null;
+  }
+
+  return null;
+}
+
 // --- Screen-coordinate helpers for drag interactions (sequence diagrams) ---
 // These use getBoundingClientRect (post-transform screen coordinates) so the
 // drag overlay aligns with the rendered diagram regardless of pan/zoom.

@@ -2118,3 +2118,256 @@ describe('DiagramViewer zoom controls & search navigation', () => {
     });
   });
 });
+
+describe('DiagramViewer double-click inline label editing', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  const editorOf = (container: HTMLElement) =>
+    container.querySelector('[data-testid="inline-label-editor"]') as HTMLInputElement | null;
+
+  const actorTextOf = (container: HTMLElement, id: string) =>
+    container.querySelector(`g[data-et="participant"][data-id="${id}"] text.actor`) as Element;
+
+  const messageTextOf = (container: HTMLElement, label: string) =>
+    Array.from(container.querySelectorAll('text.messageText'))
+      .find(t => t.textContent === label) as Element;
+
+  it('double-clicking a participant box opens the editor over its label; Enter commits', async () => {
+    const onLabelEdit = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const actorText = actorTextOf(container, 'A');
+    expect(actorText).toBeTruthy();
+    mockRect(actorText, 10, 20, 80, 20);
+
+    fireEvent.doubleClick(actorText, { clientX: 50, clientY: 30 });
+
+    const editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    // participant A has no alias in SEQ_CODE: empty value, id as placeholder
+    expect(editor!.value).toBe('');
+    expect(editor!.placeholder).toBe('A');
+    // positioned over the label's screen rect (root rect is 0,0 in jsdom)
+    expect(editor!.style.left).toBe('10px');
+    expect(editor!.style.top).toBe('20px');
+    expect(editor!.style.width).toBe('80px');
+    expect(editor!.style.height).toBe('20px');
+
+    fireEvent.change(editor!, { target: { value: 'New A' } });
+    fireEvent.keyDown(editor!, { key: 'Enter' });
+
+    expect(onLabelEdit).toHaveBeenCalledTimes(1);
+    expect(onLabelEdit).toHaveBeenCalledWith('p:0', 'New A');
+    expect(editorOf(container)).toBeNull();
+  });
+
+  it('double-clicking a message text opens the editor prefilled; blur commits', async () => {
+    const onLabelEdit = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const text = messageTextOf(container, 'm1');
+    expect(text).toBeTruthy();
+    mockRect(text, 40, 100, 60, 16);
+
+    fireEvent.doubleClick(text, { clientX: 70, clientY: 108 });
+
+    const editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    expect(editor!.value).toBe('m1');
+
+    fireEvent.change(editor!, { target: { value: 'Hello there' } });
+    fireEvent.blur(editor!);
+
+    expect(onLabelEdit).toHaveBeenCalledTimes(1);
+    expect(onLabelEdit).toHaveBeenCalledWith('m:0', 'Hello there');
+    expect(editorOf(container)).toBeNull();
+  });
+
+  it('Escape cancels without reporting; an unchanged label is not reported either', async () => {
+    const onLabelEdit = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    // Escape cancels
+    const text = messageTextOf(container, 'm2');
+    mockRect(text, 40, 150, 60, 16);
+    fireEvent.doubleClick(text, { clientX: 70, clientY: 158 });
+    let editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    fireEvent.change(editor!, { target: { value: 'ignored' } });
+    fireEvent.keyDown(editor!, { key: 'Escape' });
+    expect(editorOf(container)).toBeNull();
+    expect(onLabelEdit).not.toHaveBeenCalled();
+
+    // Enter with an unchanged value closes without reporting
+    fireEvent.doubleClick(text, { clientX: 70, clientY: 158 });
+    editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    expect(editor!.value).toBe('m2');
+    fireEvent.keyDown(editor!, { key: 'Enter' });
+    expect(editorOf(container)).toBeNull();
+    expect(onLabelEdit).not.toHaveBeenCalled();
+  });
+
+  it('double-clicking a bottom actor box opens the editor over that box', async () => {
+    const onLabelEdit = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const bottomRect = container.querySelector('rect.actor-bottom[name="C"]') as Element;
+    expect(bottomRect).toBeTruthy();
+    const bottomText = bottomRect.parentElement!.querySelector('text.actor') as Element;
+    mockRect(bottomText, 300, 326, 100, 40);
+
+    fireEvent.doubleClick(bottomRect, { clientX: 350, clientY: 346 });
+
+    const editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    expect(editor!.value).toBe('');
+    expect(editor!.style.left).toBe('300px');
+    expect(editor!.style.top).toBe('326px');
+
+    fireEvent.change(editor!, { target: { value: 'New C' } });
+    fireEvent.keyDown(editor!, { key: 'Enter' });
+    expect(onLabelEdit).toHaveBeenCalledWith('p:2', 'New C');
+  });
+
+  it('double-clicking a flowchart node label opens the editor prefilled; Enter commits', async () => {
+    const onLabelEdit = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const label = container.querySelector('g.node[id$="-A-0"] span.nodeLabel') as Element;
+    expect(label).toBeTruthy();
+    mockRect(label, 12, 8, 120, 24);
+
+    fireEvent.doubleClick(label, { clientX: 70, clientY: 20 });
+
+    const editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    expect(editor!.value).toBe('Alice');
+
+    fireEvent.change(editor!, { target: { value: 'Alicia' } });
+    fireEvent.keyDown(editor!, { key: 'Enter' });
+    expect(onLabelEdit).toHaveBeenCalledTimes(1);
+    expect(onLabelEdit).toHaveBeenCalledWith('n:0', 'Alicia');
+  });
+
+  it('double-clicking a flowchart edge label opens the editor over it', async () => {
+    const onLabelEdit = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const label = container.querySelector('g.edgeLabel span.edgeLabel') as Element;
+    expect(label).toBeTruthy();
+    mockRect(label, 82, 82, 40, 16);
+
+    fireEvent.doubleClick(label, { clientX: 100, clientY: 90 });
+
+    const editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    expect(editor!.value).toBe('Reply');
+
+    fireEvent.change(editor!, { target: { value: 'OK' } });
+    fireEvent.keyDown(editor!, { key: 'Enter' });
+    expect(onLabelEdit).toHaveBeenCalledWith('e:1', 'OK');
+  });
+
+  it('pressing the mouse on the canvas commits the editor (the pan handler suppresses blur)', async () => {
+    const onLabelEdit = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const text = messageTextOf(container, 'm1');
+    mockRect(text, 40, 100, 60, 16);
+    fireEvent.doubleClick(text, { clientX: 70, clientY: 108 });
+    const editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    fireEvent.change(editor!, { target: { value: 'Clicked away' } });
+
+    // react-zoom-pan-pinch preventDefaults mousedown while panning, so the
+    // input never blurs on a canvas click — the container commits instead.
+    const canvas = container.querySelector('#diagram-container') as Element;
+    fireEvent.mouseDown(canvas, { button: 0, clientX: 5, clientY: 5 });
+
+    expect(onLabelEdit).toHaveBeenCalledTimes(1);
+    expect(onLabelEdit).toHaveBeenCalledWith('m:0', 'Clicked away');
+    expect(editorOf(container)).toBeNull();
+  });
+
+  it('does not open for notes, empty space, or outside edit mode / when locked / without onLabelEdit', async () => {
+    const onLabelEdit = vi.fn();
+    const { container, rerender } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    // a mermaid note resolves to a key but is not inline-editable
+    const note = container.querySelector('g[data-et="note"]') as Element;
+    expect(note).toBeTruthy();
+    fireEvent.doubleClick(note, { clientX: 10, clientY: 10 });
+    expect(editorOf(container)).toBeNull();
+
+    // empty space resolves to no key
+    const svg = container.querySelector('#diagram-container svg') as Element;
+    fireEvent.doubleClick(svg, { clientX: 5, clientY: 5 });
+    expect(editorOf(container)).toBeNull();
+
+    // visual edits locked (editing source code)
+    rerender(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode isVisualLocked selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    const text = messageTextOf(container, 'm1');
+    mockRect(text, 40, 100, 60, 16);
+    fireEvent.doubleClick(text, { clientX: 70, clientY: 108 });
+    expect(editorOf(container)).toBeNull();
+
+    // not in edit mode
+    rerender(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    fireEvent.doubleClick(messageTextOf(container, 'm1'), { clientX: 70, clientY: 108 });
+    expect(editorOf(container)).toBeNull();
+
+    // no onLabelEdit handler (view-only usage)
+    rerender(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} />
+    );
+    fireEvent.doubleClick(messageTextOf(container, 'm1'), { clientX: 70, clientY: 108 });
+    expect(editorOf(container)).toBeNull();
+
+    expect(onLabelEdit).not.toHaveBeenCalled();
+  });
+});

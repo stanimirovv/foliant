@@ -50,6 +50,9 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] With an element selected, press `Escape` → the selection clears (highlight gone, panel back to the empty state) and nothing is deleted.
 - [ ] Start a participant drag (press, move past the 5px threshold), press `Escape` mid-drag → the drag overlay disappears; releasing the mouse applies nothing (the file is unchanged).
 - [ ] `Delete`/`Backspace` do nothing outside edit mode (`edit=0`) or while visual edits are locked (editing source code).
+- [ ] Double-click a participant box → a small floating input appears directly over the box, prefilled with the label (the id as placeholder when there is no alias); type a new label → `Enter` → the box label updates and the file auto-saves; `Escape` instead cancels (no change, no save).
+- [ ] Double-click a message text → the input opens over the message, prefilled with its label; edit it → click empty canvas → the input commits (closes) and the label updates; `Enter` commits too.
+- [ ] Double-clicking a bottom actor box opens the input over that bottom box (not the top one); double-clicking empty canvas or a note opens nothing; in view mode (`edit=0`) or while visual edits are locked, double-click does nothing.
 
 ## Increment 2 — Participant editing (sequence)
 
@@ -165,6 +168,8 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] On a small node whose handles reach near its center: pressing the node's center still moves it (the handle grab radius shrinks to fit the box); pressing right at an edge midpoint still connects.
 - [ ] Drag a node into empty space → a dashed indicator shows the target insertion position; releasing moves the node along the layout axis.
 - [ ] Delete a node that has edges → the cascade confirm lists the edges → confirming removes them; the surviving nodes keep their labels (check the `.mmd` file: surviving endpoint declarations are kept, not eaten).
+- [ ] Double-click a node (body or label) → a floating input appears over the node's label, prefilled; rename → `Enter` → the node label updates and the file auto-saves; `Escape` cancels.
+- [ ] Double-click an edge's label → the input opens over it, prefilled; edit → `Enter` → the edge label updates (check the `.mmd` file: `B -->|New label| C`). Double-clicking an unlabeled edge opens nothing.
 
 ## Increment 5 — New Diagram dialog
 

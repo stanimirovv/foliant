@@ -49,6 +49,7 @@ vi.mock('./DiagramViewer', () => ({
     onSelectNote?: (id: string, options?: { shiftKey?: boolean }) => void;
     onUpdateNote?: (id: string, patch: Partial<StickyNote>) => void;
     onDeleteNote?: (id: string) => void;
+    onLabelEdit?: (key: string, label: string) => void;
   }) => (
     <div
       data-testid="diagram-viewer"
@@ -136,6 +137,36 @@ vi.mock('./DiagramViewer', () => ({
         onClick={() => props.onMoveMessage?.('m:0', { type: 'after', key: 'm:1' })}
       >
         drag move message
+      </button>
+      <button
+        data-testid="inline-edit-label-p0"
+        onClick={() => props.onLabelEdit?.('p:0', 'Renamed Alice')}
+      >
+        inline edit p:0
+      </button>
+      <button
+        data-testid="inline-edit-label-m0"
+        onClick={() => props.onLabelEdit?.('m:0', 'Renamed Hello')}
+      >
+        inline edit m:0
+      </button>
+      <button
+        data-testid="inline-edit-label-n0"
+        onClick={() => props.onLabelEdit?.('n:0', 'Renamed Node')}
+      >
+        inline edit n:0
+      </button>
+      <button
+        data-testid="inline-edit-label-note"
+        onClick={() => props.onLabelEdit?.('note:0', 'Nope')}
+      >
+        inline edit note:0
+      </button>
+      <button
+        data-testid="inline-edit-label-unknown"
+        onClick={() => props.onLabelEdit?.('p:99', 'Nope')}
+      >
+        inline edit unknown key
       </button>
     </div>
   ),
@@ -3669,3 +3700,75 @@ sequenceDiagram
 
 
 
+
+describe('ClientPage inline label editing (double-click on the canvas)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fileContent.current = '';
+    postControl.fail = false;
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renames a participant via the processed key and auto-saves the rename', async () => {
+    const viewer = await renderInEditMode(DEMO, 'participant A as Alice');
+
+    fireEvent.click(screen.getByTestId('inline-edit-label-p0'));
+
+    // the processed code passed to the viewer reflects the rename after the debounce
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('participant A as Renamed Alice');
+    }, { timeout: 3000 });
+
+    // the rename is auto-saved to disk
+    await waitFor(() => {
+      expect(postCalls().length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+    const body = JSON.parse((postCalls()[0][1] as { body: string }).body);
+    expect(body.content).toContain('participant A as Renamed Alice');
+  }, 10000);
+
+  it('edits a message label via the processed key', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    fireEvent.click(screen.getByTestId('inline-edit-label-m0'));
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Renamed Hello');
+    }, { timeout: 3000 });
+  });
+
+  it('edits a flowchart node label via the processed key', async () => {
+    const FLOW_DEMO = `flowchart TD
+    A[Alice] --> B[Bob]
+    B -->|Reply| C[Charlie]`;
+    const viewer = await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+
+    fireEvent.click(screen.getByTestId('inline-edit-label-n0'));
+
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A[Renamed Node] --> B[Bob]');
+    }, { timeout: 3000 });
+  });
+
+  it('ignores inline edits for notes and unknown keys (no change, no save)', async () => {
+    const WITH_NOTE = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    Note over A,B: a note`;
+    const viewer = await renderInEditMode(WITH_NOTE, 'A->>B: Hello');
+    const mockFetch = global.fetch as import('vitest').Mock;
+    mockFetch.mockClear();
+
+    fireEvent.click(screen.getByTestId('inline-edit-label-note'));
+    fireEvent.click(screen.getByTestId('inline-edit-label-unknown'));
+
+    // wait past the 800ms auto-save debounce: nothing is posted, nothing changed
+    await new Promise(r => setTimeout(r, 950));
+    expect(postCalls()).toHaveLength(0);
+    expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+    expect(viewer.getAttribute('data-code')).toContain('Note over A,B: a note');
+  }, 10000);
+});
