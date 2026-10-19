@@ -35,6 +35,33 @@ export const SEQ_CODE = `sequenceDiagram
     A->>A: m3
     A->>C: m4`;
 
+export const SEQ_AUTONUMBER_SVG = `<svg id="fx-seq-num" aria-roledescription="sequence" viewBox="-50 -10 450 453">
+<g><line id="actor2" class="actor-line 200" data-et="life-line" data-id="C" x1="250" y1="50" x2="250" y2="326"></line>
+<g id="root-2" data-et="participant" data-type="participant" data-id="C"><rect class="actor actor-top" name="C" x="200" y="0" width="100" height="50"></rect><text class="actor actor-box"><tspan>C</tspan></text></g></g>
+<g><line id="actor1" class="actor-line 200" data-et="life-line" data-id="B" x1="150" y1="50" x2="150" y2="326"></line>
+<g id="root-1" data-et="participant" data-type="participant" data-id="B"><rect class="actor actor-top" name="B" x="100" y="0" width="100" height="50"></rect><text class="actor actor-box"><tspan>B</tspan></text></g></g>
+<g><line id="actor0" class="actor-line 200" data-et="life-line" data-id="A" x1="50" y1="50" x2="50" y2="326"></line>
+<g id="root-0" data-et="participant" data-type="participant" data-id="A"><rect class="actor actor-top" name="A" x="0" y="0" width="100" height="50"></rect><text class="actor actor-box"><tspan>A</tspan></text></g></g>
+<text class="messageText" x="100" y="80">m1</text>
+<line class="messageLine0" data-et="message" data-id="i1" data-from="A" data-to="B" x1="50" y1="90" x2="150" y2="90"></line>
+<text class="sequenceNumber" x="50" y="94">1</text>
+<text class="messageText" x="100" y="130">m2</text>
+<line class="messageLine1" data-et="message" data-id="i2" data-from="B" data-to="A" x1="150" y1="140" x2="50" y2="140"></line>
+<text class="sequenceNumber" x="150" y="144">2</text>
+<text class="messageText" x="50" y="180">m3</text>
+<path class="messageLine0" data-et="message" data-id="i3" data-from="A" data-to="A" d="M 50,190 C 110,180 110,220 50,210"></path>
+<text class="sequenceNumber" x="50" y="194">3</text>
+</svg>`;
+
+export const SEQ_AUTONUMBER_CODE = `sequenceDiagram
+    autonumber
+    participant A
+    participant B
+    participant C
+    A->>B: m1
+    B-->>A: m2
+    A->>A: m3`;
+
 export const FLOW_SVG = `<svg id="fx-flow" class="flowchart" aria-roledescription="flowchart-v2" viewBox="-8 -8 116 36">
 <g><marker id="fx-flow_flowchart-v2-pointEnd-margin" class="marker flowchart-v2"><path class="arrowMarkerPath" d="M 0 0 L 11.5 7 L 0 14 z"></path></marker>
 <g class="root">

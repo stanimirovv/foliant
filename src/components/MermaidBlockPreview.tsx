@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mermaid from 'mermaid';
-import { Pencil } from 'lucide-react';
+import { Pencil, Play } from 'lucide-react';
+import { TransformWrapper, TransformComponent, ReactZoomPanPinchContentRef } from 'react-zoom-pan-pinch';
 import { collectAvailableKeys, parseViewsData } from '@/lib/views';
 import {
   DiagramViewSelection,
@@ -10,6 +11,9 @@ import {
   findSavedView,
   renderDiagramWithView,
 } from '@/lib/diagramView';
+import { WALKTHROUGH_MIN_ZOOM, WALKTHROUGH_MAX_ZOOM } from '@/lib/walkthrough';
+import { useWalkthroughPlayback } from '@/lib/useWalkthroughPlayback';
+import WalkthroughBar from './WalkthroughBar';
 
 export interface MermaidBlockPreviewProps {
   content: string;
@@ -65,6 +69,8 @@ export default function MermaidBlockPreview({
 }: MermaidBlockPreviewProps) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [presenting, setPresenting] = useState(false);
+  const blockTransformRef = useRef<ReactZoomPanPinchContentRef | null>(null);
   // Last successful render for the current block, kept across failed renders.
   const lastGoodRef = useRef<string | null>(null);
   // Scroll request state: the wrapper element and whether the one-shot
@@ -94,6 +100,18 @@ export default function MermaidBlockPreview({
     () => renderDiagramWithView(content, config, viewState ?? EMPTY_DIAGRAM_VIEW_SELECTION),
     [content, config, viewState],
   );
+
+  const walkthrough = useWalkthroughPlayback({
+    code: renderInput.code,
+    config,
+    containerId: `md-mermaid-svg-host-${index}`,
+    transformRef: presenting ? blockTransformRef : undefined,
+    enabled: presenting,
+    svgVersion: svg,
+    onExit: () => setPresenting(false),
+  });
+
+  const svgInnerHtml = useMemo(() => (svg ? { __html: svg } : undefined), [svg]);
 
   // The view active in this block (null when the selection names no saved
   // view of this block). Its stored state drives the render; the chips show
@@ -241,7 +259,9 @@ export default function MermaidBlockPreview({
         isDark ? 'border-slate-700 bg-slate-900/60' : 'border-gray-200 bg-gray-50'
       }`}
       title="Click to open this diagram in the editor"
-      onClick={onSelect}
+      onClick={() => {
+        if (!presenting) onSelect();
+      }}
     >
       <div
         className={`md-mermaid-block-bar ${isDark ? 'text-slate-400 border-slate-700' : 'text-gray-500 border-gray-200'}`}
@@ -288,6 +308,21 @@ export default function MermaidBlockPreview({
             })}
           </div>
         )}
+        {!isEmpty && !isNotDiagram && !showErrorBox && walkthrough.plan && (
+          <button
+            type="button"
+            data-testid={`md-mermaid-present-${index}`}
+            className="md-mermaid-tag-chip inline-flex items-center gap-1"
+            title="Present this diagram step-by-step (←/→, Space, Esc)"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPresenting((p) => !p);
+            }}
+          >
+            <Play size={11} />
+            <span>{presenting ? 'Stop' : 'Present'}</span>
+          </button>
+        )}
         {error !== null && (
           <span
             data-testid={`md-mermaid-error-chip-${index}`}
@@ -323,12 +358,50 @@ export default function MermaidBlockPreview({
           <p className="md-mermaid-error-message">Diagram failed to render: {error}</p>
           <pre className="md-mermaid-error-source">{content}</pre>
         </div>
-      ) : svg ? (
-        <div
-          data-testid={`md-mermaid-svg-${index}`}
-          className="md-mermaid-svg"
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
+      ) : svg && svgInnerHtml ? (
+        presenting ? (
+          <div
+            id={`md-mermaid-svg-host-${index}`}
+            data-testid={`md-mermaid-svg-${index}`}
+            className={`relative h-[70vh] overflow-hidden rounded border ${
+              isDark ? 'border-slate-700' : 'border-gray-200'
+            }`}
+          >
+            <TransformWrapper
+              ref={blockTransformRef}
+              minScale={WALKTHROUGH_MIN_ZOOM}
+              maxScale={WALKTHROUGH_MAX_ZOOM}
+              doubleClick={{ disabled: true }}
+            >
+              <TransformComponent
+                wrapperClass="!w-full !h-full"
+                contentClass="!w-full !h-full flex items-center justify-center p-4"
+              >
+                <div dangerouslySetInnerHTML={svgInnerHtml} />
+              </TransformComponent>
+            </TransformWrapper>
+            {walkthrough.plan && (
+              <WalkthroughBar
+                theme={theme}
+                stepIndex={walkthrough.activeIndex}
+                totalSteps={walkthrough.plan.steps.length}
+                label={walkthrough.plan.steps[walkthrough.activeIndex]?.label}
+                isPlaying={walkthrough.isPlaying}
+                onPrev={walkthrough.prev}
+                onNext={walkthrough.next}
+                onTogglePlay={walkthrough.togglePlay}
+                onExit={walkthrough.exit}
+              />
+            )}
+          </div>
+        ) : (
+          <div
+            id={`md-mermaid-svg-host-${index}`}
+            data-testid={`md-mermaid-svg-${index}`}
+            className="md-mermaid-svg"
+            dangerouslySetInnerHTML={svgInnerHtml}
+          />
+        )
       ) : (
         <div
           data-testid={`md-mermaid-loading-${index}`}

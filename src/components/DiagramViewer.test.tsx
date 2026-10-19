@@ -2371,3 +2371,122 @@ describe('DiagramViewer double-click inline label editing', () => {
     expect(onLabelEdit).not.toHaveBeenCalled();
   });
 });
+
+describe('DiagramViewer — presentation mode (walkthrough player)', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renders WalkthroughBar with 1/N for sequence diagram, dims future messages/notes, highlights active message, anddims non-associated sticky notes', async () => {
+    const config: DiagramConfig = {
+      version: 1,
+      arrows: [{ from: 'B', to: 'A', label: 'm2', keys: ['tag-m2'] }],
+    };
+    const notes = [
+      { id: 'n-free', x: 10, y: 10, text: 'Untagged note' },
+      { id: 'n-m2', x: 50, y: 50, text: 'Tagged to m2', keys: ['tag-m2'] },
+    ];
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        presentation={true}
+        arrowStyles={config}
+        notes={notes}
+        showNotes={true}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    expect(container.querySelector('[data-testid="walkthrough-step-count"]')?.textContent).toBe('Step 1/4');
+    expect(container.querySelector('[data-id="i1"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(container.querySelector('[data-id="i2"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
+    expect(container.querySelector('[data-id="i3"]')?.classList.contains('walkthrough-dimmed')).toBe(true); // note
+
+    // Sticky note tagged to m2 is dimmed at step 1, untagged note is not dimmed
+    expect(
+      container.querySelector('[data-testid="sticky-note-wrapper-n-m2"]')?.classList.contains('walkthrough-dimmed'),
+    ).toBe(true);
+    expect(
+      container.querySelector('[data-testid="sticky-note-wrapper-n-free"]')?.classList.contains('walkthrough-dimmed'),
+    ).toBe(false);
+  });
+
+  it('steps flowchart by depth level (1/N where N = depth levels) and never dims g.cluster', async () => {
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" presentation={true} />,
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    // FLOW_CODE: A -> B -> C => 3 depth levels
+    expect(container.querySelector('[data-testid="walkthrough-step-count"]')?.textContent).toBe('Step 1/3');
+    expect(container.querySelector('[id$="-flowchart-A-0"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(container.querySelector('[id$="-flowchart-B-1"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
+    expect(container.querySelector('g.cluster')?.classList.contains('walkthrough-dimmed')).toBe(false);
+
+    // Advance to step 2 -> reveals node B and edge L_A_B_0
+    fireEvent.click(container.querySelector('[data-testid="walkthrough-next"]')!);
+    expect(container.querySelector('[data-testid="walkthrough-step-count"]')?.textContent).toBe('Step 2/3');
+    expect(container.querySelector('[id$="-flowchart-B-1"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(container.querySelector('[data-id="L_A_B_0"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(container.querySelector('[id$="-flowchart-C-7"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
+  });
+
+  it('steps with arrow keys and calls onExitPresentation on Escape', async () => {
+    const onExitPresentation = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        presentation={true}
+        onExitPresentation={onExitPresentation}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(container.querySelector('[data-testid="walkthrough-step-count"]')?.textContent).toBe('Step 2/4');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onExitPresentation).toHaveBeenCalledTimes(1);
+  });
+
+  it('suspends participant drag when presenting in edit mode, and renders no bar for zero-message diagrams', async () => {
+    const onMoveParticipant = vi.fn();
+    const { container, rerender } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        editMode={true}
+        presentation={true}
+        onSelect={vi.fn()}
+        onMoveParticipant={onMoveParticipant}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const pA = container.querySelector('g[data-et="participant"][data-id="A"]')!;
+    fireEvent.mouseDown(pA, { button: 0, clientX: 50, clientY: 20 });
+    fireEvent.mouseMove(window, { clientX: 250, clientY: 20 });
+    fireEvent.mouseUp(window, { clientX: 250, clientY: 20 });
+    expect(onMoveParticipant).not.toHaveBeenCalled();
+
+    // Zero-message diagram -> plan === null -> no walkthrough bar
+    rerender(
+      <DiagramViewer
+        code={`sequenceDiagram\n  participant A\n  participant B`}
+        searchQuery=""
+        theme="default"
+        presentation={true}
+      />,
+    );
+    expect(container.querySelector('[data-testid="walkthrough-bar"]')).toBeNull();
+  });
+});
+

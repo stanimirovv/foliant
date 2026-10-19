@@ -527,6 +527,25 @@ path[data-et="edge"].edge-hover {
   white-space: pre-wrap;
 }
 
+/* Walkthrough player (WALKTHROUGH_PLAYER.plan.md): dim future steps,
+   highlight the active one. Applied by the useWalkthroughPlayback hook as
+   post-render DOM classes (same mechanism as the search highlight). */
+.walkthrough-dimmed {
+  opacity: 0.2;
+  transition: opacity 0.25s ease;
+}
+.walkthrough-dimmed .walkthrough-dimmed {
+  opacity: 1;
+}
+.walkthrough-active {
+  filter: drop-shadow(0 0 6px #3b82f6);
+}
+@media (prefers-reduced-motion: reduce) {
+  .walkthrough-dimmed {
+    transition: none;
+  }
+}
+
 /* Dark mode overrides (the preview pane carries .theme-dark) */
 .theme-dark .markdown-body { color: #e2e8f0; }
 .theme-dark .markdown-body h1,

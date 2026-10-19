@@ -14,7 +14,7 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Mermaid Viewer",
+  title: "Foliant",
   description: "Locally view and filter complex Mermaid diagrams",
 };
 

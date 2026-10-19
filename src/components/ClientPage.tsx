@@ -321,6 +321,7 @@ export default function ClientPage() {
   
   const currentFile = searchParams.get('file');
   const searchQuery = searchParams.get('q') || '';
+  const presentation = searchParams.get('present') === '1';
   const themeParam = searchParams.get('theme');
   const theme: 'default' | 'dark' = themeParam === 'default' ? 'default' : 'dark';
   const isDark = theme === 'dark';
@@ -2044,7 +2045,7 @@ export default function ClientPage() {
         <div className={`p-4 border-b flex justify-between items-center ${isDark ? 'border-slate-800' : 'border-gray-200'}`}>
           <div className="flex items-center space-x-2">
             <img src="/logo.png" alt="Logo" className="w-6 h-6 rounded-md object-cover" />
-            <h1 className="font-bold">Mermaid Viewer</h1>
+            <h1 className="font-bold">Foliant</h1>
           </div>
           <button 
             onClick={() => {
@@ -2657,6 +2658,32 @@ export default function ClientPage() {
               </>
             )}
             {!isMarkdownDoc && (
+            <>
+            <button
+              onClick={() => {
+                const params = new URLSearchParams(searchParams.toString());
+                if (presentation) params.delete('present');
+                else params.set('present', '1');
+                router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+              }}
+              disabled={!editSupported || !rawCode}
+              title="Present step-by-step (←/→ to step, Space to play/pause, Esc to exit)"
+              data-testid="present-toggle"
+              className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                presentation
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : (isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200')
+              } ${
+                !editSupported || !rawCode
+                  ? 'opacity-40 cursor-not-allowed'
+                  : presentation
+                    ? ''
+                    : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
+              }`}
+            >
+              <Play size={14} />
+              <span>{presentation ? 'Stop' : 'Present'}</span>
+            </button>
             <button
               onClick={handleExportSvg}
               disabled={!rawCode}
@@ -2671,6 +2698,7 @@ export default function ClientPage() {
               <Download size={14} />
               <span>Export SVG</span>
             </button>
+            </>
             )}
           </div>
           <div className="flex items-center space-x-3">
@@ -2765,6 +2793,14 @@ export default function ClientPage() {
                 theme={theme}
                 editMode={editMode}
                 isVisualLocked={isVisualLocked}
+                presentation={presentation}
+                onExitPresentation={() => {
+                  if (presentation) {
+                    const params = new URLSearchParams(searchParams.toString());
+                    params.delete('present');
+                    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                  }
+                }}
                 arrowStyles={resolvedArrowStyles}
                 nodeColors={viewsData}
                 selection={processedSelection}

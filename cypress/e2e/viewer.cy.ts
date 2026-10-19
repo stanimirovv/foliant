@@ -1,4 +1,4 @@
-describe('Mermaid Viewer', () => {
+describe('Foliant', () => {
   it('loads the diagram, filters and syncs with URL', () => {
     // Visit the app with an explicit file: with no `file` param the app
     // auto-selects the first file in the directory, which is not main.mmd.

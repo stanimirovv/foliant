@@ -4,7 +4,7 @@ import MermaidBlockPreview from './MermaidBlockPreview';
 
 // mermaid is mocked: tests assert which source the block renders (recorded on
 // mock.calls), not the SVG.
-const renderMock = vi.fn(() => ({
+const renderMock = vi.fn<(id: string, code: string) => { svg: string }>(() => ({
   svg: '<svg data-testid="mock-mermaid-svg"><text>mock diagram</text></svg>',
 }));
 
@@ -174,3 +174,93 @@ describe('MermaidBlockPreview view/tag controls', () => {
     });
   });
 });
+
+describe('MermaidBlockPreview — presentation mode (walkthrough player)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    renderMock.mockImplementation(() => ({
+      svg: '<svg data-testid="mock-mermaid-svg"><text>mock diagram</text></svg>',
+    }));
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('shows Present button for valid sequence block, wraps SVG in TransformWrapper when presenting, dims future messages & notes, and unwraps on Esc/exit without calling onSelect', async () => {
+    const { SEQ_SVG, SEQ_CODE } = await import('@/lib/svgTestFixtures');
+    renderMock.mockImplementation((id: string) => ({
+      svg: SEQ_SVG.replaceAll('fx-seq', id),
+    }));
+
+    const { props, container } = renderBlock({ content: SEQ_CODE });
+    await waitFor(() => expect(container.querySelector('[data-testid="md-mermaid-svg-0"] svg')).toBeTruthy());
+
+    // Not wrapped in TransformWrapper initially
+    expect(container.querySelector('.react-transform-wrapper')).toBeNull();
+    const presentBtn = screen.getByTestId('md-mermaid-present-0');
+    expect(presentBtn.textContent).toContain('Present');
+
+    // Click Present button -> does not trigger onSelect, wraps in TransformWrapper, shows WalkthroughBar
+    fireEvent.click(presentBtn);
+    expect(props.onSelect).not.toHaveBeenCalled();
+    expect(container.querySelector('.react-transform-wrapper')).toBeTruthy();
+    expect(screen.getByTestId('walkthrough-step-count').textContent).toBe('Step 1/4');
+
+    // Clicking block body while presenting does not trigger onSelect
+    fireEvent.click(screen.getByTestId('md-mermaid-block-0'));
+    expect(props.onSelect).not.toHaveBeenCalled();
+
+    // Step 1: m:0 (i1) is active, m:1 (i2) and note (i3) are dimmed
+    expect(container.querySelector('[data-id="i1"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(container.querySelector('[data-id="i2"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
+    expect(container.querySelector('[data-id="i3"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
+
+    // Step 2: m:1 (i2) and Note over (i3) are revealed
+    fireEvent.click(screen.getByTestId('walkthrough-next'));
+    expect(screen.getByTestId('walkthrough-step-count').textContent).toBe('Step 2/4');
+    expect(container.querySelector('[data-id="i2"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(container.querySelector('[data-id="i3"]')?.classList.contains('walkthrough-dimmed')).toBe(false);
+
+    // Exit via Escape -> unwraps TransformWrapper and restores all elements
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(container.querySelector('.react-transform-wrapper')).toBeNull();
+    expect(screen.queryByTestId('walkthrough-bar')).toBeNull();
+    expect(container.querySelectorAll('.walkthrough-dimmed')).toHaveLength(0);
+    expect(container.querySelectorAll('.walkthrough-active')).toHaveLength(0);
+  });
+
+  it('steps flowchart block by depth level (1/N where N = depth levels)', async () => {
+    const { FLOW_SVG, FLOW_CODE } = await import('@/lib/svgTestFixtures');
+    renderMock.mockImplementation((id: string) => ({
+      svg: FLOW_SVG.replaceAll('fx-flow', id),
+    }));
+
+    const { container } = renderBlock({ content: FLOW_CODE, title: 'flowchart' });
+    await waitFor(() => expect(container.querySelector('[data-testid="md-mermaid-svg-0"] svg')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('md-mermaid-present-0'));
+    expect(screen.getByTestId('walkthrough-step-count').textContent).toBe('Step 1/3');
+    expect(container.querySelector('[id$="-flowchart-A-0"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(container.querySelector('[id$="-flowchart-B-1"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
+
+    fireEvent.click(screen.getByTestId('walkthrough-next'));
+    expect(screen.getByTestId('walkthrough-step-count').textContent).toBe('Step 2/3');
+    expect(container.querySelector('[id$="-flowchart-B-1"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(container.querySelector('[data-id="L_A_B_0"]')?.classList.contains('walkthrough-active')).toBe(true);
+  });
+
+  it('hides Present button for empty, non-diagram, or unsupported diagram blocks', () => {
+    const { unmount: u1 } = renderBlock({ content: '   ' });
+    expect(screen.queryByTestId('md-mermaid-present-0')).toBeNull();
+    u1();
+
+    const { unmount: u2 } = renderBlock({ content: 'just some prose' });
+    expect(screen.queryByTestId('md-mermaid-present-0')).toBeNull();
+    u2();
+
+    const { unmount: u3 } = renderBlock({ content: 'pie\n  "A" : 50\n  "B" : 50' });
+    expect(screen.queryByTestId('md-mermaid-present-0')).toBeNull();
+    u3();
+  });
+});
+
