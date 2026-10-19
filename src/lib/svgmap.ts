@@ -614,6 +614,126 @@ export function getMessageEndpointScreenInfo(svg: Element, model: DiagramModel):
   return result;
 }
 
+export interface EdgeEndpointScreenInfo {
+  key: string;
+  fromX: number; fromY: number;  // screen point of the tail (at the 'from' node boundary)
+  toX: number; toY: number;      // screen point of the arrow head (at the 'to' node boundary)
+}
+
+// The first and last points of an SVG path's `d` attribute, in the path's local
+// coordinates. Mermaid 12.1 flowchart edges are single-subpath paths built
+// from absolute M/L/Q commands (observed in real render output), but the
+// parser handles the full command set (relative forms, H/V, C/S/T, Z) so a
+// future mermaid change degrades to a wrong point, never a crash. Returns
+// null for an empty or unparseable path.
+function pathEndPoints(d: string): { from: { x: number; y: number }; to: { x: number; y: number } } | null {
+  const tokens = d.match(/[A-Za-z]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g);
+  if (!tokens || tokens.length === 0) return null;
+  let i = 0;
+  let cx = 0;
+  let cy = 0;
+  let startX = 0;
+  let startY = 0;
+  let first: { x: number; y: number } | null = null;
+  let last: { x: number; y: number } | null = null;
+  let cmd = '';
+  const num = (): number | null => {
+    const t = tokens[i];
+    if (t === undefined || /[A-Za-z]/.test(t)) return null;
+    i++;
+    return parseFloat(t);
+  };
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (/[A-Za-z]/.test(t)) {
+      cmd = t;
+      i++;
+    }
+    const rel = cmd === cmd.toLowerCase();
+    const c = cmd.toUpperCase();
+    if (c === 'M') {
+      const x = num();
+      const y = num();
+      if (x === null || y === null) return last && first ? { from: first, to: last } : null;
+      cx = rel ? cx + x : x;
+      cy = rel ? cy + y : y;
+      if (!first) first = { x: cx, y: cy };
+      // A moveto starts a new subpath (its implicit continuation is a lineto).
+      startX = cx;
+      startY = cy;
+      last = { x: cx, y: cy };
+      cmd = rel ? 'l' : 'L';
+    } else if (c === 'L') {
+      const x = num();
+      const y = num();
+      if (x === null || y === null) return first && last ? { from: first, to: last } : null;
+      cx = rel ? cx + x : x;
+      cy = rel ? cy + y : y;
+      last = { x: cx, y: cy };
+    } else if (c === 'H') {
+      const x = num();
+      if (x === null) return first && last ? { from: first, to: last } : null;
+      cx = rel ? cx + x : x;
+      last = { x: cx, y: cy };
+    } else if (c === 'V') {
+      const y = num();
+      if (y === null) return first && last ? { from: first, to: last } : null;
+      cy = rel ? cy + y : y;
+      last = { x: cx, y: cy };
+    } else if (c === 'C' || c === 'S' || c === 'Q' || c === 'T') {
+      // Consume the command's coordinate pairs; only the final point matters.
+      const pairs = c === 'C' ? 3 : c === 'S' || c === 'Q' ? 2 : 1;
+      let x: number | null = null;
+      let y: number | null = null;
+      for (let p = 0; p < pairs; p++) {
+        x = num();
+        y = num();
+        if (x === null || y === null) return first && last ? { from: first, to: last } : null;
+      }
+      cx = rel ? cx + x! : x!;
+      cy = rel ? cy + y! : y!;
+      last = { x: cx, y: cy };
+    } else if (c === 'Z') {
+      cx = startX;
+      cy = startY;
+      last = { x: cx, y: cy };
+    } else {
+      return null; // unknown command
+    }
+  }
+  return first && last ? { from: first, to: last } : null;
+}
+
+// Screen points of each flowchart edge's two endpoints. The edge path runs
+// from the origin node's boundary (tail) to the target node's boundary
+// (head, where the arrowhead marker sits), so the path's first/last points
+// are the endpoint positions; they are mapped to viewport coordinates through
+// the path's screen CTM (which already includes the pan/zoom transform).
+// Edges whose path or CTM is missing are skipped (soft-fail).
+export function getEdgeEndpointScreenInfo(svg: Element, model: DiagramModel): EdgeEndpointScreenInfo[] {
+  const zip = zipModelToSvg(svg, model);
+  const edges = ofKind<EdgeElement>(model, 'edge');
+  const result: EdgeEndpointScreenInfo[] = [];
+  edges.forEach((e, i) => {
+    const el = zip.edges[i];
+    if (!el) return;
+    const d = el.getAttribute('d');
+    if (!d) return;
+    const pts = pathEndPoints(d);
+    if (!pts) return;
+    const ctm = (el as unknown as SVGGraphicsElement).getScreenCTM?.();
+    if (!ctm) return;
+    const toScreen = (p: { x: number; y: number }) => ({
+      x: ctm.a * p.x + ctm.c * p.y + ctm.e,
+      y: ctm.b * p.x + ctm.d * p.y + ctm.f,
+    });
+    const from = toScreen(pts.from);
+    const to = toScreen(pts.to);
+    result.push({ key: e.key, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y });
+  });
+  return result;
+}
+
 // Finds the sequence message whose horizontal span and vertical Y coordinate
 // are nearest to the given screen point (x, y) within maxVerticalDist px.
 // Makes clicking arrow lines and surrounding space reliable even when area

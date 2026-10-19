@@ -102,6 +102,7 @@ interface EditorPanelProps {
   onSetNodeShape?: (shape: NodeShape) => void;
   onToggleActivation?: (endpoint: 'target' | 'source', active: boolean) => void;
   onGroupParticipants?: (participantKeys: string[], title: string, color?: string) => void;
+  onGroupNodes?: (nodeKeys: string[], title: string) => void;
   onRequestDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
@@ -166,6 +167,7 @@ export default function EditorPanel({
   onSetNodeShape,
   onToggleActivation,
   onGroupParticipants,
+  onGroupNodes,
   onRequestDelete,
   onConfirmDelete,
   onCancelDelete,
@@ -234,6 +236,7 @@ export default function EditorPanel({
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
           onGroupParticipants={onGroupParticipants}
+          onGroupNodes={onGroupNodes}
         />
       )}
       {!isMultiSelect && activeElement && isComponent(activeElement) && (
@@ -356,6 +359,7 @@ interface MultiElementFieldsProps {
   onAddTag: (tag: string, targetKey?: string) => void;
   onRemoveTag: (tag: string, targetKey?: string) => void;
   onGroupParticipants?: (participantKeys: string[], title: string, color?: string) => void;
+  onGroupNodes?: (nodeKeys: string[], title: string) => void;
 }
 
 function MultiElementFields({
@@ -365,13 +369,16 @@ function MultiElementFields({
   onAddTag,
   onRemoveTag,
   onGroupParticipants,
+  onGroupNodes,
 }: MultiElementFieldsProps) {
   const [tagInput, setTagInput] = useState('');
   const [existingTagSelect, setExistingTagSelect] = useState('');
   const [boxTitle, setBoxTitle] = useState('Group');
   const [boxColor, setBoxColor] = useState('');
+  const [subgraphTitle, setSubgraphTitle] = useState('Subgraph');
 
   const participants = elements.filter((el): el is ParticipantElement => el.kind === 'participant');
+  const nodes = elements.filter((el): el is NodeElement => el.kind === 'node');
 
   const submitTag = () => {
     const tag = tagInput.trim();
@@ -424,6 +431,30 @@ function MultiElementFields({
               className="w-full py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium transition-colors"
             >
               Group into Box
+            </button>
+          </div>
+        </div>
+      )}
+
+      {nodes.length >= 2 && onGroupNodes && (
+        <div className="space-y-2 border border-emerald-100 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20 rounded p-2.5">
+          <span className={fieldLabel}>Group into Subgraph ({nodes.length} nodes)</span>
+          <div className="space-y-1.5">
+            <input
+              type="text"
+              className={fieldInput}
+              placeholder="Subgraph title..."
+              value={subgraphTitle}
+              onChange={(e) => setSubgraphTitle(e.target.value)}
+              data-testid="group-subgraph-title"
+            />
+            <button
+              type="button"
+              data-testid="group-subgraph-button"
+              onClick={() => onGroupNodes(nodes.map(n => n.key), subgraphTitle)}
+              className="w-full py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium transition-colors"
+            >
+              Group into Subgraph
             </button>
           </div>
         </div>

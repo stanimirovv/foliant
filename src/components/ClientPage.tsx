@@ -19,8 +19,8 @@ import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
   getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
-  moveNode, moveMessage, moveMessageEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
-  setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation,
+  moveNode, moveMessage, moveMessageEndpoint, moveEdgeEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
+  setParticipantKind, setNodeShape, toggleActivation, groupParticipants, groupNodes, toggleDiagramOrientation,
   toggleNumberedSteps, hasNumberedSteps,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
@@ -1327,6 +1327,20 @@ export default function ClientPage() {
     applyEditResult(moveMessageEndpoint(rawCode, viewsData, rawMessage.key, end, rawTarget.key));
   };
 
+  // DiagramViewer drag: retarget a flowchart edge's endpoint — drag the arrow
+  // head to change the target node ('to'), the tail to change the origin
+  // ('from'). All keys are processed; resolved to raw keys here.
+  const handleMoveEdgeEndpoint = (
+    edgeProcessedKey: string,
+    end: 'from' | 'to',
+    targetProcessedKey: string,
+  ) => {
+    const rawEdge = selectionMap.get(edgeProcessedKey);
+    const rawTarget = selectionMap.get(targetProcessedKey);
+    if (!rawEdge || !rawTarget) return;
+    applyEditResult(moveEdgeEndpoint(rawCode, viewsData, rawEdge.key, end, rawTarget.key));
+  };
+
   // DiagramViewer drag: reorder a sequence message vertically up or down.
   const handleMoveMessage = (
     messageProcessedKey: string,
@@ -1738,6 +1752,13 @@ export default function ClientPage() {
 
   const handleGroupParticipants = (participantKeys: string[], title: string, color?: string) => {
     applyEditResult(groupParticipants(rawCode, viewsData, participantKeys, title, color));
+  };
+
+  // Editor panel: wrap flowchart nodes into a `subgraph <title> ... end`
+  // block. The subgraph tag pipeline derives the group tag from the title —
+  // no CONFIG entry is written.
+  const handleGroupNodes = (nodeKeys: string[], title: string) => {
+    applyEditResult(groupNodes(rawCode, viewsData, nodeKeys, title));
   };
 
   const handleToggleOrientation = () => {
@@ -2751,6 +2772,7 @@ export default function ClientPage() {
                 onMoveParticipant={handleMoveParticipant}
                 onCreateMessageDrag={handleCreateMessageDrag}
                 onMoveMessageEndpoint={handleMoveMessageEndpoint}
+                onMoveEdgeEndpoint={handleMoveEdgeEndpoint}
                 onMoveMessage={handleMoveMessage}
                 notes={visibleStickyNotes}
                 showNotes={showNotes}
@@ -2930,6 +2952,7 @@ export default function ClientPage() {
                       onSetNodeShape={handleSetNodeShape}
                       onToggleActivation={handleToggleActivation}
                       onGroupParticipants={handleGroupParticipants}
+                      onGroupNodes={handleGroupNodes}
                       onRequestDelete={handleRequestDelete}
                       onConfirmDelete={handleConfirmDelete}
                       onCancelDelete={handleCancelDelete}

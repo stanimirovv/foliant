@@ -2,14 +2,15 @@ import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
-  getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, MessageInsertPosition,
+  getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, moveEdgeEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
-  setParticipantKind, setNodeShape, toggleActivation, groupParticipants, toggleDiagramOrientation, insertMessage,
+  setParticipantKind, setNodeShape, toggleActivation, groupParticipants, groupNodes, toggleDiagramOrientation, insertMessage,
   toggleNumberedSteps, hasNumberedSteps,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
 import { updateViewsData, DiagramConfig } from './views';
+import { buildSubgraphTagIndex, collectSubgraphTags } from './subgraphTags';
 import { createSequenceDiagram, createFlowchartDiagram, parseConfig } from './editorTestHarness';
 
 // Fixture with a CONFIG header, a comment, a region and blank lines: every
@@ -535,6 +536,256 @@ sequenceDiagram
     const res = moveMessageEndpoint(SEQ, SEQ_CFG, 'm:2', 'to', 'p:0');
     expect(res.warning).toBeUndefined();
     expectOnlyLineChanged(SEQ, res.code, 10, '    A->>A: Again');
+  });
+});
+
+describe('moveEdgeEndpoint', () => {
+  // FLOW: A[Alice] --> B[Bob]  (e:0, line 2)
+  //       B -->|Reply| A       (e:1, line 3)
+  //       A -- ping -- B       (e:2, line 4)
+  //       C[Standalone]        (n:2, line 5)
+
+  it('retargets the head (target node), preserving operator, label and spacing', () => {
+    const res = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:0', 'to', 'n:2');
+    expect(res.warning).toBeUndefined();
+    // B's first (shaped) declaration lived on the retargeted endpoint, so it
+    // is preserved as a standalone line — B keeps its label and stays visible.
+    expect(res.code).toBe(`%% CONFIG: {"version":1}
+flowchart TD
+    A[Alice] --> C
+    B[Bob]
+    B -->|Reply| A
+    A -- ping -- B
+    C[Standalone]`);
+    expect(res.newKey).toBe('e:0');
+  });
+
+  it('retargets the tail (origin node)', () => {
+    const res = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:0', 'from', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`%% CONFIG: {"version":1}
+flowchart TD
+    C --> B[Bob]
+    A[Alice]
+    B -->|Reply| A
+    A -- ping -- B
+    C[Standalone]`);
+  });
+
+  it('retargets the head of a labeled (pipe) edge, keeping the label', () => {
+    const res = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:1', 'to', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(FLOW, res.code, 3, '    B -->|Reply| C');
+  });
+
+  it('retargets the head of an open-text edge, keeping the label', () => {
+    const res = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:2', 'to', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(FLOW, res.code, 4, '    A -- ping -- C');
+  });
+
+  it('retargets the tail of an open-text edge', () => {
+    const res = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:2', 'from', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expectOnlyLineChanged(FLOW, res.code, 4, '    C -- ping -- B');
+  });
+
+  it('preserves unusual whitespace around the endpoints', () => {
+    const code = `flowchart TD\n    A  -->  B`;
+    const res = moveEdgeEndpoint(code, null, 'e:0', 'to', 'n:0');
+    expect(res.warning).toBeUndefined();
+    // B's only declaration was the retargeted endpoint: preserved standalone.
+    expect(res.code).toBe(`flowchart TD\n    A  -->  A\n    B`);
+  });
+
+  it('is a no-op when the target is the node already at that end', () => {
+    const res = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:0', 'to', 'n:1');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(FLOW);
+    const res2 = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:0', 'from', 'n:0');
+    expect(res2.warning).toBeUndefined();
+    expect(res2.code).toBe(FLOW);
+  });
+
+  it('retargets the head onto the origin node, making a self-loop', () => {
+    const res = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:0', 'to', 'n:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`%% CONFIG: {"version":1}
+flowchart TD
+    A[Alice] --> A
+    B[Bob]
+    B -->|Reply| A
+    A -- ping -- B
+    C[Standalone]`);
+  });
+
+  it('retargets a self-loop head into a regular edge', () => {
+    const code = `flowchart TD\n    A --> A\n    B[Bob]`;
+    const res = moveEdgeEndpoint(code, null, 'e:0', 'to', 'n:1');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A --> B\n    B[Bob]`);
+  });
+
+  it('keeps the replaced node visible with its label when its only declaration was the retargeted endpoint', () => {
+    const code = `flowchart TD\n    A --> B[Bob]\n    C[Charlie]`;
+    const res = moveEdgeEndpoint(code, null, 'e:0', 'to', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A --> C\n    B[Bob]\n    C[Charlie]`);
+    // B survives as a node with its label.
+    const b = parseModel(res.code).elements.find(e => e.kind === 'node' && (e as { id: string }).id === 'B');
+    expect(b).toMatchObject({ kind: 'node', label: 'Bob' });
+  });
+
+  it('keeps a bare replaced node visible when it has no other declaration', () => {
+    const code = `flowchart TD\n    A --> B\n    C[Charlie]`;
+    const res = moveEdgeEndpoint(code, null, 'e:0', 'to', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A --> C\n    B\n    C[Charlie]`);
+  });
+
+  it('does not duplicate the declaration when the replaced node is still on the rewritten line', () => {
+    const code = `flowchart TD\n    A --> B --> A\n    C[Charlie]`;
+    // Retarget the head of A --> B (the middle endpoint) onto C: the chain
+    // splits, B keeps its declaration on the right half.
+    const res = moveEdgeEndpoint(code, null, 'e:0', 'to', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A --> C\n    B --> A\n    C[Charlie]`);
+  });
+
+  describe('chained edges (A --> B --> C)', () => {
+    const CHAIN = `flowchart TD\n    A --> B --> C\n    D[Dave]`;
+    // edges: e:0 A->B (segment 0), e:1 B->C (segment 1); nodes n:0..n:3
+
+    it('splits the chain when the head of the first link is retargeted, keeping the second link intact', () => {
+      const res = moveEdgeEndpoint(CHAIN, null, 'e:0', 'to', 'n:3');
+      expect(res.warning).toBeUndefined();
+      expect(res.code).toBe(`flowchart TD\n    A --> D\n    B --> C\n    D[Dave]`);
+      expect(res.newKey).toBe('e:0');
+      // The second link is untouched: still B -> C.
+      const edges = parseModel(res.code).elements.filter(e => e.kind === 'edge');
+      expect(edges.map(e => `${e.from}->${e.to}`)).toEqual(['A->D', 'B->C']);
+    });
+
+    it('splits the chain when the tail of the second link is retargeted, keeping the first link intact', () => {
+      const res = moveEdgeEndpoint(CHAIN, null, 'e:1', 'from', 'n:3');
+      expect(res.warning).toBeUndefined();
+      expect(res.code).toBe(`flowchart TD\n    A --> B\n    D --> C\n    D[Dave]`);
+      expect(res.newKey).toBe('e:1');
+      const edges = parseModel(res.code).elements.filter(e => e.kind === 'edge');
+      expect(edges.map(e => `${e.from}->${e.to}`)).toEqual(['A->B', 'D->C']);
+    });
+
+    it('replaces the last endpoint in place (no split), preserving the replaced node declaration', () => {
+      const res = moveEdgeEndpoint(CHAIN, null, 'e:1', 'to', 'n:3');
+      expect(res.warning).toBeUndefined();
+      expect(res.code).toBe(`flowchart TD\n    A --> B --> D\n    C\n    D[Dave]`);
+      expect(res.newKey).toBe('e:1');
+    });
+
+    it('replaces the first endpoint in place (no split), preserving the replaced node declaration', () => {
+      const res = moveEdgeEndpoint(CHAIN, null, 'e:0', 'from', 'n:3');
+      expect(res.warning).toBeUndefined();
+      expect(res.code).toBe(`flowchart TD\n    D --> B --> C\n    A\n    D[Dave]`);
+      expect(res.newKey).toBe('e:0');
+    });
+
+    it('splits a three-link chain at the middle link head, preserving both neighbours', () => {
+      const code = `flowchart TD\n    A --> B --> C --> E\n    D[Dave]`;
+      // edges: e:0 A->B, e:1 B->C, e:2 C->E; retarget e:1's head (C) onto D
+      const res = moveEdgeEndpoint(code, null, 'e:1', 'to', 'n:4');
+      expect(res.warning).toBeUndefined();
+      expect(res.code).toBe(`flowchart TD\n    A --> B --> D\n    C --> E\n    D[Dave]`);
+      const edges = parseModel(res.code).elements.filter(e => e.kind === 'edge');
+      expect(edges.map(e => `${e.from}->${e.to}`)).toEqual(['A->B', 'B->D', 'C->E']);
+    });
+
+    it('splits a three-link chain at the middle link tail, preserving both neighbours', () => {
+      const code = `flowchart TD\n    A --> B --> C --> E\n    D[Dave]`;
+      // retarget e:1's tail (B) onto D
+      const res = moveEdgeEndpoint(code, null, 'e:1', 'from', 'n:4');
+      expect(res.warning).toBeUndefined();
+      expect(res.code).toBe(`flowchart TD\n    A --> B\n    D --> C --> E\n    D[Dave]`);
+      const edges = parseModel(res.code).elements.filter(e => e.kind === 'edge');
+      expect(edges.map(e => `${e.from}->${e.to}`)).toEqual(['A->B', 'D->C', 'C->E']);
+    });
+
+    it('preserves shapes and labels on the untouched side of a split', () => {
+      const code = `flowchart TD\n    A["x"] --> B["y"] --> C["z"]\n    D[Dave]`;
+      const res = moveEdgeEndpoint(code, null, 'e:0', 'to', 'n:3');
+      expect(res.warning).toBeUndefined();
+      expect(res.code).toBe(`flowchart TD\n    A["x"] --> D\n    B["y"] --> C["z"]\n    D[Dave]`);
+    });
+
+    it('preserves a pipe label on the retargeted link of a split', () => {
+      const code = `flowchart TD\n    A -->|go| B --> C\n    D[Dave]`;
+      const res = moveEdgeEndpoint(code, null, 'e:0', 'to', 'n:3');
+      expect(res.warning).toBeUndefined();
+      expect(res.code).toBe(`flowchart TD\n    A -->|go| D\n    B --> C\n    D[Dave]`);
+    });
+  });
+
+  it('moves the arrow CONFIG entry (style, tags, mode) to the new endpoint', () => {
+    const code = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","label":"go","color":"#e11d48","keys":["backend"],"keyMode":"clean"}]}
+flowchart TD
+    A -->|go| B
+    B --> C
+    D[Dave]`;
+    const res = moveEdgeEndpoint(code, parseConfig(code), 'e:0', 'to', 'n:3');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toContain('    A -->|go| D');
+    expect(parseConfig(res.code)?.arrows).toEqual([
+      { from: 'A', to: 'D', label: 'go', color: '#e11d48', keys: ['backend'], keyMode: 'clean' },
+    ]);
+  });
+
+  it('moves the arrow CONFIG entry to the new origin when the tail is dragged', () => {
+    const code = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","color":"#e11d48"}]}
+flowchart TD
+    A --> B
+    D[Dave]`;
+    const res = moveEdgeEndpoint(code, parseConfig(code), 'e:0', 'from', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(parseConfig(res.code)?.arrows).toEqual([
+      { from: 'D', to: 'B', color: '#e11d48' },
+    ]);
+  });
+
+  it('leaves unrelated arrows entries untouched', () => {
+    const code = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","color":"#e11d48"},{"from":"B","to":"A","color":"#22c55e"}]}
+flowchart TD
+    A --> B
+    B --> A
+    D[Dave]`;
+    const res = moveEdgeEndpoint(code, parseConfig(code), 'e:0', 'to', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(parseConfig(res.code)?.arrows).toEqual([
+      { from: 'A', to: 'D', color: '#e11d48' },
+      { from: 'B', to: 'A', color: '#22c55e' },
+    ]);
+  });
+
+  it('preserves the CONFIG block and every other line byte-for-byte', () => {
+    // FLOW: e:0 is on line 2; that line is rewritten and B's preserved
+    // declaration lands right after it — everything else is byte-identical.
+    const res = moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:0', 'to', 'n:2');
+    expect(res.warning).toBeUndefined();
+    const lines = res.code.split('\n');
+    expect(lines[0]).toBe(FLOW.split('\n')[0]);
+    expect(lines[1]).toBe('flowchart TD');
+    expect(lines[2]).toBe('    A[Alice] --> C');
+    expect(lines[3]).toBe('    B[Bob]');
+    expect(lines.slice(4)).toEqual(FLOW.split('\n').slice(3));
+  });
+
+  it('soft-fails on sequence diagrams, non-edges, unknown keys and non-node targets', () => {
+    const seq = moveEdgeEndpoint(SEQ, SEQ_CFG, 'm:0', 'to', 'p:1');
+    expect(seq.warning).toBeTruthy();
+    expect(seq.code).toBe(SEQ);
+    expect(moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:99', 'to', 'n:1').warning).toBeTruthy();
+    expect(moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:99', 'to', 'n:1').code).toBe(FLOW);
+    expect(moveEdgeEndpoint(FLOW, FLOW_CFG, 'n:0', 'to', 'n:1').warning).toBeTruthy();
+    expect(moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:0', 'to', 'n:99').warning).toBeTruthy();
+    expect(moveEdgeEndpoint(FLOW, FLOW_CFG, 'e:0', 'to', 'e:1').warning).toBeTruthy();
   });
 });
 
@@ -2413,6 +2664,119 @@ describe('groupParticipants', () => {
     const code = `sequenceDiagram\n    participant A as Alice`;
     const res = groupParticipants(code, null, ['p:0'], 'Core');
     expect(res.warning).toBe('At least two participants must be selected to create a box group');
+  });
+});
+
+describe('groupNodes', () => {
+  it('wraps standalone-declared nodes into a subgraph block, moving their declaration lines', () => {
+    const code = `flowchart TD\n    A[Alice]\n    B[Bob]\n    C[Charlie]\n    A --> B`;
+    const res = groupNodes(code, null, ['n:0', 'n:1'], 'Core Services');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph Core Services\n        A[Alice]\n        B[Bob]\n    end\n    C[Charlie]\n    A --> B`);
+  });
+
+  it('inserts declarations for edge-declared nodes and leaves the edge lines untouched', () => {
+    const code = `flowchart TD\n    A[Alice] --> B[Bob]\n    C[Charlie]`;
+    const res = groupNodes(code, null, ['n:0', 'n:1'], 'Group');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph Group\n        A[Alice]\n        B[Bob]\n    end\n    A[Alice] --> B[Bob]\n    C[Charlie]`);
+  });
+
+  it('handles a mix of standalone and edge-declared nodes', () => {
+    const code = `flowchart TD\n    A[Alice]\n    B[Bob] --> C[Charlie]`;
+    // A (n:0) is standalone on line 1; B (n:1) is first declared on the edge line 2.
+    const res = groupNodes(code, null, ['n:0', 'n:1'], 'Mixed');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph Mixed\n        A[Alice]\n        B[Bob]\n    end\n    B[Bob] --> C[Charlie]`);
+  });
+
+  it('does not pull non-selected endpoints of a shared edge line into the group', () => {
+    const code = `flowchart TD\n    A --> B --> C`;
+    // Group A and B only: the edge line stays outside the subgraph, so C
+    // (first declared on that line) is NOT part of the group.
+    const res = groupNodes(code, null, ['n:0', 'n:1'], 'Pair');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph Pair\n        A\n        B\n    end\n    A --> B --> C`);
+    const index = buildSubgraphTagIndex(res.code);
+    expect(index.actorKeys.get('A')).toEqual(['pair']);
+    expect(index.actorKeys.get('B')).toEqual(['pair']);
+    expect(index.actorKeys.has('C')).toBe(false);
+  });
+
+  it('tags the grouped nodes through the zero-config subgraph pipeline', () => {
+    const code = `flowchart TD\n    A[Alice]\n    B[Bob]\n    A --> B`;
+    const res = groupNodes(code, null, ['n:0', 'n:1'], 'Auth Services');
+    expect(res.warning).toBeUndefined();
+    // The title slugifies to the structural tag key; no CONFIG line is written.
+    expect(res.code).not.toContain('CONFIG');
+    expect(res.config).toBeNull();
+    const tags = collectSubgraphTags(res.code);
+    expect(tags).toEqual([{ key: 'auth-services', title: 'Auth Services', lineStart: 1, lineEnd: 4 }]);
+    const index = buildSubgraphTagIndex(res.code);
+    expect(index.actorKeys.get('A')).toEqual(['auth-services']);
+    expect(index.actorKeys.get('B')).toEqual(['auth-services']);
+  });
+
+  it('keeps the nodes in their original relative order inside the block', () => {
+    const code = `flowchart TD\n    A[Alice]\n    X[Extra]\n    B[Bob]`;
+    // B (n:2) listed before A (n:0): the block still orders them by source line.
+    const res = groupNodes(code, null, ['n:2', 'n:0'], 'Order');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph Order\n        A[Alice]\n        B[Bob]\n    end\n    X[Extra]`);
+  });
+
+  it('supports an empty title (a visual-only group with no structural tag)', () => {
+    const code = `flowchart TD\n    A[Alice]\n    B[Bob]`;
+    const res = groupNodes(code, null, ['n:0', 'n:1'], '   ');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph\n        A[Alice]\n        B[Bob]\n    end`);
+    expect(collectSubgraphTags(res.code)).toEqual([]);
+  });
+
+  it('nests inside an existing subgraph', () => {
+    const code = `flowchart TD\n    subgraph Outer\n        A[Alice]\n        B[Bob]\n    end\n    C[Charlie]`;
+    const res = groupNodes(code, null, ['n:0', 'n:1'], 'Inner');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph Outer\n        subgraph Inner\n            A[Alice]\n            B[Bob]\n        end\n    end\n    C[Charlie]`);
+    // Both the inner and the outer group tag the nodes (nested groups stack,
+    // outermost first — the source order of the blocks).
+    const index = buildSubgraphTagIndex(res.code);
+    expect(index.actorKeys.get('A')).toEqual(['outer', 'inner']);
+    expect(index.actorKeys.get('B')).toEqual(['outer', 'inner']);
+  });
+
+  it('preserves the CONFIG block and every other line byte-for-byte', () => {
+    const res = groupNodes(FLOW, FLOW_CFG, ['n:0', 'n:1'], 'Core');
+    expect(res.warning).toBeUndefined();
+    expect(res.code.split('\n')[0]).toBe(FLOW.split('\n')[0]);
+    // FLOW line 2 (A[Alice] --> B[Bob]) declares both selected nodes: it stays
+    // byte-identical, the block is inserted before it.
+    expect(res.code).toContain('    A[Alice] --> B[Bob]');
+    expect(res.code).toContain('    subgraph Core');
+    expect(res.code).toContain('    end');
+    // B -->|Reply| A and A -- ping -- B and C[Standalone] are untouched.
+    expect(res.code).toContain('    B -->|Reply| A');
+    expect(res.code).toContain('    A -- ping -- B');
+    expect(res.code).toContain('    C[Standalone]');
+  });
+
+  it('preserves a trailing newline', () => {
+    const code = `flowchart TD\n    A[Alice]\n    B[Bob]\n`;
+    const res = groupNodes(code, null, ['n:0', 'n:1'], 'Core');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph Core\n        A[Alice]\n        B[Bob]\n    end\n`);
+  });
+
+  it('soft-fails with fewer than two nodes, on sequence diagrams, and on non-node keys', () => {
+    const res = groupNodes(FLOW, FLOW_CFG, ['n:0'], 'Core');
+    expect(res.warning).toBe('At least two nodes must be selected to create a subgraph');
+    expect(res.code).toBe(FLOW);
+    const seq = groupNodes(SEQ, SEQ_CFG, ['p:0', 'p:1'], 'Core');
+    expect(seq.warning).toBeTruthy();
+    expect(seq.code).toBe(SEQ);
+    expect(groupNodes(FLOW, FLOW_CFG, ['n:0', 'e:0'], 'Core').warning).toBeTruthy();
+    expect(groupNodes(FLOW, FLOW_CFG, ['n:0', 'n:99'], 'Core').warning).toBeTruthy();
+    expect(groupNodes(FLOW, FLOW_CFG, ['n:0', 'n:1'], 'a\nb').warning).toBeTruthy();
   });
 });
 

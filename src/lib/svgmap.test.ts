@@ -343,6 +343,7 @@ describe('zip + click against real mermaid renders', () => {
 
 import {
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
+  getEdgeEndpointScreenInfo,
   nearestParticipantAtX,
   sequenceConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
@@ -491,6 +492,67 @@ describe('getMessageEndpointScreenInfo', () => {
 
     const info = getMessageEndpointScreenInfo(svg, model);
     expect(info.map(m => m.key)).toEqual(['m:0', 'm:1', 'm:2', 'm:3']); // m:4 skipped
+  });
+});
+
+describe('getEdgeEndpointScreenInfo', () => {
+  type Ctm = { a: number; b: number; c: number; d: number; e: number; f: number };
+  const IDENTITY: Ctm = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+
+  const edgePaths = (svg: Element) =>
+    Array.from(svg.querySelectorAll('g.edgePaths path[data-et="edge"]'));
+
+  const mockPath = (path: Element, d: string | null, ctm: Ctm | null) => {
+    if (d === null) path.removeAttribute('d');
+    else path.setAttribute('d', d);
+    (path as unknown as { getScreenCTM?: () => Ctm | null }).getScreenCTM =
+      ctm ? () => ctm : () => null;
+  };
+
+  it('returns the path start/end as tail/head, mapped through the screen CTM', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const paths = edgePaths(svg);
+    mockPath(paths[0], 'M10,20 L110,20', IDENTITY);
+    mockPath(paths[1], 'M30,40 L130,40', { a: 2, b: 0, c: 0, d: 2, e: 100, f: 50 });
+
+    const info = getEdgeEndpointScreenInfo(svg, flowModel());
+    expect(info).toHaveLength(2);
+    // e:0 A->B: identity CTM — local coordinates are the screen coordinates.
+    expect(info[0]).toEqual({ key: 'e:0', fromX: 10, fromY: 20, toX: 110, toY: 20 });
+    // e:1 B->C: scale 2 + translate (100, 50).
+    expect(info[1]).toEqual({ key: 'e:1', fromX: 160, fromY: 130, toX: 360, toY: 130 });
+  });
+
+  it('parses quadratic-curve paths (self-loop shapes) to their first/last points', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const paths = edgePaths(svg);
+    // Real mermaid 12.1 self-loop path (rounded corners via Q commands).
+    mockPath(
+      paths[0],
+      'M49.33333333333333,32L49.33333333333333,19.071067811865476Q49.33333333333333,12 56.404401145198804,12L67.59559885480118,12Q74.66666666666666,12 74.66666666666666,19.071067811865476L74.66666666666666,28',
+      IDENTITY,
+    );
+    mockPath(paths[1], 'M1,2 L3,4', null); // no CTM: skipped
+
+    const info = getEdgeEndpointScreenInfo(svg, flowModel());
+    expect(info).toHaveLength(1);
+    expect(info[0].key).toBe('e:0');
+    expect(info[0].fromX).toBeCloseTo(49.33333333333333, 5);
+    expect(info[0].fromY).toBe(32);
+    expect(info[0].toX).toBeCloseTo(74.66666666666666, 5);
+    expect(info[0].toY).toBe(28);
+  });
+
+  it('skips edges without a d attribute, without a CTM, or without an SVG counterpart', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const paths = edgePaths(svg);
+    mockPath(paths[0], null, IDENTITY);        // no d
+    mockPath(paths[1], 'M1,2 L3,4', IDENTITY);
+
+    // The model claims a 3rd edge the SVG does not have.
+    const model = parseModel(FLOW_CODE + '\n    A --> C');
+    const info = getEdgeEndpointScreenInfo(svg, model);
+    expect(info.map(e => e.key)).toEqual(['e:1']); // e:0 (no d) and e:2 (no path) skipped
   });
 });
 

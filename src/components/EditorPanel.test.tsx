@@ -609,6 +609,50 @@ describe('EditorPanel', () => {
     expect(onGroupParticipants).toHaveBeenCalledWith(['p:0', 'p:1'], 'Core Services', 'LightBlue');
   });
 
+  it('renders subgraph grouping section and dispatches onGroupNodes when 2+ flowchart nodes are selected', () => {
+    const onGroupNodes = vi.fn();
+    const nodeB = el(flowModel, 'n:1');
+    const props = makeProps({
+      selectedElements: [nodeA, nodeB],
+      diagramType: 'flowchart',
+      onGroupNodes,
+    });
+    render(<EditorPanel {...props} />);
+
+    const titleInput = screen.getByTestId('group-subgraph-title') as HTMLInputElement;
+    expect(titleInput.value).toBe('Subgraph');
+    fireEvent.change(titleInput, { target: { value: 'Core Services' } });
+
+    fireEvent.click(screen.getByTestId('group-subgraph-button'));
+    expect(onGroupNodes).toHaveBeenCalledWith(['n:0', 'n:1'], 'Core Services');
+
+    // The sequence-only "Group into Box" section stays hidden for nodes.
+    expect(screen.queryByTestId('group-box-button')).toBeNull();
+  });
+
+  it('hides the subgraph grouping section for a single node and for participants', () => {
+    const onGroupNodes = vi.fn();
+    // A single node selection is not a multi-selection at all.
+    const { unmount } = render(<EditorPanel {...makeProps({
+      selectedElements: [nodeA],
+      diagramType: 'flowchart',
+      onGroupNodes,
+    })} />);
+    expect(screen.queryByTestId('group-subgraph-button')).toBeNull();
+    unmount();
+
+    // Participants get the box section, never the subgraph section.
+    const participantB = el(seqModel, 'p:1');
+    render(<EditorPanel {...makeProps({
+      selectedElements: [participantA, participantB],
+      diagramType: 'sequence',
+      onGroupParticipants: vi.fn(),
+      onGroupNodes,
+    })} />);
+    expect(screen.queryByTestId('group-subgraph-button')).toBeNull();
+    expect(screen.queryByTestId('group-box-button')).toBeTruthy();
+  });
+
   it('renders type and color in one row, and width and dash in one row for arrows', () => {
     const props = makeProps({
       element: message0,

@@ -9,11 +9,12 @@ import {
   elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf, zipModelToSvg, EDGE_HIT_CLASS,
   labelElementForKey,
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
+  getEdgeEndpointScreenInfo,
   nearestParticipantAtX, nearestMessageKeyAt,
   sequenceConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
   CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
-  ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo,
+  ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo, EdgeEndpointScreenInfo,
 } from '@/lib/svgmap';
 import { DiagramConfig, StickyNote as StickyNoteType } from '@/lib/views';
 import { MessageInsertPosition } from '@/lib/editor';
@@ -37,6 +38,9 @@ interface DiagramViewerProps {
   // Retarget a sequence message: end 'to' drags the arrow head (recipient),
   // 'from' drags the tail (origin) onto the participant with the given key.
   onMoveMessageEndpoint?: (messageKey: string, end: 'from' | 'to', targetParticipantKey: string) => void;
+  // Retarget a flowchart edge: end 'to' drags the arrow head (target node),
+  // 'from' drags the tail (origin) onto the node with the given key.
+  onMoveEdgeEndpoint?: (edgeKey: string, end: 'from' | 'to', targetNodeKey: string) => void;
   // Move a sequence message vertically up or down to reorder messages.
   onMoveMessage?: (messageKey: string, position: MessageInsertPosition) => void;
   // Sticky notes:
@@ -191,13 +195,15 @@ function computeReorderDrop(
   return { beforeKey: null, indicator: endEdge(last) + 15 };
 }
 
-// The message endpoint (arrow head = 'to', tail = 'from') nearest to the
-// cursor, within the grab radius. A selected message's endpoints get the much
-// larger ENDPOINT_GRAB_RADIUS_SELECTED zone. Candidates are checked head-first
-// and only a strictly closer point replaces the best, so a self-message (head
+// The endpoint (arrow head = 'to', tail = 'from') nearest to the cursor,
+// within the grab radius. Works for sequence messages and flowchart edges
+// alike — both carry { key, fromX, fromY, toX, toY } screen points. A
+// selected element's endpoints get the much larger
+// ENDPOINT_GRAB_RADIUS_SELECTED zone. Candidates are checked head-first and
+// only a strictly closer point replaces the best, so a self-message (head
 // and tail coincide on the lifeline) resolves to the head.
 function endpointHitAt(
-  endpoints: MessageEndpointScreenInfo[],
+  endpoints: (MessageEndpointScreenInfo | EdgeEndpointScreenInfo)[],
   x: number,
   y: number,
   selectedKeys: string[] | string | null,
@@ -394,6 +400,7 @@ export default function DiagramViewer({
   onMoveParticipant,
   onCreateMessageDrag,
   onMoveMessageEndpoint,
+  onMoveEdgeEndpoint,
   onMoveMessage,
   notes = [],
   showNotes = true,
@@ -688,6 +695,19 @@ export default function DiagramViewer({
     return eps.find(ep => ep.key === selectedProcessedKeys[0]) ?? null;
   }, [editMode, isVisualLocked, isSequenceDiagram, selectedProcessedKeys, code, svgStr]);
 
+  // Flowchart counterpart of selectedEndpoints: the screen points of the
+  // single selected edge's tail/head, rendered as drag handles so the edge
+  // can be retargeted (the flowchart parity of sequence message retargeting).
+  const selectedEdgeEndpoints = useMemo(() => {
+    if (!editMode || isVisualLocked || !isFlowchartDiagram || selectedProcessedKeys.length !== 1) return null;
+    const container = document.getElementById('diagram-container');
+    const svgRoot = container?.querySelector('svg');
+    if (!svgRoot) return null;
+    const model = parseModel(code);
+    const eps = getEdgeEndpointScreenInfo(svgRoot, model);
+    return eps.find(ep => ep.key === selectedProcessedKeys[0]) ?? null;
+  }, [editMode, isVisualLocked, isFlowchartDiagram, selectedProcessedKeys, code, svgStr]);
+
   // Selection highlight: re-applied after every render via the zip (plan 4.7).
   // Coexists with the search highlight (different elements/properties).
   useEffect(() => {
@@ -755,17 +775,23 @@ export default function DiagramViewer({
   //     to change the origin. Loses to the connect handle within its grab
   //     radius; everywhere else the zones coexist.
   // Flowchart diagrams:
+  //   - Selected edge's arrow head / tail (within the endpoint grab zone
+  //     around the rendered handle — ENDPOINT_GRAB_RADIUS_SELECTED px, only
+  //     for the selected edge) → retarget: drag the head to change the target
+  //     node, the tail to change the origin. Wins over the connect handles
+  //     and the node body inside its zone. Releasing over another node
+  //     retargets; anywhere else cancels (edges have no reorder fallback).
   //   - Connect handles (four dots shown on hover, at the node box's edge
   //     midpoints) → create edge: drag to another node and release. A drag
   //     line follows the cursor and a snap rect highlights the target node.
-  //     Releasing anywhere else cancels. This is the ONLY way to start an
-  //     edge drag.
+  //     Releasing anywhere else cancels. Outside a selected edge's endpoint
+  //     zone this is the ONLY way to start an edge drag.
   //   - Node box (g.node) → move: drag and release over empty space to
   //     reorder the node (a dashed indicator shows the insertion position
   //     along the layout axis — horizontal for TD/BT, vertical for LR/RL).
   //   - Edge (its ~12px invisible hit band, the visible stroke, or the label
   //     box) → select: the press selects the edge immediately and never pans
-  //     the canvas (edges have no drag interaction).
+  //     the canvas (unselected edges have no drag interaction).
 
   const getSvgAndModel = () => {
     const container = document.getElementById('diagram-container');
@@ -913,6 +939,18 @@ export default function DiagramViewer({
           ? (endpointHit.end === 'from' ? msgEl.from : msgEl.to)
           : null;
       }
+    } else if (selectedEdgeEndpoints) {
+      // Flowchart edge endpoint drag: only the SELECTED edge's endpoints are
+      // grabbable (its head/tail handles are the visible affordance), so
+      // unselected edges never steal node drags near their endpoints.
+      const hit = endpointHitAt([selectedEdgeEndpoints], e.clientX, e.clientY, selectedProcessedKeys);
+      if (hit) {
+        endpointHit = hit;
+        const edgeEl = ctx.model.elements.find(e2 => e2.key === hit.key);
+        endpointCurrentId = edgeEl && edgeEl.kind === 'edge'
+          ? (hit.end === 'from' ? edgeEl.from : edgeEl.to)
+          : null;
+      }
     }
 
     if (ctx.model.type === 'sequence') {
@@ -950,12 +988,18 @@ export default function DiagramViewer({
       // Empty space near a lifeline: no drag — message creation starts from
       // the connect handle only.
     } else {
-      // Flowchart: the connect handles (shown on hover at the node box's edge
+      // Flowchart: a selected edge's head/tail (within the endpoint grab zone
+      // around the visible handle) retargets the edge — it wins over the
+      // connect handles and the node body, which share the node boundary.
+      // Otherwise the connect handles (shown on hover at the node box's edge
       // midpoints) start an edge-creation drag; the node body moves.
       cachedParticipants = getNodeScreenInfo(ctx.svgRoot, ctx.model);
       const hovered = nearestNodeAtPoint(cachedParticipants, e.clientX, e.clientY, null, NODE_HOVER_PAD);
       const handleHit = hovered ? nearestNodeHandleAt(hovered, e.clientX, e.clientY) : null;
-      if (hovered && handleHit) {
+      if (endpointHit) {
+        dragType = 'endpoint';
+        participantKey = endpointHit.key;
+      } else if (hovered && handleHit) {
         dragType = 'connect';
         participantKey = hovered.key;
         anchorX = handleHit.x;
@@ -1037,6 +1081,42 @@ export default function DiagramViewer({
     if (!cache) return null;
 
     if (drag.type === 'endpoint') {
+      if (isFlowchartDiagram) {
+        // Flowchart edge endpoint: the drop target is the node whose padded
+        // box contains the cursor — except the node currently at the dragged
+        // end (dropping on it is a no-op). There is no reorder fallback: an
+        // endpoint drag only ever retargets the edge.
+        const nodeTarget = nearestNodeAtPoint(
+          cache.participants, drag.currentX, drag.currentY, null, NODE_DROP_PAD
+        );
+        const validTarget = nodeTarget && nodeTarget.id !== drag.endpointCurrentId ? nodeTarget : null;
+        drag.toParticipantKey = validTarget ? validTarget.key : null;
+        drag.toParticipantId = validTarget ? validTarget.id : null;
+        drag.insertPosition = null;
+        return {
+          type: 'endpoint',
+          reorderX: null,
+          reorderY1: 0,
+          reorderY2: 0,
+          reorderY: null,
+          reorderX1: 0,
+          reorderX2: 0,
+          lineX1: drag.endpointFixedX,
+          lineY1: drag.endpointFixedY,
+          lineX2: drag.currentX,
+          lineY2: drag.currentY,
+          insertY: null,
+          insertX1: 0,
+          insertX2: 0,
+          hasTarget: validTarget !== null,
+          targetRect: validTarget ? {
+            left: validTarget.left - 4,
+            top: validTarget.top - 4,
+            width: validTarget.right - validTarget.left + 8,
+            height: validTarget.bottom - validTarget.top + 8,
+          } : null,
+        };
+      }
       // Drag line from the fixed endpoint to the cursor.
       // If cursor moves over another participant: retarget the endpoint (change actor).
       // If cursor stays near the same participant (or dragged vertically): reorder the message!
@@ -1365,9 +1445,15 @@ export default function DiagramViewer({
           onMoveParticipant(drag.participantKey, drag.targetBeforeKey);
         }
       } else if (drag.type === 'endpoint') {
-        // Retarget the message's endpoint when released over a different participant.
-        // Otherwise, reorder the message vertically if dragged up/down.
-        if (onMoveMessageEndpoint && drag.messageKey && drag.endpointEnd && drag.toParticipantKey) {
+        if (isFlowchartDiagram) {
+          // Flowchart: release over a different node retargets the edge's
+          // endpoint; anywhere else cancels (edges have no reorder fallback).
+          if (onMoveEdgeEndpoint && drag.messageKey && drag.endpointEnd && drag.toParticipantKey) {
+            onMoveEdgeEndpoint(drag.messageKey, drag.endpointEnd, drag.toParticipantKey);
+          }
+        } else if (onMoveMessageEndpoint && drag.messageKey && drag.endpointEnd && drag.toParticipantKey) {
+          // Retarget the message's endpoint when released over a different participant.
+          // Otherwise, reorder the message vertically if dragged up/down.
           onMoveMessageEndpoint(drag.messageKey, drag.endpointEnd, drag.toParticipantKey);
         } else if (onMoveMessage && drag.messageKey && drag.insertPosition) {
           onMoveMessage(drag.messageKey, drag.insertPosition);
@@ -1387,7 +1473,7 @@ export default function DiagramViewer({
       window.removeEventListener('mouseup', onMouseUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode, code, selection, onMoveParticipant, onCreateMessageDrag, onMoveMessageEndpoint, onMoveMessage]);
+  }, [editMode, code, selection, onMoveParticipant, onCreateMessageDrag, onMoveMessageEndpoint, onMoveEdgeEndpoint, onMoveMessage]);
 
   // Escape cancels an active canvas drag: the pending mouseup then does
   // nothing and the selection made on press stays. The event is marked handled
@@ -1768,6 +1854,34 @@ export default function DiagramViewer({
             data-testid="message-head-handle"
             cx={selectedEndpoints.toX}
             cy={selectedEndpoints.toY}
+            r={5}
+            fill="#10b981"
+            stroke="#ffffff"
+            strokeWidth={2}
+            className="drop-shadow cursor-grab"
+          />
+        </svg>
+      )}
+      {selectedEdgeEndpoints && !dragOverlay && (
+        <svg
+          data-testid="selected-edge-handles"
+          className="fixed inset-0 pointer-events-none z-30"
+          style={{ width: '100vw', height: '100vh', overflow: 'visible' }}
+        >
+          <circle
+            data-testid="edge-tail-handle"
+            cx={selectedEdgeEndpoints.fromX}
+            cy={selectedEdgeEndpoints.fromY}
+            r={5}
+            fill="#3b82f6"
+            stroke="#ffffff"
+            strokeWidth={2}
+            className="drop-shadow cursor-grab"
+          />
+          <circle
+            data-testid="edge-head-handle"
+            cx={selectedEdgeEndpoints.toX}
+            cy={selectedEdgeEndpoints.toY}
             r={5}
             fill="#10b981"
             stroke="#ffffff"

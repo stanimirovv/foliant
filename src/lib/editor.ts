@@ -4,7 +4,7 @@
 // (NFR-02), and malformed input is a no-op with a warning, never a
 // corruption (NFR-01).
 
-import { parseModel, parseShapeToken, parseParticipantLine, parseFlowchartLine, ParsedFlowchartLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeShape, ParticipantType } from './model';
+import { parseModel, parseShapeToken, parseParticipantLine, parseFlowchartLine, ParsedFlowchartLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeElement, NodeShape, ParticipantType } from './model';
 import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, ArrowStyleDefaults, DiagramConfig, NoteTagEntry, updateViewsData } from './views';
 import { ANIMATED_ARROW_COLORS } from './styling';
 import { buildSubgraphTagIndex } from './subgraphTags';
@@ -688,6 +688,110 @@ export function moveMessageEndpoint(
   }
   if (!configChanged || !newConfig) return { code: newCode, config, newKey: el.key };
   return { code: updateViewsData(newCode, newConfig), config: newConfig, newKey: el.key };
+}
+
+// Retarget one endpoint of a flowchart edge (flowcharts only): 'to' moves the
+// arrow head (target node), 'from' the tail (origin node). The operator and
+// label are untouched. Arrow style/tag entries are keyed by
+// (from, to, label, occurrence), so the entries that styled this edge follow
+// the retargeted endpoint instead of being orphaned (same as
+// moveMessageEndpoint).
+//
+// Chained edge lines (`A --> B --> C` emit one edge element per link) are
+// handled through parseFlowchartLine's exact spans. An endpoint shared with
+// the adjacent link cannot be renamed in place — that would silently
+// retarget the neighbouring edge too — so the line is split in two at the
+// endpoint: the retargeted link keeps the new id, the rest of the chain
+// keeps the original endpoint text (id + shape) verbatim. An unshared
+// endpoint (chain start/end, or a single-link line) is replaced in place.
+// When the replaced node's first declaration lived on that endpoint, a
+// standalone declaration line preserves it (retargeting an edge never
+// deletes a node — same philosophy as deleteElement's rewrite).
+export function moveEdgeEndpoint(
+  code: string,
+  config: DiagramConfig | null,
+  key: string,
+  end: 'from' | 'to',
+  newNodeKey: string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'flowchart') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'edge') return fail(code, config, `Element ${key} is not an edge`);
+  const target = findElement(model, newNodeKey);
+  if (!target || target.kind !== 'node') {
+    return fail(code, config, `Unknown node key: ${newNodeKey}`);
+  }
+  const newId = target.id;
+  if (newId === (end === 'from' ? el.from : el.to)) return { code, config }; // no-op
+
+  const line = code.split('\n')[el.lineStart];
+  const parsed = parseFlowchartLine(line);
+  if (!parsed) return fail(code, config, `Cannot parse edge line: ${line.trim()}`);
+  const segIdx = arrowSegmentIndex(model, el);
+  const seg = parsed.segments[segIdx];
+  const epIdx = end === 'from' ? seg?.from : seg?.to;
+  const ep = epIdx !== undefined ? parsed.endpoints[epIdx] : undefined;
+  if (!seg || !ep || ep.id !== (end === 'from' ? el.from : el.to)) {
+    return fail(code, config, `Cannot locate edge endpoint on line: ${line.trim()}`);
+  }
+
+  const isLast = epIdx === parsed.endpoints.length - 1;
+  const isFirst = epIdx === 0;
+  // The endpoint is shared with the adjacent link when it is an inner chain
+  // node: 'to' of segment k is 'from' of segment k+1, 'from' of segment k is
+  // 'to' of segment k-1.
+  const shared = end === 'to' ? !isLast : !isFirst;
+
+  let newLines: string[];
+  if (shared) {
+    // Split the chain at the endpoint: the retargeted link carries the new id
+    // (bare — the shape token belongs to the old node), the other side keeps
+    // the original endpoint text verbatim.
+    if (end === 'to') {
+      newLines = [line.slice(0, ep.start) + newId, parsed.indent + line.slice(ep.start)];
+    } else {
+      newLines = [line.slice(0, ep.end), parsed.indent + newId + line.slice(ep.end)];
+    }
+  } else {
+    newLines = [line.slice(0, ep.start) + newId + line.slice(ep.end)];
+  }
+
+  // The old node loses its declaration when its id no longer appears on the
+  // rewritten line(s) and this line was its first declaration: keep a
+  // standalone declaration so it stays visible with its label.
+  const firstDeclaredHere = model.elements.some(
+    e => e.kind === 'node' && e.id === ep.id && e.lineStart === el.lineStart
+  );
+  const stillDeclared = newLines.some(nl =>
+    parseFlowchartLine(nl)?.endpoints.some(e2 => e2.id === ep.id)
+  );
+  if (firstDeclaredHere && !stillDeclared) {
+    newLines.push(`${parsed.indent}${line.slice(ep.start, ep.end)}`);
+  }
+
+  const newCode = replaceLines(code, el.lineStart, el.lineEnd, newLines);
+
+  // Keys are positional: the retargeted edge keeps its rank among the edges
+  // of its line, and every segment before it stays before it (the split only
+  // reorders lines after the dragged link's line), so its new key is the
+  // (edgesBefore + segIdx)-th edge of the new model.
+  const edgesBefore = model.elements.filter(e => e.kind === 'edge' && e.lineStart < el.lineStart).length;
+  const newEdges = parseModel(newCode).elements.filter(e => e.kind === 'edge');
+  const newKey = newEdges[edgesBefore + segIdx]?.key;
+
+  const occurrence = elementOccurrence(model, el);
+  const newConfig = cloneConfig(config);
+  let configChanged = false;
+  if (newConfig?.arrows) {
+    newConfig.arrows = newConfig.arrows.map(a => {
+      if (!arrowsMatchEntry(a, el.from, el.to, el.label, occurrence)) return a;
+      configChanged = true;
+      return end === 'from' ? { ...a, from: newId } : { ...a, to: newId };
+    });
+  }
+  if (!configChanged || !newConfig) return { code: newCode, config, newKey };
+  return { code: updateViewsData(newCode, newConfig), config: newConfig, newKey };
 }
 
 export const PRESET_ACTOR_COLORS: string[] = [
@@ -1954,6 +2058,88 @@ export function groupParticipants(
     } else {
       newLines.push(lines[i]);
     }
+  }
+
+  return {
+    code: newLines.join('\n'),
+    config,
+  };
+}
+
+// Wrap flowchart nodes into a `subgraph <title> ... end` block (the flowchart
+// counterpart of groupParticipants' `box`). A node joins the cluster through
+// its FIRST declaration line (mermaid's placement rule — the same one
+// buildSubgraphTagIndex applies), so the block carries one declaration per
+// selected node: a standalone declaration line moves into the subgraph
+// verbatim, while a node first declared on an edge line gets a standalone
+// declaration inserted (copying its endpoint text, shape included). Edge
+// lines themselves are never wrapped or rewritten — wrapping an edge line
+// would pull its non-selected endpoints into the cluster with it.
+//
+// The block is inserted immediately before the first selected node's
+// declaration line; selected nodes keep their relative order (sorted by
+// line), and every other line is preserved byte-for-byte. No CONFIG is
+// written: the subgraph tag pipeline (subgraphTags.ts) derives the group tag
+// from the block's title structurally.
+export function groupNodes(
+  code: string,
+  config: DiagramConfig | null,
+  nodeKeys: string[],
+  title: string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'flowchart') return fail(code, config, UNSUPPORTED);
+  if (nodeKeys.length < 2) {
+    return fail(code, config, 'At least two nodes must be selected to create a subgraph');
+  }
+  if (title.includes('\n')) return fail(code, config, 'Title must be a single line');
+
+  const elements = nodeKeys.map(k => findElement(model, k));
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el || el.kind !== 'node') {
+      return fail(code, config, `Unknown or non-node key: ${nodeKeys[i]}`);
+    }
+  }
+
+  const nodes = (elements as NodeElement[]).slice().sort((a, b) => a.lineStart - b.lineStart);
+  const lines = code.split('\n');
+
+  const movedLines = new Set<number>();
+  const decls: string[] = [];
+  for (const n of nodes) {
+    const line = lines[n.lineStart];
+    const parsed = parseFlowchartLine(line);
+    if (parsed && parsed.segments.length === 0) {
+      // Standalone node line: it declares only this node, so it moves in.
+      movedLines.add(n.lineStart);
+      decls.push(line.trim());
+    } else if (parsed) {
+      // Edge line: insert a standalone declaration, leave the line untouched.
+      const ep = parsed.endpoints.find(e => e.id === n.id);
+      decls.push(ep ? line.slice(ep.start, ep.end) : n.id);
+    } else {
+      decls.push(n.label ? `${n.id}[${n.label}]` : n.id);
+    }
+  }
+
+  const indentMatch = lines[nodes[0].lineStart].match(/^(\s*)/);
+  const baseIndent = indentMatch ? indentMatch[1] : '    ';
+  const innerIndent = `${baseIndent}    `;
+
+  const trimmedTitle = title.trim();
+  const block = [
+    trimmedTitle ? `${baseIndent}subgraph ${trimmedTitle}` : `${baseIndent}subgraph`,
+    ...decls.map(d => `${innerIndent}${d}`),
+    `${baseIndent}end`,
+  ];
+
+  const insertAt = nodes[0].lineStart;
+  const newLines: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (i === insertAt) newLines.push(...block);
+    if (movedLines.has(i)) continue;
+    newLines.push(lines[i]);
   }
 
   return {
