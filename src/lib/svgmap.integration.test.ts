@@ -22,11 +22,13 @@ describe('risk #2: zip on diagrams/complex.mmd (Step 13)', () => {
     expect(zip.participants.length).toBeGreaterThanOrEqual(5);
     expect(zip.messages.length).toBeGreaterThanOrEqual(20);
     expect(zip.notes.length).toBeGreaterThanOrEqual(1);
+    expect(zip.blocks.length).toBeGreaterThanOrEqual(1);  // rect blocks
 
     // no count/endpoint mismatch, no unmapped element
     expect(zip.warnings).toEqual([]);
     expect(zip.participants.every(Boolean)).toBe(true);
     expect(zip.messages.every(Boolean)).toBe(true);
     expect(zip.notes.every(Boolean)).toBe(true);
+    expect(zip.blocks.every(Boolean)).toBe(true);
   });
 });

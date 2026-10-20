@@ -5,7 +5,9 @@ import {
   getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, moveEdgeEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, groupNodes, toggleDiagramOrientation, insertMessage,
-  toggleNumberedSteps, hasNumberedSteps,
+  toggleNumberedSteps, hasNumberedSteps, addSequenceNote, editNoteText, setNotePlacement, setNoteSpan,
+  setBlockTitle, setBlockType, unwrapBlock, deleteBlock, hexToRgbColor, rgbToHexColor, DEFAULT_RECT_COLOR,
+  canWrapSelection, wrapInBlock, wrapInRegion,
 } from './editor';
 import { parseModel } from './model';
 import { processMermaid, transformActors } from './preprocessor';
@@ -1802,6 +1804,1070 @@ sequenceDiagram
     removeTag(NOTE_SEQ, config, 'note:1', 'x');
     deleteElement(NOTE_SEQ, config, 'note:1');
     expect(JSON.stringify(config)).toBe(snapshot);
+  });
+});
+
+describe('sequence notes (addSequenceNote / editNoteText / setNotePlacement / setNoteSpan)', () => {
+  // Lines: 0 sequenceDiagram, 1 participant A, 2 participant B, 3 A->>B: Hello,
+  // 4 activate B, 5 B-->>A: Hi, 6 Note over A,B: greeting
+  const NOTE_EDIT_SEQ = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    activate B
+    B-->>A: Hi
+    Note over A,B: greeting`;
+  const NOTE_EDIT_CFG = parseConfig(NOTE_EDIT_SEQ);
+
+  describe('addSequenceNote', () => {
+    it('creates a note over the first participant after the last message/note', () => {
+      const res = addSequenceNote(NOTE_EDIT_SEQ, NOTE_EDIT_CFG);
+      expect(res.warning).toBeUndefined();
+      expect(res.code.split('\n')).toEqual([
+        ...NOTE_EDIT_SEQ.split('\n'),
+        '    Note over A: New note',
+      ]);
+      expect(res.newKey).toBe('note:1');
+      expect(parseModel(res.code).elements.find(e => e.key === 'note:1'))
+        .toMatchObject({ kind: 'note', placement: 'over', over: ['A'], text: 'New note', lineStart: 7, lineEnd: 7 });
+    });
+
+    it('honours overKey (a participant key)', () => {
+      const res = addSequenceNote(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, { overKey: 'p:1' });
+      expect(res.code).toContain('    Note over B: New note');
+    });
+
+    it('honours afterKey: the note lands directly after that element', () => {
+      const res = addSequenceNote(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, { afterKey: 'm:1' });
+      const lines = res.code.split('\n');
+      expect(lines[5]).toBe('    B-->>A: Hi');
+      expect(lines[6]).toBe('    Note over A: New note');
+      expect(lines[7]).toBe('    Note over A,B: greeting');
+      // the new note sorts before the existing one, so it takes key note:0
+      expect(res.newKey).toBe('note:0');
+      const created = parseModel(res.code).elements.find(e => e.key === 'note:0');
+      expect(created).toMatchObject({ kind: 'note', text: 'New note', lineStart: 6, lineEnd: 6 });
+    });
+
+    it('hops over activate/deactivate companion lines of the anchor message (N9)', () => {
+      const res = addSequenceNote(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, { afterKey: 'm:0' });
+      const lines = res.code.split('\n');
+      expect(lines[3]).toBe('    A->>B: Hello');
+      expect(lines[4]).toBe('    activate B');
+      expect(lines[5]).toBe('    Note over A: New note');
+      expect(lines[6]).toBe('    B-->>A: Hi');
+    });
+
+    it('falls back to the first implicit actor when there are no participants (N10)', () => {
+      const code = `sequenceDiagram
+    A->>B: Hello
+    B-->>A: Hi`;
+      const res = addSequenceNote(code, null);
+      expect(res.warning).toBeUndefined();
+      expect(res.code.split('\n')[3]).toBe('    Note over A: New note');
+      expect(res.newKey).toBe('note:0');
+    });
+
+    it('refuses with a warning when there are no actors at all (N11)', () => {
+      const code = `sequenceDiagram
+    autonumber`;
+      const res = addSequenceNote(code, null);
+      expect(res.code).toBe(code);
+      expect(res.warning).toBe('Add a participant first');
+    });
+
+    it('soft-fails on flowcharts and unknown keys', () => {
+      expect(addSequenceNote(FLOW, FLOW_CFG).warning).toBeTruthy();
+      expect(addSequenceNote(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, { overKey: 'm:0' }).warning).toBeTruthy();
+      expect(addSequenceNote(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, { overKey: 'nope' }).warning).toBeTruthy();
+      expect(addSequenceNote(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, { afterKey: 'nope' }).warning).toBeTruthy();
+    });
+  });
+
+  describe('editNoteText', () => {
+    it('rewrites only the text span, byte-preserving the rest (N1/N3)', () => {
+      const res = editNoteText(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'Contains: colon #hash');
+      expect(res.warning).toBeUndefined();
+      expectOnlyLineChanged(NOTE_EDIT_SEQ, res.code, 6, '    Note over A,B: Contains: colon #hash');
+    });
+
+    it('allows empty text and drops the space after the colon', () => {
+      const res = editNoteText(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', '');
+      expectOnlyLineChanged(NOTE_EDIT_SEQ, res.code, 6, '    Note over A,B:');
+    });
+
+    it('preserves unusual spacing around the colon', () => {
+      const code = `sequenceDiagram
+    participant A
+      Note  over  A : spaced`;
+      const res = editNoteText(code, null, 'note:0', 'new');
+      expectOnlyLineChanged(code, res.code, 2, '      Note  over  A : new');
+    });
+
+    it('refuses newlines (N2) and non-note keys', () => {
+      expect(editNoteText(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'a\nb').warning).toBeTruthy();
+      expect(editNoteText(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'a\nb').code).toBe(NOTE_EDIT_SEQ);
+      expect(editNoteText(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'm:0', 'x').warning).toBeTruthy();
+      expect(editNoteText(FLOW, FLOW_CFG, 'note:0', 'x').warning).toBeTruthy();
+    });
+
+    it('is a no-op when the text is unchanged', () => {
+      const res = editNoteText(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'greeting');
+      expect(res.code).toBe(NOTE_EDIT_SEQ);
+      expect(res.config).toBe(NOTE_EDIT_CFG);
+    });
+  });
+
+  describe('setNotePlacement', () => {
+    it('switches over -> left of on a single-actor note', () => {
+      const code = `sequenceDiagram
+    participant A
+    participant B
+    Note over A: solo`;
+      const res = setNotePlacement(code, null, 'note:0', 'left of');
+      expect(res.warning).toBeUndefined();
+      expectOnlyLineChanged(code, res.code, 3, '    Note left of A: solo');
+      expect(parseModel(res.code).elements.find(e => e.kind === 'note')).toMatchObject({ placement: 'left of' });
+    });
+
+    it('refuses left of / right of on a multi-actor span (N4)', () => {
+      const res = setNotePlacement(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'right of');
+      expect(res.code).toBe(NOTE_EDIT_SEQ);
+      expect(res.warning).toBeTruthy();
+    });
+
+    it('refuses invalid placements and non-note keys', () => {
+      expect(setNotePlacement(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'beside' as never).warning).toBeTruthy();
+      expect(setNotePlacement(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'p:0', 'over').warning).toBeTruthy();
+    });
+
+    it('is a no-op when the placement is unchanged', () => {
+      const res = setNotePlacement(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'over');
+      expect(res.code).toBe(NOTE_EDIT_SEQ);
+    });
+  });
+
+  describe('setNoteSpan', () => {
+    it('rewrites the id list, dedupes and keeps order (N13)', () => {
+      const res = setNoteSpan(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', ['B', 'A', 'B']);
+      expect(res.warning).toBeUndefined();
+      expectOnlyLineChanged(NOTE_EDIT_SEQ, res.code, 6, '    Note over B,A: greeting');
+    });
+
+    it('refuses empty spans and unknown ids (N5)', () => {
+      expect(setNoteSpan(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', []).warning).toBeTruthy();
+      const res = setNoteSpan(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', ['A', 'Z']);
+      expect(res.code).toBe(NOTE_EDIT_SEQ);
+      expect(res.warning).toBeTruthy();
+    });
+
+    it('allows implicit actors (message endpoints) in the span (N6)', () => {
+      const code = `sequenceDiagram
+    A->>B: Hello
+    Note over A: x`;
+      const res = setNoteSpan(code, null, 'note:0', ['A', 'B']);
+      expect(res.warning).toBeUndefined();
+      expectOnlyLineChanged(code, res.code, 2, '    Note over A,B: x');
+    });
+
+    it('refuses a multi-actor span on a left of note (N4)', () => {
+      const code = `sequenceDiagram
+    participant A
+    participant B
+    Note left of A: x`;
+      const res = setNoteSpan(code, null, 'note:0', ['A', 'B']);
+      expect(res.code).toBe(code);
+      expect(res.warning).toBeTruthy();
+    });
+
+    it('is a no-op when the span is unchanged', () => {
+      const res = setNoteSpan(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', ['A', 'B']);
+      expect(res.code).toBe(NOTE_EDIT_SEQ);
+    });
+  });
+
+  describe('CONFIG noteTags retargeting (R-04, N7/N8)', () => {
+    it('a tagged note keeps its keys through text, placement and span edits (N7)', () => {
+      const tagged = addTag(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'k1');
+      expect(tagged.config?.noteTags).toEqual([{ over: ['A', 'B'], text: 'greeting', keys: ['k1'] }]);
+
+      const edited = editNoteText(tagged.code, tagged.config, 'note:0', 'renamed');
+      expect(edited.config?.noteTags).toEqual([{ over: ['A', 'B'], text: 'renamed', keys: ['k1'] }]);
+      expect(parseConfig(edited.code)?.noteTags).toEqual([{ over: ['A', 'B'], text: 'renamed', keys: ['k1'] }]);
+      expect(getNoteTags(edited.code, edited.config, 'note:0')).toEqual(['k1']);
+
+      const respanned = setNoteSpan(edited.code, edited.config, 'note:0', ['A']);
+      expect(respanned.config?.noteTags).toEqual([{ over: ['A'], text: 'renamed', keys: ['k1'] }]);
+
+      // single-actor note keeps working through a placement edit
+      const placed = setNotePlacement(respanned.code, respanned.config, 'note:0', 'left of');
+      expect(placed.config?.noteTags).toEqual([{ over: ['A'], text: 'renamed', keys: ['k1'] }]);
+      expect(getNoteTags(placed.code, placed.config, 'note:0')).toEqual(['k1']);
+    });
+
+    it('a duplicate-note tag follows the edited note, not its twin (N8)', () => {
+      const code = `sequenceDiagram
+    participant A
+    Note over A: Same
+    Note over A: Same`;
+      const cfg = parseConfig(code);
+      const taggedFirst = addTag(code, cfg, 'note:0', 'first');
+      const taggedBoth = addTag(taggedFirst.code, taggedFirst.config, 'note:1', 'second');
+      expect(taggedBoth.config?.noteTags).toEqual([
+        { over: ['A'], text: 'Same', keys: ['first'] },
+        { over: ['A'], text: 'Same', occurrence: 1, keys: ['second'] },
+      ]);
+      // edit the SECOND note's text: its entry (occurrence 1) follows it and
+      // drops to occurrence 0 in the new (over, text) group
+      const edited = editNoteText(taggedBoth.code, taggedBoth.config, 'note:1', 'Changed');
+      expect(edited.config?.noteTags).toEqual([
+        { over: ['A'], text: 'Same', keys: ['first'] },
+        { over: ['A'], text: 'Changed', keys: ['second'] },
+      ]);
+      expect(getNoteTags(edited.code, edited.config, 'note:0')).toEqual(['first']);
+      expect(getNoteTags(edited.code, edited.config, 'note:1')).toEqual(['second']);
+    });
+
+    it('a tag survives a span edit that changes the occurrence group', () => {
+      const code = `sequenceDiagram
+    participant A
+    participant B
+    Note over A: Same
+    Note over A,B: Same`;
+      const tagged = addTag(code, null, 'note:0', 'k1');
+      expect(tagged.config?.noteTags).toEqual([{ over: ['A'], text: 'Same', keys: ['k1'] }]);
+      // span note:0 to A,B: it joins the other note's (over, text) group —
+      // as occurrence 0, because it still sorts first in source order
+      const respanned = setNoteSpan(tagged.code, tagged.config, 'note:0', ['A', 'B']);
+      expect(respanned.config?.noteTags).toEqual([{ over: ['A', 'B'], text: 'Same', keys: ['k1'] }]);
+      expect(getNoteTags(respanned.code, respanned.config, 'note:0')).toEqual(['k1']);
+      expect(getNoteTags(respanned.code, respanned.config, 'note:1')).toEqual([]);
+    });
+
+    it('deleting a note drops its tag entry (deleteElement path, R-03)', () => {
+      const tagged = addTag(NOTE_EDIT_SEQ, NOTE_EDIT_CFG, 'note:0', 'k1');
+      const del = deleteElement(tagged.code, tagged.config, 'note:0');
+      expect(del.warning).toBeUndefined();
+      expect(del.config?.noteTags).toBeUndefined();
+      expect(del.code).not.toContain('Note over A,B: greeting');
+      expect(parseConfig(del.code)).toBeNull();
+    });
+  });
+});
+
+describe('sequence blocks (setBlockTitle / setBlockType / unwrapBlock / deleteBlock)', () => {
+  const BLOCK_SEQ = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    alt has else
+        A->>B: m1
+    else other
+        B-->>A: m2
+    end
+    loop retry
+        A->>B: m3
+    end
+    rect rgb(1,2,3)
+        A->>B: r1
+    end
+    box red BoxOne
+        participant C
+    end`;
+  // b:0 alt (has else) 4-8, b:1 loop 9-11, b:2 rect 12-14, b:3 box 15-17
+
+  describe('setBlockTitle', () => {
+    it('edits a labeled block title, changing only the header line', () => {
+      const r = setBlockTitle(BLOCK_SEQ, null, 'b:1', 'retry loop');
+      expect(r.warning).toBeUndefined();
+      expectOnlyLineChanged(BLOCK_SEQ, r.code, 9, '    loop retry loop');
+      expect(r.config).toBeNull();
+    });
+
+    it('clears the title to a bare keyword line', () => {
+      const r = setBlockTitle(BLOCK_SEQ, null, 'b:1', '');
+      expect(r.warning).toBeUndefined();
+      expectOnlyLineChanged(BLOCK_SEQ, r.code, 9, '    loop');
+    });
+
+    it('accepts an rgb(...) title for rect and round-trips through parseModel', () => {
+      const r = setBlockTitle(BLOCK_SEQ, null, 'b:2', 'rgb(200,150,255)');
+      expect(r.warning).toBeUndefined();
+      expectOnlyLineChanged(BLOCK_SEQ, r.code, 12, '    rect rgb(200,150,255)');
+      const el = parseModel(r.code).elements.find(e => e.key === 'b:2');
+      expect(el).toMatchObject({ kind: 'block', blockType: 'rect', title: 'rgb(200,150,255)' });
+    });
+
+    it('clears a rect title to a bare rect line', () => {
+      const r = setBlockTitle(BLOCK_SEQ, null, 'b:2', '');
+      expect(r.warning).toBeUndefined();
+      expectOnlyLineChanged(BLOCK_SEQ, r.code, 12, '    rect');
+    });
+
+    it('refuses a non-rgb rect title (edge B10)', () => {
+      const r = setBlockTitle(BLOCK_SEQ, null, 'b:2', 'red');
+      expect(r.warning).toContain('rgb(...)');
+      expect(r.code).toBe(BLOCK_SEQ);
+    });
+
+    it('refuses an out-of-range rgb title', () => {
+      const r = setBlockTitle(BLOCK_SEQ, null, 'b:2', 'rgb(300,0,0)');
+      expect(r.warning).toContain('rgb(...)');
+      expect(r.code).toBe(BLOCK_SEQ);
+    });
+
+    it('refuses to edit a box title (color + name are encoded, edge B11)', () => {
+      const r = setBlockTitle(BLOCK_SEQ, null, 'b:3', 'blue BoxOne');
+      expect(r.warning).toContain('box');
+      expect(r.code).toBe(BLOCK_SEQ);
+    });
+
+    it('refuses multi-line titles, unknown keys, non-blocks and flowcharts', () => {
+      expect(setBlockTitle(BLOCK_SEQ, null, 'b:1', 'a\nb').warning).toContain('single line');
+      expect(setBlockTitle(BLOCK_SEQ, null, 'b:99', 'x').warning).toContain('not a block');
+      expect(setBlockTitle(BLOCK_SEQ, null, 'm:0', 'x').warning).toContain('not a block');
+      expect(setBlockTitle(FLOW, FLOW_CFG, 'b:0', 'x').warning).toBeTruthy();
+    });
+
+    it('converts hex <-> rgb for the rect color row (edge B10)', () => {
+      expect(hexToRgbColor('#c896ff')).toBe('rgb(200,150,255)');
+      expect(hexToRgbColor('#010203')).toBe('rgb(1,2,3)');
+      expect(hexToRgbColor('#fff')).toBeNull();
+      expect(hexToRgbColor('red')).toBeNull();
+      expect(rgbToHexColor('rgb(200,150,255)')).toBe('#c896ff');
+      expect(rgbToHexColor('rgb(200, 150, 255)')).toBe('#c896ff');
+      expect(rgbToHexColor('rgb(1,2,3)')).toBe('#010203');
+      expect(rgbToHexColor('red')).toBeNull();
+      expect(rgbToHexColor('rgb(300,0,0)')).toBeNull();
+      expect(DEFAULT_RECT_COLOR).toBe('rgb(200,150,255)');
+    });
+  });
+
+  describe('setBlockType', () => {
+    it('converts between the labeled types, changing only the keyword', () => {
+      const r = setBlockType(BLOCK_SEQ, null, 'b:1', 'par');
+      expect(r.warning).toBeUndefined();
+      expectOnlyLineChanged(BLOCK_SEQ, r.code, 9, '    par retry');
+    });
+
+    it('is a no-op for the same type', () => {
+      const r = setBlockType(BLOCK_SEQ, null, 'b:1', 'loop');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(BLOCK_SEQ);
+    });
+
+    it('refuses conversion when the span contains else/and separators (edge B5)', () => {
+      const r = setBlockType(BLOCK_SEQ, null, 'b:0', 'loop');
+      expect(r.warning).toContain('else/and');
+      expect(r.code).toBe(BLOCK_SEQ);
+      // same-type "conversion" of an alt with else is still a no-op
+      const same = setBlockType(BLOCK_SEQ, null, 'b:0', 'alt');
+      expect(same.warning).toBeUndefined();
+      expect(same.code).toBe(BLOCK_SEQ);
+    });
+
+    it('converting to rect supplies the default rgb title (edge W11)', () => {
+      const r = setBlockType(BLOCK_SEQ, null, 'b:1', 'rect');
+      expect(r.warning).toBeUndefined();
+      expectOnlyLineChanged(BLOCK_SEQ, r.code, 9, `    rect ${DEFAULT_RECT_COLOR}`);
+    });
+
+    it('converting to rect keeps an existing rgb title', () => {
+      const r = setBlockType(BLOCK_SEQ, null, 'b:2', 'alt');
+      expect(r.warning).toBeUndefined();
+      expectOnlyLineChanged(BLOCK_SEQ, r.code, 12, '    alt rgb(1,2,3)');
+      const back = setBlockType(r.code, null, 'b:2', 'rect');
+      expectOnlyLineChanged(r.code, back.code, 12, '    rect rgb(1,2,3)');
+    });
+
+    it('refuses box/subgraph as source and target (edge B11)', () => {
+      expect(setBlockType(BLOCK_SEQ, null, 'b:3', 'alt').warning).toContain('box');
+      expect(setBlockType(BLOCK_SEQ, null, 'b:1', 'box').warning).toContain("'box'");
+      expect(setBlockType(BLOCK_SEQ, null, 'b:99', 'alt').warning).toContain('not a block');
+      expect(setBlockType(FLOW, FLOW_CFG, 'b:0', 'alt').warning).toBeTruthy();
+    });
+  });
+
+  describe('unwrapBlock', () => {
+    it('drops header and end and de-indents the content one level', () => {
+      const r = unwrapBlock(BLOCK_SEQ, null, 'b:1');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    alt has else
+        A->>B: m1
+    else other
+        B-->>A: m2
+    end
+    A->>B: m3
+    rect rgb(1,2,3)
+        A->>B: r1
+    end
+    box red BoxOne
+        participant C
+    end`);
+    });
+
+    it('drops else/and separator lines and warns about them (edge B6)', () => {
+      const r = unwrapBlock(BLOCK_SEQ, null, 'b:0');
+      expect(r.warning).toBe('1 separator line removed');
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    A->>B: m1
+    B-->>A: m2
+    loop retry
+        A->>B: m3
+    end
+    rect rgb(1,2,3)
+        A->>B: r1
+    end
+    box red BoxOne
+        participant C
+    end`);
+    });
+
+    it('de-indents only lines that start with headerIndent + 4 spaces (edge B7)', () => {
+      const hand = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+alt weird
+      A->>B: deep
+  A->>B: shallow
+end
+    A->>B: after`;
+      const r = unwrapBlock(hand, null, 'b:0');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+  A->>B: deep
+  A->>B: shallow
+    A->>B: after`);
+    });
+
+    it('leaves blank lines byte-identical while unwrapping', () => {
+      const withBlank = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    loop blank
+        A->>B: m1
+
+        A->>B: m2
+    end`;
+      const r = unwrapBlock(withBlank, null, 'b:0');
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    A->>B: m1
+
+    A->>B: m2`);
+    });
+
+    it('unwraps the outer block of a nested pair and keeps the inner one intact', () => {
+      const nested = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    alt outer
+        A->>B: m1
+        loop inner
+            A->>B: m2
+        end
+    end`;
+      const r = unwrapBlock(nested, null, 'b:0');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    A->>B: m1
+    loop inner
+        A->>B: m2
+    end`);
+      // the inner block still parses at its new span
+      const inner = parseModel(r.code).elements.find(e => e.kind === 'block' && e.blockType === 'loop');
+      expect(inner).toMatchObject({ title: 'inner', lineStart: 5, lineEnd: 7 });
+    });
+
+    it('unwraps an unclosed block by dropping only the header (edge B8)', () => {
+      const unclosed = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    loop never closed
+        A->>B: m1`;
+      const r = unwrapBlock(unclosed, null, 'b:0');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+        A->>B: m1`);
+    });
+
+    it('refuses unknown keys, non-blocks and flowcharts', () => {
+      expect(unwrapBlock(BLOCK_SEQ, null, 'b:99').warning).toContain('not a block');
+      expect(unwrapBlock(BLOCK_SEQ, null, 'm:0').warning).toContain('not a block');
+      expect(unwrapBlock(FLOW, FLOW_CFG, 'b:0').warning).toBeTruthy();
+    });
+  });
+
+  describe('deleteBlock', () => {
+    it('drops the span, cascades contained messages/notes and prunes CONFIG (edge B9)', () => {
+      const tagged = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","label":"m1","keys":["k1"]},{"from":"A","to":"B","label":"m3","color":"red"}],"noteTags":[{"over":["A","B"],"text":"note inside","keys":["k2"]}]}
+sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    loop del me
+        A->>B: m1
+        Note over A,B: note inside
+        A->>B: m3
+    end
+    A->>B: after`;
+      const r = deleteBlock(tagged, parseConfig(tagged), 'b:0', { withContent: true });
+      expect(r.warning).toBeUndefined();
+      expect(r.cascaded).toEqual(['m:1', 'note:0', 'm:2']);
+      // every CONFIG entry was pruned, so the CONFIG line itself is dropped
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    A->>B: after`);
+      expect(r.config?.arrows).toBeUndefined();
+      expect(r.config?.noteTags).toBeUndefined();
+      expect(parseConfig(r.code)).toBeNull();
+    });
+
+    it('does not renumber occurrences of surviving CONFIG entries (edge B9)', () => {
+      const dup = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","label":"dup","occurrence":2,"keys":["keep"]}]}
+sequenceDiagram
+    participant A
+    participant B
+    A->>B: dup
+    loop del me
+        A->>B: dup
+    end
+    A->>B: dup`;
+      const r = deleteBlock(dup, parseConfig(dup), 'b:0', { withContent: true });
+      expect(r.warning).toBeUndefined();
+      expect(r.cascaded).toEqual(['m:1']);
+      // the surviving entry still points at occurrence 2 (not renumbered to 1)
+      expect(r.config?.arrows).toEqual([{ from: 'A', to: 'B', label: 'dup', occurrence: 2, keys: ['keep'] }]);
+      expect(r.code).toContain('A->>B: dup');
+      expect(r.code.split('A->>B: dup')).toHaveLength(3);  // two surviving copies
+    });
+
+    it('drops participants declared inside the span and prunes their actor entries', () => {
+      const boxed = `%% CONFIG: {"version":1,"actors":{"C":{"color":"red"}}}
+sequenceDiagram
+    participant A
+    box red BoxOne
+        participant C
+    end
+    A->>B: m0`;
+      const r = deleteBlock(boxed, parseConfig(boxed), 'b:0', { withContent: true });
+      expect(r.warning).toBeUndefined();
+      expect(r.cascaded).toEqual([]);
+      // the actor entry was pruned, so the CONFIG line itself is dropped
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    A->>B: m0`);
+      expect(r.config?.actors).toBeUndefined();
+      expect(parseConfig(r.code)).toBeNull();
+    });
+
+    it('deletes an unclosed block through EOF (edge B8)', () => {
+      const unclosed = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    loop never closed
+        A->>B: m1`;
+      const r = deleteBlock(unclosed, null, 'b:0', { withContent: true });
+      expect(r.warning).toBeUndefined();
+      expect(r.cascaded).toEqual(['m:1']);
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0`);
+    });
+
+    it('withContent: false unwraps instead', () => {
+      const r = deleteBlock(BLOCK_SEQ, null, 'b:1', { withContent: false });
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(unwrapBlock(BLOCK_SEQ, null, 'b:1').code);
+    });
+
+    it('refuses unknown keys, non-blocks and flowcharts', () => {
+      expect(deleteBlock(BLOCK_SEQ, null, 'b:99').warning).toContain('not a block');
+      expect(deleteBlock(BLOCK_SEQ, null, 'm:0').warning).toContain('not a block');
+      expect(deleteBlock(FLOW, FLOW_CFG, 'b:0').warning).toBeTruthy();
+    });
+  });
+});
+
+describe('wrapInBlock / wrapInRegion (canWrapSelection)', () => {
+  const WRAP_SEQ = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    A->>B: m1
+
+    %% a comment
+    B-->>A: m2
+    A->>B: m3`;
+  // lines: 0 sequenceDiagram, 1 p:0, 2 p:1, 3 m:0, 4 m:1, 5 blank, 6 comment,
+  //        7 m:2, 8 m:3
+
+  const WRAP_BLOCK_SEQ = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: before
+    alt cond
+        A->>B: arm1
+    else other
+        B-->>A: arm2
+    end
+    loop retry
+        A->>B: in1
+        A->>B: in2
+    end
+    A->>B: after`;
+  // lines: 0 seq, 1 p:0, 2 p:1, 3 m:0, 4 b:0 alt(4-8), 5 m:1, 6 else, 7 m:2,
+  //        8 end, 9 b:1 loop(9-12), 10 m:3, 11 m:4, 12 end, 13 m:5
+
+  const WRAP_COMPANION_SEQ = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    activate B
+    A->>B: m1
+    deactivate B
+    A->>B: m2`;
+  // lines: 3 m:0, 4 activate (companion of m:0), 5 m:1, 6 deactivate
+  //        (companion of m:1), 7 m:2
+
+  const WRAP_REGION_SEQ = `sequenceDiagram
+    participant A
+    participant B
+    %% @region-start: existing
+    A->>B: m0
+    A->>B: m1
+    %% @region-end
+    A->>B: m2`;
+  // lines: 3 r:0, 4 m:0, 5 m:1, 6 region-end comment, 7 m:2
+
+  const WRAP_REGION_START_SEQ = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    %% @region-start: inner
+    A->>B: m1`;
+  // lines: 3 m:0, 4 r:0, 5 m:1
+
+  const WRAP_CFG_SEQ = `%% CONFIG: {"version":1}
+sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    A->>B: m1`;
+  // lines: 0 c:0, 1 sequenceDiagram, 2 p:0, 3 p:1, 4 m:0, 5 m:1
+
+  const WRAP_NOTE_SEQ = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m0
+    Note over A: hello
+    A->>B: m1`;
+  // lines: 3 m:0, 4 note:0, 5 m:1
+
+  describe('canWrapSelection', () => {
+    it('accepts a contiguous selection in both modes', () => {
+      const model = parseModel(WRAP_SEQ);
+      expect(canWrapSelection(WRAP_SEQ, model, ['m:0', 'm:1'], 'block')).toEqual({ ok: true });
+      expect(canWrapSelection(WRAP_SEQ, model, ['m:0', 'm:1'], 'region')).toEqual({ ok: true });
+    });
+
+    it('accepts a span containing blank lines and %% comments (W1)', () => {
+      const model = parseModel(WRAP_SEQ);
+      // span 3..8: the blank line and the %% comment sit between selected
+      // messages and are fine; every message inside is selected
+      const keys = ['m:0', 'm:1', 'm:2', 'm:3'];
+      expect(canWrapSelection(WRAP_SEQ, model, keys, 'block')).toEqual({ ok: true });
+      expect(canWrapSelection(WRAP_SEQ, model, keys, 'region')).toEqual({ ok: true });
+    });
+
+    it('accepts a message+note selection (both wrappable kinds, W4)', () => {
+      const model = parseModel(WRAP_NOTE_SEQ);
+      expect(canWrapSelection(WRAP_NOTE_SEQ, model, ['m:0', 'note:0'], 'block')).toEqual({ ok: true });
+    });
+
+    it('refuses a non-contiguous selection (W1)', () => {
+      const model = parseModel(WRAP_SEQ);
+      const r = canWrapSelection(WRAP_SEQ, model, ['m:0', 'm:2'], 'block');
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toContain('contiguous');
+      const rRegion = canWrapSelection(WRAP_SEQ, model, ['m:0', 'm:2'], 'region');
+      expect(rRegion.ok).toBe(false);
+    });
+
+    it('refuses mixed-kind selections and unknown keys (W4)', () => {
+      const model = parseModel(WRAP_SEQ);
+      const mixed = canWrapSelection(WRAP_SEQ, model, ['p:0', 'm:0', 'm:1'], 'block');
+      expect(mixed.ok).toBe(false);
+      if (!mixed.ok) expect(mixed.reason).toContain('Only messages and notes');
+      const unknown = canWrapSelection(WRAP_SEQ, model, ['m:0', 'm:99'], 'block');
+      expect(unknown.ok).toBe(false);
+      if (!unknown.ok) expect(unknown.reason).toContain('Unknown element key');
+    });
+
+    it('requires at least two distinct keys', () => {
+      const model = parseModel(WRAP_SEQ);
+      expect(canWrapSelection(WRAP_SEQ, model, ['m:0'], 'block').ok).toBe(false);
+      expect(canWrapSelection(WRAP_SEQ, model, [], 'block').ok).toBe(false);
+      expect(canWrapSelection(WRAP_SEQ, model, ['m:0', 'm:0'], 'block').ok).toBe(false);
+    });
+
+    it('is order-insensitive (W5)', () => {
+      const model = parseModel(WRAP_SEQ);
+      expect(canWrapSelection(WRAP_SEQ, model, ['m:1', 'm:0'], 'block')).toEqual({ ok: true });
+    });
+
+    it('refuses messages in two alt arms (W2, else separator)', () => {
+      const model = parseModel(WRAP_BLOCK_SEQ);
+      const r = canWrapSelection(WRAP_BLOCK_SEQ, model, ['m:1', 'm:2'], 'block');
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toContain('else');
+    });
+
+    it('refuses a span crossing into or out of a block (W2)', () => {
+      const model = parseModel(WRAP_BLOCK_SEQ);
+      // before the block vs inside the alt: the alt header sits inside the span
+      const into = canWrapSelection(WRAP_BLOCK_SEQ, model, ['m:0', 'm:1'], 'block');
+      expect(into.ok).toBe(false);
+      if (!into.ok) expect(into.reason).toContain('block header');
+      // inside the alt vs inside the loop: the end + loop header sit inside
+      const across = canWrapSelection(WRAP_BLOCK_SEQ, model, ['m:2', 'm:3'], 'block');
+      expect(across.ok).toBe(false);
+      if (!across.ok) expect(across.reason).toContain('block end');
+    });
+
+    it('allows wrapping fully inside a single block arm (W2 depth check)', () => {
+      const model = parseModel(WRAP_BLOCK_SEQ);
+      expect(canWrapSelection(WRAP_BLOCK_SEQ, model, ['m:3', 'm:4'], 'block')).toEqual({ ok: true });
+    });
+
+    it('absorbs trailing activate/deactivate companion lines into the span (W3)', () => {
+      const model = parseModel(WRAP_COMPANION_SEQ);
+      expect(canWrapSelection(WRAP_COMPANION_SEQ, model, ['m:0', 'm:1'], 'block')).toEqual({ ok: true });
+      expect(canWrapSelection(WRAP_COMPANION_SEQ, model, ['m:0', 'm:1'], 'region')).toEqual({ ok: true });
+    });
+
+    it('refuses a region wrap spanning an existing %% @region-end line (W9)', () => {
+      const model = parseModel(WRAP_REGION_SEQ);
+      const r = canWrapSelection(WRAP_REGION_SEQ, model, ['m:0', 'm:1', 'm:2'], 'region');
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toContain('@region-end');
+    });
+
+    it('refuses a region wrap containing a %% @region-start line (W9, via W1 contiguity)', () => {
+      const model = parseModel(WRAP_REGION_START_SEQ);
+      // the region-start line is a model element inside the span; contiguity
+      // (checked first) refuses before the region-tag scan runs
+      const r = canWrapSelection(WRAP_REGION_START_SEQ, model, ['m:0', 'm:1'], 'region');
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toContain('contiguous');
+    });
+
+    it('refuses a block wrap across a region tag (W1 contiguity)', () => {
+      const model = parseModel(WRAP_REGION_START_SEQ);
+      expect(canWrapSelection(WRAP_REGION_START_SEQ, model, ['m:0', 'm:1'], 'block').ok).toBe(false);
+    });
+
+    it('allows region wraps around block structure lines (W10)', () => {
+      const model = parseModel(WRAP_BLOCK_SEQ);
+      // the span 5..7 contains the else separator — fine for regions
+      expect(canWrapSelection(WRAP_BLOCK_SEQ, model, ['m:1', 'm:2'], 'region')).toEqual({ ok: true });
+    });
+
+    it('refuses flowcharts (sequence-only)', () => {
+      const model = parseModel(FLOW);
+      expect(canWrapSelection(FLOW, model, ['n:0', 'n:1'], 'block').ok).toBe(false);
+      expect(canWrapSelection(FLOW, model, ['n:0', 'n:1'], 'region').ok).toBe(false);
+    });
+  });
+
+  describe('wrapInBlock', () => {
+    it('wraps a contiguous selection with a bare keyword header (W12)', () => {
+      const r = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'alt');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    alt
+        A->>B: m0
+        A->>B: m1
+    end
+
+    %% a comment
+    B-->>A: m2
+    A->>B: m3`);
+    });
+
+    it('wraps with a title for each wrappable block type', () => {
+      for (const t of ['alt', 'opt', 'loop', 'par'] as const) {
+        const r = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], t, 'title');
+        expect(r.warning).toBeUndefined();
+        expect(r.code).toContain(`\n    ${t} title\n        A->>B: m0\n        A->>B: m1\n    end\n`);
+      }
+    });
+
+    it('wraps messages and notes together', () => {
+      const r = wrapInBlock(WRAP_NOTE_SEQ, null, ['m:0', 'note:0'], 'loop', 'retry');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    loop retry
+        A->>B: m0
+        Note over A: hello
+    end
+    A->>B: m1`);
+    });
+
+    it('re-indents only the span lines, blank lines untouched (NFR-02)', () => {
+      const r = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1', 'm:2', 'm:3'], 'opt', 'maybe');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    opt maybe
+        A->>B: m0
+        A->>B: m1
+
+        %% a comment
+        B-->>A: m2
+        A->>B: m3
+    end`);
+    });
+
+    it('absorbs trailing companion lines into the block (W3)', () => {
+      const r = wrapInBlock(WRAP_COMPANION_SEQ, null, ['m:0', 'm:1'], 'loop', 'retry');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    loop retry
+        A->>B: m0
+        activate B
+        A->>B: m1
+        deactivate B
+    end
+    A->>B: m2`);
+    });
+
+    it('is order-insensitive (W5)', () => {
+      const a = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'loop', 'x');
+      const b = wrapInBlock(WRAP_SEQ, null, ['m:1', 'm:0'], 'loop', 'x');
+      expect(a.code).toBe(b.code);
+      expect(a.newKey).toBe(b.newKey);
+    });
+
+    it('wraps fully inside a single block arm, nesting correctly (W2)', () => {
+      const r = wrapInBlock(WRAP_BLOCK_SEQ, null, ['m:3', 'm:4'], 'opt', 'choice');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: before
+    alt cond
+        A->>B: arm1
+    else other
+        B-->>A: arm2
+    end
+    loop retry
+        opt choice
+            A->>B: in1
+            A->>B: in2
+        end
+    end
+    A->>B: after`);
+    });
+
+    it('returns the new block key (newKey) at the header line', () => {
+      const r = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'loop', 'retry');
+      expect(r.newKey).toBe('b:0');
+      const el = parseModel(r.code).elements.find(e => e.key === r.newKey);
+      expect(el).toMatchObject({ kind: 'block', blockType: 'loop', title: 'retry', lineStart: 3, lineEnd: 6 });
+      // with existing blocks the new key continues the sequence
+      const r2 = wrapInBlock(WRAP_BLOCK_SEQ, null, ['m:3', 'm:4'], 'opt');
+      expect(r2.newKey).toBe('b:2');
+      const el2 = parseModel(r2.code).elements.find(e => e.key === 'b:2');
+      expect(el2).toMatchObject({ kind: 'block', blockType: 'opt', lineStart: 10, lineEnd: 13 });
+    });
+
+    it('rect defaults to the default color and validates rgb(...) titles (W11)', () => {
+      const def = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'rect');
+      expect(def.warning).toBeUndefined();
+      expect(def.code).toContain('\n    rect rgb(200,150,255)\n');
+      const el = parseModel(def.code).elements.find(e => e.key === def.newKey);
+      expect(el).toMatchObject({ kind: 'block', blockType: 'rect', title: DEFAULT_RECT_COLOR });
+
+      const custom = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'rect', 'rgb(1,2,3)');
+      expect(custom.warning).toBeUndefined();
+      expect(custom.code).toContain('\n    rect rgb(1,2,3)\n');
+
+      const bad = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'rect', 'red');
+      expect(bad.warning).toContain('rgb(...)');
+      expect(bad.code).toBe(WRAP_SEQ);
+      const outOfRange = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'rect', 'rgb(300,0,0)');
+      expect(outOfRange.warning).toContain('rgb(...)');
+      expect(outOfRange.code).toBe(WRAP_SEQ);
+    });
+
+    it('refuses multi-line titles, box/subgraph and flowcharts (W12)', () => {
+      expect(wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'loop', 'a\nb').warning).toContain('single line');
+      expect(wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'box').warning).toContain('box');
+      expect(wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1'], 'subgraph').warning).toContain('subgraph');
+      expect(wrapInBlock(FLOW, FLOW_CFG, ['n:0', 'n:1'], 'loop').warning).toBeTruthy();
+    });
+
+    it('refuses non-contiguous and block-crossing selections with the check reason', () => {
+      const nonContig = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:2'], 'loop');
+      expect(nonContig.warning).toContain('contiguous');
+      expect(nonContig.code).toBe(WRAP_SEQ);
+      const crossArm = wrapInBlock(WRAP_BLOCK_SEQ, null, ['m:1', 'm:2'], 'loop');
+      expect(crossArm.warning).toContain('else');
+      expect(crossArm.code).toBe(WRAP_BLOCK_SEQ);
+    });
+
+    it('keeps the CONFIG line untouched and passes config through', () => {
+      const cfg = parseConfig(WRAP_CFG_SEQ);
+      const r = wrapInBlock(WRAP_CFG_SEQ, cfg, ['m:0', 'm:1'], 'loop');
+      expect(r.warning).toBeUndefined();
+      expect(r.config).toBe(cfg);
+      expect(r.code).toBe(`%% CONFIG: {"version":1}
+sequenceDiagram
+    participant A
+    participant B
+    loop
+        A->>B: m0
+        A->>B: m1
+    end`);
+    });
+
+    it('undo round trip: unwrapBlock restores the pre-wrap bytes (W14)', () => {
+      const r = wrapInBlock(WRAP_SEQ, null, ['m:0', 'm:1', 'm:2', 'm:3'], 'opt', 'maybe');
+      expect(unwrapBlock(r.code, null, r.newKey!).code).toBe(WRAP_SEQ);
+      const nested = wrapInBlock(WRAP_BLOCK_SEQ, null, ['m:3', 'm:4'], 'opt', 'choice');
+      expect(unwrapBlock(nested.code, null, nested.newKey!).code).toBe(WRAP_BLOCK_SEQ);
+    });
+  });
+
+  describe('wrapInRegion', () => {
+    it('inserts the region tags at the span indent, content byte-untouched (NFR-02)', () => {
+      const r = wrapInRegion(WRAP_SEQ, null, ['m:0', 'm:1'], 'section');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    %% @region-start: section
+    A->>B: m0
+    A->>B: m1
+    %% @region-end
+
+    %% a comment
+    B-->>A: m2
+    A->>B: m3`);
+      expect(r.newKey).toBe('r:0');
+      const el = parseModel(r.code).elements.find(e => e.key === 'r:0');
+      expect(el).toMatchObject({ kind: 'region', regionType: 'section', lineStart: 3, lineEnd: 3 });
+    });
+
+    it('supports a type=value region', () => {
+      const r = wrapInRegion(WRAP_SEQ, null, ['m:0', 'm:1'], 'section', 'intro');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toContain('\n    %% @region-start: section=intro\n');
+      const el = parseModel(r.code).elements.find(e => e.key === r.newKey);
+      expect(el).toMatchObject({ kind: 'region', regionType: 'section', value: 'intro' });
+    });
+
+    it('continues the region key sequence when regions already exist', () => {
+      const r = wrapInRegion(WRAP_REGION_SEQ, null, ['m:0', 'm:1'], 'outer');
+      expect(r.warning).toBeUndefined();
+      expect(r.newKey).toBe('r:1');
+    });
+
+    it('validates type and value (W8)', () => {
+      for (const bad of ['', 'foo bar', 'a=b', 'ü']) {
+        const r = wrapInRegion(WRAP_SEQ, null, ['m:0', 'm:1'], bad);
+        expect(r.warning).toContain('Region type');
+        expect(r.code).toBe(WRAP_SEQ);
+      }
+      const badValue = wrapInRegion(WRAP_SEQ, null, ['m:0', 'm:1'], 'ok', 'a b');
+      expect(badValue.warning).toContain('Region value');
+      expect(badValue.code).toBe(WRAP_SEQ);
+      // an empty value is allowed and produces a bare region
+      const bare = wrapInRegion(WRAP_SEQ, null, ['m:0', 'm:1'], 'ok', '');
+      expect(bare.warning).toBeUndefined();
+      expect(bare.code).toContain('\n    %% @region-start: ok\n');
+    });
+
+    it('refuses a span containing an existing region tag (W9)', () => {
+      const r = wrapInRegion(WRAP_REGION_SEQ, null, ['m:0', 'm:1', 'm:2'], 'outer');
+      expect(r.warning).toContain('@region-end');
+      expect(r.code).toBe(WRAP_REGION_SEQ);
+      const start = wrapInRegion(WRAP_REGION_START_SEQ, null, ['m:0', 'm:1'], 'outer');
+      expect(start.warning).toContain('contiguous');
+      expect(start.code).toBe(WRAP_REGION_START_SEQ);
+    });
+
+    it('allows wrapping around block structure lines (W10)', () => {
+      const r = wrapInRegion(WRAP_BLOCK_SEQ, null, ['m:1', 'm:2'], 'part');
+      expect(r.warning).toBeUndefined();
+      expect(r.code).toBe(`sequenceDiagram
+    participant A
+    participant B
+    A->>B: before
+    alt cond
+        %% @region-start: part
+        A->>B: arm1
+    else other
+        B-->>A: arm2
+        %% @region-end
+    end
+    loop retry
+        A->>B: in1
+        A->>B: in2
+    end
+    A->>B: after`);
+    });
+
+    it('refuses non-contiguous selections and flowcharts', () => {
+      const r = wrapInRegion(WRAP_SEQ, null, ['m:0', 'm:2'], 'x');
+      expect(r.warning).toContain('contiguous');
+      expect(r.code).toBe(WRAP_SEQ);
+      expect(wrapInRegion(FLOW, FLOW_CFG, ['n:0', 'n:1'], 'x').warning).toBeTruthy();
+    });
+
+    it('undo round trip: splicing out the two tag lines restores the input (W14)', () => {
+      const r = wrapInRegion(WRAP_SEQ, null, ['m:0', 'm:1', 'm:2', 'm:3'], 'section', 'intro');
+      const original = WRAP_SEQ.split('\n');
+      const lines = r.code.split('\n');
+      expect(lines[3]).toBe('    %% @region-start: section=intro');
+      expect(lines.slice(4, 10)).toEqual(original.slice(3, 9));
+      expect(lines[10]).toBe('    %% @region-end');
+      expect([...lines.slice(0, 3), ...lines.slice(4, 10), ...lines.slice(11)]).toEqual(original);
+    });
   });
 });
 

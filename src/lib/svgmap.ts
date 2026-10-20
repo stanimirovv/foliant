@@ -18,7 +18,17 @@
 //                        text.messageText. messageLineN classes are per line
 //                        STYLE (0 = solid, 1 = dashed), not per message.
 //   sequence note        | g[data-et="note"] with rect.note + text.noteText.
-//   sequence block       | g[data-et="control-structure"] (not selectable).
+//   sequence block       | alt/opt/loop/par: g[data-et="control-structure"] with
+//                        polygon.labelBox + text.labelText (keyword) +
+//                        text.loopText (title; may word-wrap into several
+//                        text elements). DOM order is post-order (children
+//                        before parents; ascending lineEnd).
+//                        rect: bare top-level rect.rect[fill] (no label chip).
+//                        box: bare top-level g > rect.rect + text.text (title).
+//                        rect/box DOM order is descending lineEnd (later blocks
+//                        paint first). reorderSequenceLayers buckets all three
+//                        shapes as decorations without changing their relative
+//                        order, so the pairing holds on raw and styled SVG.
 //   flowchart node       | g.node[id], id = "<renderId>-flowchart-<nodeId>-<n>"
 //                        (n is not dense; the id is parsed from the middle).
 //                        Shape = first .label-container descendant.
@@ -32,7 +42,7 @@
 //                        unlabeled edges, whose visible stroke is only ~2px.
 //   flowchart cluster    | g.cluster (subgraphs; not a node, not selectable).
 
-import { DiagramModel, ModelElement, ParticipantElement, MessageElement, NoteElement, NodeElement, EdgeElement, parseModel } from './model';
+import { DiagramModel, ModelElement, ParticipantElement, MessageElement, NoteElement, BlockElement, NodeElement, EdgeElement, parseModel } from './model';
 import { ActorTransformOptions, buildActorRewriteMap } from './preprocessor';
 import { DiagramConfig } from './views';
 
@@ -46,6 +56,7 @@ export interface SvgZip {
   participants: (Element | null)[];  // aligned with model participant elements (source order)
   messages: (Element | null)[];      // aligned with model message elements
   notes: (Element | null)[];         // aligned with model note elements
+  blocks: (Element | null)[];        // aligned with model block elements (source order)
   nodes: (Element | null)[];         // aligned with model node elements
   edges: (Element | null)[];         // aligned with model edge elements
   warnings: string[];
@@ -165,6 +176,83 @@ function zipNotes(svg: Element, model: DiagramModel, warnings: string[]): (Eleme
   return groups;
 }
 
+// Block shapes render as three different top-level element kinds (see the
+// header): alt/opt/loop/par as g[data-et="control-structure"] in post-order
+// (children before parents = ascending lineEnd), rect as bare top-level
+// rect.rect and box as bare top-level g > rect.rect + text.text, both in
+// descending lineEnd order. reorderSequenceLayers (styling.ts) buckets all
+// three as decorations but keeps their relative order, so the pairing holds
+// on raw and styled SVG alike. Any count or label mismatch -> nulls + warning
+// (never guess).
+const CS_BLOCK_TYPES = new Set(['alt', 'opt', 'loop', 'par', 'subgraph']);
+
+// A rendered box group: a bare top-level g whose direct child is a rect.rect
+// and which contains no actor/message/note parts (participants declared
+// inside a box render as regular top-level actor boxes, not inside it).
+function isRenderedBoxGroup(el: Element): boolean {
+  if (el.tagName.toLowerCase() !== 'g') return false;
+  if (el.getAttribute('data-et')) return false;
+  if (!el.querySelector(':scope > rect.rect')) return false;
+  return !el.querySelector('.actor, .actor-man, .actor-line, [data-et="participant"], [data-et="message"], [data-et="note"]');
+}
+
+function zipBlocks(svg: Element, model: DiagramModel, warnings: string[]): (Element | null)[] {
+  const blocks = ofKind<BlockElement>(model, 'block');
+  const result: (Element | null)[] = blocks.map(() => null);
+  if (blocks.length === 0) return result;
+
+  const byBlock = new Map<BlockElement, number>();
+  blocks.forEach((b, i) => byBlock.set(b, i));
+
+  // Control-structure blocks pair with g[data-et="control-structure"] groups
+  // in document order; the label keyword is cross-checked so an ordering
+  // surprise degrades to a warning instead of a wrong selection.
+  const csBlocks = blocks
+    .filter(b => CS_BLOCK_TYPES.has(b.blockType))
+    .sort((a, b) => a.lineEnd - b.lineEnd);
+  const csGroups = toArray(svg.querySelectorAll('g[data-et="control-structure"]'));
+  if (csGroups.length !== csBlocks.length) {
+    warnings.push(`block count mismatch: model ${csBlocks.length} control structures, svg ${csGroups.length}; blocks not selectable`);
+  } else {
+    let ok = true;
+    csBlocks.forEach((b, i) => {
+      const kw = csGroups[i].querySelector('text.labelText')?.textContent?.trim();
+      if (kw !== b.blockType) ok = false;
+    });
+    if (!ok) {
+      warnings.push('block label mismatch; blocks not selectable');
+    } else {
+      csBlocks.forEach((b, i) => { result[byBlock.get(b)!] = csGroups[i]; });
+    }
+  }
+
+  // rect blocks pair with bare top-level rect.rect elements, which paint in
+  // descending lineEnd order (later blocks first in the DOM).
+  const rectBlocks = blocks
+    .filter(b => b.blockType === 'rect')
+    .sort((a, b) => b.lineEnd - a.lineEnd);
+  const rects = Array.from(svg.children).filter(c => c.tagName.toLowerCase() === 'rect' && c.matches('rect.rect'));
+  if (rects.length !== rectBlocks.length) {
+    warnings.push(`rect block count mismatch: model ${rectBlocks.length}, svg ${rects.length}; rect blocks not selectable`);
+  } else {
+    rectBlocks.forEach((b, i) => { result[byBlock.get(b)!] = rects[i]; });
+  }
+
+  // box blocks pair with bare top-level box groups, also in descending
+  // lineEnd order.
+  const boxBlocks = blocks
+    .filter(b => b.blockType === 'box')
+    .sort((a, b) => b.lineEnd - a.lineEnd);
+  const boxGroups = Array.from(svg.children).filter(isRenderedBoxGroup);
+  if (boxGroups.length !== boxBlocks.length) {
+    warnings.push(`box block count mismatch: model ${boxBlocks.length}, svg ${boxGroups.length}; box blocks not selectable`);
+  } else {
+    boxBlocks.forEach((b, i) => { result[byBlock.get(b)!] = boxGroups[i]; });
+  }
+
+  return result;
+}
+
 const FLOWCHART_NODE_ID_RE = /-flowchart-(.+)-(\d+)$/;
 
 // Extracts the Mermaid node id from a rendered node group id
@@ -261,6 +349,7 @@ export function zipModelToSvg(svg: Element, model: DiagramModel): SvgZip {
       participants: zipParticipants(svg, model, warnings),
       messages: zipMessages(svg, model, warnings),
       notes: zipNotes(svg, model, warnings),
+      blocks: zipBlocks(svg, model, warnings),
       nodes: empty,
       edges: empty,
       warnings,
@@ -271,12 +360,13 @@ export function zipModelToSvg(svg: Element, model: DiagramModel): SvgZip {
       participants: empty,
       messages: empty,
       notes: empty,
+      blocks: empty,
       nodes: zipNodes(svg, model, warnings),
       edges: zipEdges(svg, model, warnings),
       warnings,
     };
   }
-  return { participants: empty, messages: empty, notes: empty, nodes: empty, edges: empty, warnings };
+  return { participants: empty, messages: empty, notes: empty, blocks: empty, nodes: empty, edges: empty, warnings };
 }
 
 function keyFromList(list: ModelElement[], zipped: (Element | null)[], el: Element | null): string | null {
@@ -366,6 +456,39 @@ export function elementKeyAtTarget(
       const p = participants.find(p => p.id === id);
       return p ? p.key : null;
     }
+
+    // Blocks (edge B1): only the label chip of an alt/opt/loop/par frame
+    // selects the block — frame-interior clicks fall through to null. rect
+    // blocks and box groups render as bare top-level rects/groups (no
+    // data-et); the app sets pointer-events:none on rect.rect, so real
+    // clicks reach them only through the box group's title text.
+    const blocks = ofKind<BlockElement>(model, 'block');
+    const control = target.closest('g[data-et="control-structure"]');
+    if (control) {
+      const key = keyFromList(blocks, zip.blocks, control);
+      if (key) {
+        const onLabel = target.closest('.labelBox, .labelText, .loopText') !== null;
+        const labelBox = control.querySelector('polygon.labelBox');
+        const r = labelBox ? labelBox.getBoundingClientRect() : null;
+        const inLabel = onLabel || (point != null && r != null
+          && point.x >= r.left && point.x <= r.right
+          && point.y >= r.top && point.y <= r.bottom);
+        if (inLabel) return key;
+      }
+      return null;
+    }
+    if (target.matches('rect.rect')) {
+      const key = keyFromList(blocks, zip.blocks, target);
+      if (key) return key;
+      // a box group's inner rect resolves through its parent group
+      const parent = target.parentElement;
+      if (parent && parent.parentElement === svg) return keyFromList(blocks, zip.blocks, parent);
+      return null;
+    }
+    const boxGroup = target.closest('g');
+    if (boxGroup && boxGroup.parentElement === svg && isRenderedBoxGroup(boxGroup)) {
+      return keyFromList(blocks, zip.blocks, boxGroup);
+    }
     return null;
   }
 
@@ -423,6 +546,7 @@ export function svgElementForKey(svg: Element, model: DiagramModel, key: string)
     ['participant', zip.participants],
     ['message', zip.messages],
     ['note', zip.notes],
+    ['block', zip.blocks],
     ['node', zip.nodes],
     ['edge', zip.edges],
   ];
@@ -924,7 +1048,9 @@ export function buildSelectionMap(
       case 'edge':
         return `edge|${rewriteId(el.from)}|${rewriteId(el.to)}|${el.label ?? ''}`;
       case 'note': {
-        // transformActors rewrites "Note over A,A" to "Note over A".
+        // transformActors rewrites "Note over A,A" to "Note over A". The
+        // placement keyword is part of the signature so an `over` note and a
+        // `left of` note over the same actor never cross-match.
         const seen = new Set<string>();
         const over: string[] = [];
         el.over.map(rewriteId).forEach(id => {
@@ -933,10 +1059,16 @@ export function buildSelectionMap(
             over.push(id);
           }
         });
-        return `note|${over.join(',')}|${el.text}`;
+        return `note|${el.placement}|${over.join(',')}|${el.text}`;
       }
+      case 'block':
+        // Blocks match on (type, title). Grouped order matching tolerates
+        // processed-only boxes (generated by transformActors) and blocks
+        // stripped from processed code (hidden regions, empty-block
+        // cleanup) — they simply have no processed counterpart.
+        return `block|${el.blockType}|${el.title ?? ''}`;
       default:
-        return null;  // blocks, regions, config are not selectable
+        return null;  // regions, config are not selectable
     }
   };
 

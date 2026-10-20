@@ -40,8 +40,11 @@ export interface MessageElement extends BaseElement {
   deactivateSource?: boolean;
 }
 
+export type NotePlacement = 'over' | 'left of' | 'right of';
+
 export interface NoteElement extends BaseElement {
   kind: 'note';
+  placement: NotePlacement;   // the keyword NOTE_RE captured: over | left of | right of
   over: string[];
   text: string;
 }
@@ -170,7 +173,7 @@ const MESSAGE_RE = new RegExp(`^\\s*([A-Za-z0-9_-]+?)\\s*(-->>|->>|--x|-x|-->o|-
 // processed sequence code, so it must be tracked for end-matching.
 export const BLOCK_OPEN_RE = /^\s*(alt|opt|loop|par|rect|box|subgraph)(?:\s+(.*))?$/;
 export const BLOCK_END_RE = /^\s*end\s*$/;
-const BLOCK_CONT_RE = /^\s*(else|and)\b/;
+export const BLOCK_CONT_RE = /^\s*(else|and)\b/;
 
 // Flowcharts
 const FC_SKIP_RE = /^\s*(direction|click|style|classDef|class|linkStyle|accTitle|accDescr)\b/;
@@ -486,6 +489,7 @@ export function parseModel(code: string): DiagramModel {
         elements.push({
           key: nextKey('note'),
           kind: 'note',
+          placement: note[1] as NotePlacement,
           over,
           text: note[3],
           lineStart: i,

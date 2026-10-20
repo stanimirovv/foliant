@@ -9,10 +9,10 @@ import SourceCodePanel from './SourceCodePanel';
 import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
-import { parseModel, ModelElement, NodeShape, ParticipantType, StickyNoteElement } from '@/lib/model';
+import { parseModel, ModelElement, NodeShape, ParticipantType, StickyNoteElement, NotePlacement, BlockType } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
 import mermaid from 'mermaid';
 import {
@@ -21,7 +21,9 @@ import {
   getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, moveEdgeEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, groupNodes, toggleDiagramOrientation,
-  toggleNumberedSteps, hasNumberedSteps,
+  toggleNumberedSteps, hasNumberedSteps, addSequenceNote, editNoteText, setNotePlacement, setNoteSpan,
+  setBlockTitle, setBlockType, unwrapBlock, deleteBlock,
+  canWrapSelection, wrapInBlock, wrapInRegion,
 } from '@/lib/editor';
 import { resolveParticipantReorder } from '@/lib/reorder';
 import { formatRecentDir } from '@/lib/recentDirs';
@@ -1573,6 +1575,10 @@ export default function ClientPage() {
     ? selectedRawElement
     : null;
 
+  const selectedBlock = selectedRawElement && selectedRawElement.kind === 'block'
+    ? selectedRawElement
+    : null;
+
   const selectedNoteTags = useMemo(
     () => (selectedNote ? getNoteTags(rawCode, viewsData, selectedNote.key) : null),
     [selectedNote, rawCode, viewsData]
@@ -1786,6 +1792,20 @@ export default function ClientPage() {
       setSelection(null);
       return;
     }
+    // Blocks delete with their content (edge B12): confirm with the contained
+    // messages/notes listed, like the note cascade dialog.
+    if (selectedRawElement.kind === 'block') {
+      const result = deleteBlock(rawCode, viewsData, selectedRawElement.key, { withContent: true });
+      if (result.warning) {
+        setEditWarning(result.warning);
+        return;
+      }
+      const cascaded = (result.cascaded ?? [])
+        .map(k => rawModel.elements.find(e => e.key === k))
+        .filter((e): e is ModelElement => e !== undefined);
+      setPendingDelete({ code: result.code, element: selectedRawElement, cascaded });
+      return;
+    }
     const result = deleteElement(rawCode, viewsData, selectedRawElement.key);
     if (result.warning) {
       setEditWarning(result.warning);
@@ -1902,6 +1922,115 @@ export default function ClientPage() {
       ? { type: 'after', key: selectedArrow.key }
       : undefined;
     applyEditResult(addMessage(rawCode, viewsData, fromEl.key, toEl.key, position));
+  };
+
+  // All actor ids a sequence note may span: declared participants, message
+  // endpoints (implicit actors) and actors of existing notes — deduped, source
+  // order. Also drives the Add Sequence Note button's disabled state.
+  const noteActorIds = useMemo(() => {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const e of rawModel.elements) {
+      const add = (id: string) => {
+        if (!seen.has(id)) { seen.add(id); ids.push(id); }
+      };
+      if (e.kind === 'participant') add(e.id);
+      if (e.kind === 'message') { add(e.from); add(e.to); }
+      if (e.kind === 'note') e.over.forEach(add);
+    }
+    return ids;
+  }, [rawModel]);
+
+  // Keys of the selected messages/notes — the wrappable kinds (W4). The
+  // transforms re-sort by lineStart, so click order never matters (W5).
+  const wrapKeys = useMemo(
+    () => selectedRawElements
+      .filter(e => e.kind === 'message' || e.kind === 'note')
+      .map(e => e.key),
+    [selectedRawElements]
+  );
+
+  // Wrap gating for the multi-selection panel (W1–W10): both modes checked up
+  // front; the panel shows the refusal reason verbatim and disables the buttons.
+  const wrapChecks = useMemo(() => {
+    if (rawModel.type !== 'sequence' || wrapKeys.length < 2) return null;
+    const toCheck = (r: { ok: true } | { ok: false; reason: string }) =>
+      r.ok ? { ok: true } : { ok: false, reason: r.reason };
+    return {
+      block: toCheck(canWrapSelection(rawCode, rawModel, wrapKeys, 'block')),
+      region: toCheck(canWrapSelection(rawCode, rawModel, wrapKeys, 'region')),
+    };
+  }, [rawCode, rawModel, wrapKeys]);
+
+  // Existing region types, for the wrap-in-region datalist (W8/W15: duplicate
+  // names are allowed, so the list is deduped but never restricted).
+  const regionTypes = useMemo(() => {
+    const types: string[] = [];
+    for (const e of rawModel.elements) {
+      if (e.kind === 'region' && !types.includes(e.regionType)) types.push(e.regionType);
+    }
+    return types;
+  }, [rawModel]);
+
+  // Add Sequence Note (sequence diagrams only): the note spans the selected
+  // participant (else the first one) and lands after the selected message/note
+  // (else after the last one). applyEditResult selects the new note via newKey.
+  const handleAddSequenceNote = () => {
+    const overKey = selectedComponent && selectedComponent.kind === 'participant'
+      ? selectedComponent.key
+      : undefined;
+    const afterKey = selectedRawElement && (selectedRawElement.kind === 'message' || selectedRawElement.kind === 'note')
+      ? selectedRawElement.key
+      : undefined;
+    applyEditResult(addSequenceNote(rawCode, viewsData, { overKey, afterKey }));
+  };
+
+  const handleEditNoteText = (text: string) => {
+    if (!selectedNote) return;
+    applyEditResult(editNoteText(rawCode, viewsData, selectedNote.key, text));
+  };
+
+  const handleSetNotePlacement = (placement: NotePlacement) => {
+    if (!selectedNote) return;
+    applyEditResult(setNotePlacement(rawCode, viewsData, selectedNote.key, placement));
+  };
+
+  const handleSetNoteSpan = (overIds: string[]) => {
+    if (!selectedNote) return;
+    applyEditResult(setNoteSpan(rawCode, viewsData, selectedNote.key, overIds));
+  };
+
+  const handleEditBlockTitle = (title: string) => {
+    if (!selectedBlock) return;
+    applyEditResult(setBlockTitle(rawCode, viewsData, selectedBlock.key, title));
+  };
+
+  const handleSetBlockType = (blockType: BlockType) => {
+    if (!selectedBlock) return;
+    applyEditResult(setBlockType(rawCode, viewsData, selectedBlock.key, blockType));
+  };
+
+  const handleUnwrapBlock = () => {
+    if (!selectedBlock) return;
+    applyEditResult(unwrapBlock(rawCode, viewsData, selectedBlock.key));
+  };
+
+  // Wrap the selected messages/notes in a block (W1–W12). applyEditResult
+  // selects the created block via newKey, so BlockFields opens immediately.
+  const handleWrapInBlock = (blockType: BlockType, title?: string) => {
+    applyEditResult(wrapInBlock(rawCode, viewsData, wrapKeys, blockType, title));
+  };
+
+  // Wrap the selected messages/notes in a %% @region (W8–W10). Regions are not
+  // selectable on the canvas, so the selection is cleared after the wrap.
+  const handleWrapInRegion = (type: string, value?: string) => {
+    const result = wrapInRegion(rawCode, viewsData, wrapKeys, type, value);
+    if (result.warning) {
+      setEditWarning(result.warning);
+      return;
+    }
+    applyEditResult({ code: result.code, config: result.config });
+    setSelectedKeys([]);
   };
 
   const saveCurrentView = async () => {
@@ -2554,6 +2683,28 @@ export default function ClientPage() {
                   <MessageSquarePlus size={14} />
                   <span>Message</span>
                 </button>
+                {rawModel.type === 'sequence' && (
+                  <button
+                    onClick={handleAddSequenceNote}
+                    disabled={isVisualLocked || noteActorIds.length === 0}
+                    title={isVisualLocked
+                      ? 'Locked while editing source code'
+                      : noteActorIds.length === 0
+                        ? 'Add a participant first'
+                        : 'Add Sequence Note'}
+                    data-testid="add-sequence-note"
+                    className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                      isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+                    } ${
+                      isVisualLocked || noteActorIds.length === 0
+                        ? 'opacity-40 cursor-not-allowed'
+                        : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
+                    }`}
+                  >
+                    <MessageSquareWarning size={14} />
+                    <span>Note</span>
+                  </button>
+                )}
                 <button
                   onClick={handleAddNote}
                   disabled={isVisualLocked || !rawCode}
@@ -2884,6 +3035,17 @@ export default function ClientPage() {
                         arrowStyle={selectedArrowStyle}
                         arrowTags={selectedArrowTags}
                         noteTags={selectedNoteTags}
+                        noteActorIds={noteActorIds}
+                        onEditNoteText={handleEditNoteText}
+                        onSetNotePlacement={handleSetNotePlacement}
+                        onSetNoteSpan={handleSetNoteSpan}
+                        onEditBlockTitle={handleEditBlockTitle}
+                        onSetBlockType={handleSetBlockType}
+                        onUnwrapBlock={handleUnwrapBlock}
+                        wrapChecks={wrapChecks}
+                        regionTypes={regionTypes}
+                        onWrapInBlock={handleWrapInBlock}
+                        onWrapInRegion={handleWrapInRegion}
                         stickyNoteTags={selectedStickyNoteTags}
                         warning={editWarning}
                         pendingDelete={pendingDelete}
@@ -2935,6 +3097,17 @@ export default function ClientPage() {
                       onSetGlobalColor={handleSetGlobalColor}
                       onSetGlobalWidth={handleSetGlobalWidth}
                       noteTags={selectedNoteTags}
+                      noteActorIds={noteActorIds}
+                      onEditNoteText={handleEditNoteText}
+                      onSetNotePlacement={handleSetNotePlacement}
+                      onSetNoteSpan={handleSetNoteSpan}
+                      onEditBlockTitle={handleEditBlockTitle}
+                      onSetBlockType={handleSetBlockType}
+                      onUnwrapBlock={handleUnwrapBlock}
+                      wrapChecks={wrapChecks}
+                      regionTypes={regionTypes}
+                      onWrapInBlock={handleWrapInBlock}
+                      onWrapInRegion={handleWrapInRegion}
                       stickyNoteTags={selectedStickyNoteTags}
                       warning={editWarning}
                       pendingDelete={pendingDelete}

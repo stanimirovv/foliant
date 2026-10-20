@@ -75,7 +75,7 @@ vi.mock('./DiagramViewer', () => ({
           </button>
         </>
       )}
-      {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0', 'n:0', 'n:1', 'e:0', 'e:1', 'note:0', 'note:1'].map(k => (
+      {['p:0', 'p:1', 'p:2', 'm:0', 'm:1', 'm:2', 'r:0', 'n:0', 'n:1', 'e:0', 'e:1', 'note:0', 'note:1', 'b:0', 'b:1'].map(k => (
         <button
           key={k}
           data-testid={`select-${k}`}
@@ -2407,6 +2407,274 @@ sequenceDiagram
       expect(viewer.getAttribute('data-code')).toContain('Note over A,B');
     }, { timeout: 3000 });
   }, 15000);
+
+  describe('sequence notes', () => {
+    const NOTE_DEMO = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    Note over A: Solo note
+    B-->>A: Hi there`;
+
+    it('adds a sequence note via the Note toolbar button and selects it for editing', async () => {
+      const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+      fireEvent.click(screen.getByTestId('add-sequence-note'));
+
+      // appended after the last message, spanning the first participant
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('    Note over A: New note');
+      }, { timeout: 3000 });
+      // the new note is selected and its panel fields are editable
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-selection')).toBe('note:0');
+      });
+      const noteText = (await screen.findByTestId('note-text')) as HTMLTextAreaElement;
+      expect(noteText.value).toBe('New note');
+    });
+
+    it('spans the selected participant when adding a note', async () => {
+      const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+      fireEvent.click(screen.getByTestId('select-p:1'));
+      await screen.findByDisplayValue('Bob');
+
+      fireEvent.click(screen.getByTestId('add-sequence-note'));
+
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('Note over B: New note');
+      }, { timeout: 3000 });
+    });
+
+    it('lands after the selected message when adding a note', async () => {
+      const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+      fireEvent.click(screen.getByTestId('select-m:0'));
+      await screen.findByDisplayValue('Hello');
+
+      fireEvent.click(screen.getByTestId('add-sequence-note'));
+
+      await waitFor(() => {
+        const code = viewer.getAttribute('data-code') ?? '';
+        const noteAt = code.indexOf('Note over A: New note');
+        expect(noteAt).toBeGreaterThan(-1);
+        // inserted right after the selected message, before the last one
+        expect(code.indexOf('A->>B: Hello')).toBeLessThan(noteAt);
+        expect(noteAt).toBeLessThan(code.indexOf('B-->>A: Hi there'));
+      }, { timeout: 3000 });
+    });
+
+    it('disables the Note button when the sequence diagram has no actors', async () => {
+      await renderInEditMode('sequenceDiagram\n    autonumber', 'autonumber');
+      const btn = screen.getByTestId('add-sequence-note') as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute('title')).toBe('Add a participant first');
+    });
+
+    it('hides the Note button for flowcharts', async () => {
+      const FLOW_DEMO = `flowchart TD\n    A[Alice] --> B[Bob]`;
+      await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+      expect(screen.queryByTestId('add-sequence-note')).toBeNull();
+    });
+
+    it('edits the note text from the panel', async () => {
+      const viewer = await renderInEditMode(NOTE_DEMO, 'Solo note');
+      fireEvent.click(screen.getByTestId('select-note:0'));
+      const noteText = (await screen.findByTestId('note-text')) as HTMLTextAreaElement;
+      expect(noteText.value).toBe('Solo note');
+
+      fireEvent.change(noteText, { target: { value: 'Updated solo note' } });
+      fireEvent.blur(noteText);
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('Note over A: Updated solo note');
+      }, { timeout: 3000 });
+    });
+
+    it('changes span and placement from the panel', async () => {
+      const viewer = await renderInEditMode(NOTE_DEMO, 'Solo note');
+      fireEvent.click(screen.getByTestId('select-note:0'));
+      await screen.findByTestId('note-text');
+
+      // extend the span to B
+      fireEvent.click(screen.getByTestId('note-span-B'));
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('Note over A,B: Solo note');
+      }, { timeout: 3000 });
+      // a multi-actor span locks the placement select
+      expect((screen.getByTestId('note-placement') as HTMLSelectElement).disabled).toBe(true);
+
+      // back to a single actor, then move the note to the left of A
+      fireEvent.click(screen.getByTestId('note-span-B'));
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('Note over A: Solo note');
+      }, { timeout: 3000 });
+      fireEvent.change(screen.getByTestId('note-placement'), { target: { value: 'left of' } });
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('Note left of A: Solo note');
+      }, { timeout: 3000 });
+    });
+  });
+
+  describe('sequence blocks', () => {
+    const BLOCK_DEMO = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello
+    loop retry
+        B-->>A: Hi there
+    end`;
+
+    it('selects a block on the canvas: the raw BlockElement reaches the panel', async () => {
+      const viewer = await renderInEditMode(BLOCK_DEMO, 'loop retry');
+      fireEvent.click(screen.getByTestId('select-b:0'));
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-selection')).toBe('b:0');
+      });
+      // the panel shows the block's editable fields
+      const title = (await screen.findByTestId('block-title')) as HTMLInputElement;
+      expect(title.value).toBe('retry');
+      expect((screen.getByTestId('block-type') as HTMLSelectElement).value).toBe('loop');
+
+      // shift-clicking a message joins the block in a multi-selection
+      fireEvent.click(screen.getByTestId('select-m:0'), { shiftKey: true });
+      await screen.findByText('Selected Elements (2)');
+    });
+
+    it('edits the block title and type from the panel', async () => {
+      const viewer = await renderInEditMode(BLOCK_DEMO, 'loop retry');
+      fireEvent.click(screen.getByTestId('select-b:0'));
+      const title = (await screen.findByTestId('block-title')) as HTMLInputElement;
+
+      fireEvent.change(title, { target: { value: 'retry all' } });
+      fireEvent.blur(title);
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('loop retry all');
+      }, { timeout: 3000 });
+
+      fireEvent.change(screen.getByTestId('block-type'), { target: { value: 'par' } });
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-code')).toContain('par retry all');
+      }, { timeout: 3000 });
+    });
+
+    it('unwraps a block from the panel, keeping its content', async () => {
+      const viewer = await renderInEditMode(BLOCK_DEMO, 'loop retry');
+      fireEvent.click(screen.getByTestId('select-b:0'));
+      await screen.findByTestId('block-unwrap');
+
+      fireEvent.click(screen.getByTestId('block-unwrap'));
+      await waitFor(() => {
+        const code = viewer.getAttribute('data-code') ?? '';
+        expect(code).not.toContain('loop retry');
+        expect(code).not.toMatch(/^\s*end\s*$/m);
+        expect(code).toContain('B-->>A: Hi there');
+      }, { timeout: 3000 });
+      // the selection was cleared with the block
+      await screen.findByText(/Click an element in the diagram/);
+    });
+
+    it('deleting a block opens the cascade confirm dialog listing contained content (edge B12)', async () => {
+      const viewer = await renderInEditMode(BLOCK_DEMO, 'loop retry');
+      fireEvent.click(screen.getByTestId('select-b:0'));
+      await screen.findByTestId('block-unwrap');
+
+      // panel Delete button stages the dialog (no immediate deletion)
+      fireEvent.click(screen.getByTestId('panel-delete'));
+      const dialog = await screen.findByTestId('delete-dialog');
+      expect(within(dialog).getByText(/loop block/)).toBeTruthy();
+      expect(within(dialog).getByText(/message B -->> A: Hi there/)).toBeTruthy();
+      expect(viewer.getAttribute('data-code')).toContain('loop retry');
+
+      // cancelling keeps the block
+      fireEvent.click(screen.getByText('Cancel'));
+      expect(screen.queryByTestId('delete-dialog')).toBeNull();
+      expect(viewer.getAttribute('data-code')).toContain('loop retry');
+
+      // the Delete key opens the same dialog; confirming removes the span
+      fireEvent.keyDown(document.body, { key: 'Delete' });
+      fireEvent.click(await screen.findByTestId('confirm-delete'));
+      await waitFor(() => {
+        const code = viewer.getAttribute('data-code') ?? '';
+        expect(code).not.toContain('loop retry');
+        expect(code).not.toContain('Hi there');
+        expect(code).toContain('A->>B: Hello');
+      }, { timeout: 3000 });
+    });
+  });
+
+  describe('sequence wrap', () => {
+    const THREE_MSG = `sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: one
+    A->>B: two
+    A->>B: three`;
+
+    it('wraps two selected messages in a block and selects the new block', async () => {
+      const viewer = await renderInEditMode(DEMO, 'Hello');
+      fireEvent.click(screen.getByTestId('select-m:0'));
+      fireEvent.click(screen.getByTestId('select-m:1'), { shiftKey: true });
+      await screen.findByTestId('wrap-block-button');
+
+      fireEvent.change(screen.getByTestId('wrap-block-type'), { target: { value: 'loop' } });
+      fireEvent.change(screen.getByTestId('wrap-block-title'), { target: { value: 'retry' } });
+      fireEvent.click(screen.getByTestId('wrap-block-button'));
+
+      await waitFor(() => {
+        const code = viewer.getAttribute('data-code') ?? '';
+        expect(code).toContain('loop retry');
+        expect(code).toMatch(/^\s*end\s*$/m);
+      }, { timeout: 3000 });
+      // applyEditResult selected the created block → BlockFields opens
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-selection')).toBe('b:0');
+      }, { timeout: 3000 });
+      const title = (await screen.findByTestId('block-title')) as HTMLInputElement;
+      expect(title.value).toBe('retry');
+    });
+
+    it('wraps two selected messages in a region; the tags land in the raw code and the selection clears', async () => {
+      const viewer = await renderInEditMode(DEMO, 'Hello');
+      fireEvent.click(screen.getByTestId('select-m:0'));
+      fireEvent.click(screen.getByTestId('select-m:1'), { shiftKey: true });
+      await screen.findByTestId('wrap-region-button');
+
+      fireEvent.change(screen.getByTestId('wrap-region-type'), { target: { value: 'flow' } });
+      fireEvent.change(screen.getByTestId('wrap-region-value'), { target: { value: 'login' } });
+      fireEvent.click(screen.getByTestId('wrap-region-button'));
+
+      // regions are not selectable: the multi-selection is cleared
+      await waitFor(() => {
+        expect(viewer.getAttribute('data-selection')).toBe('');
+      }, { timeout: 3000 });
+      await screen.findByText(/Click an element in the diagram/);
+      // the visible region keeps its content in the processed render
+      expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello');
+
+      // processedCode strips %% @region tags, so assert on the raw code via
+      // the auto-save POST body
+      await waitFor(() => {
+        expect(postCalls().length).toBeGreaterThan(0);
+      }, { timeout: 3000 });
+      const [, init] = postCalls()[0];
+      const body = JSON.parse((init as { body: string }).body);
+      expect(body.content).toContain('%% @region-start: flow=login');
+      expect(body.content).toContain('%% @region-end');
+      expect(body.content).toContain('A->>B: Hello');
+    }, 10000);
+
+    it('disables the wrap buttons with the reason for a non-contiguous selection (W1)', async () => {
+      const viewer = await renderInEditMode(THREE_MSG, 'one');
+      fireEvent.click(screen.getByTestId('select-m:0'));
+      fireEvent.click(screen.getByTestId('select-m:2'), { shiftKey: true });
+
+      const button = (await screen.findByTestId('wrap-block-button')) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(screen.getByTestId('wrap-reason').textContent).toContain('contiguous');
+      fireEvent.click(button);
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).not.toContain('loop');
+      expect(code).toContain('A->>B: two');
+    });
+  });
 
   it('adds a sticky note via + Note button, updates count, and persists to CONFIG', async () => {
     const viewer = await renderInEditMode(DEMO, 'Alice');

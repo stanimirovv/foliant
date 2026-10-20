@@ -23,6 +23,22 @@ const appUrl = (name: string, dir: string) =>
 const saved = () =>
   cy.get('[data-testid="save-indicator"]', { timeout: 10000 }).should('have.text', 'Saved');
 
+// Sets the panel's controlled <input type="color"> the way a real picker
+// does: through the native value setter + a bubbling 'input' event (the same
+// pattern as canvas-shortcuts.cy.ts). A plain .invoke('val', ...) goes
+// through React's value tracker, so React detects no change and the field's
+// onChange never fires.
+const setColorPicker = (hex: string) => {
+  cy.contains('label', 'Color').find('input').then(($input) => {
+    const el = $input[0] as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype, 'value'
+    )!.set!;
+    setter.call(el, hex);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
 describe('Visual editing (e2e)', () => {
   it('sequence: edit -> auto-save -> reload renders the styled arrow; add, tag+merge, delete cascade, undo', () => {
     let dir = '';
@@ -58,7 +74,7 @@ describe('Visual editing (e2e)', () => {
         // change label / type / color / width / dash
         cy.contains('label', 'Label').find('input').clear().type('Greetings');
         cy.contains('label', 'Type').find('select').select('-->>');
-        cy.contains('label', 'Color').find('input').invoke('val', '#e11d48').trigger('input').trigger('change');
+        setColorPicker('#e11d48');
         cy.contains('label', 'Width').find('input').clear().type('3');
         cy.contains('label', 'Dash').find('select').select('dashed');
 
@@ -109,7 +125,7 @@ describe('Visual editing (e2e)', () => {
         // merge by that key: A and B collapse into one participant (the
         // untagged New Participant is unaffected), and the styled arrow
         // follows the merge and renders as a styled self-call (R-07)
-        cy.contains('By Key').parent().contains('li', 'backend').contains('button', 'Merged').click();
+        cy.contains('By Key').parent().parent().contains('li', 'backend').contains('button', 'Merged').click();
         cy.url().should('include', 'merge_key=backend');
         cy.get('#diagram-container g[data-et="participant"]').should('have.length', 2);
         cy.get('#diagram-container [data-et="message"]').first().should(($el) => {
@@ -147,10 +163,10 @@ describe('Visual editing (e2e)', () => {
         saved();
 
         // hiding the message's tag 'critical' hides the message
-        cy.contains('By Key').parent().contains('li', 'critical').contains('button', 'Off').click();
+        cy.contains('By Key').parent().parent().contains('li', 'critical').contains('button', 'Off').click();
         cy.get('#diagram-container text.messageText').contains('Greetings').should('not.exist');
         // un-hiding restores it
-        cy.contains('By Key').parent().contains('li', 'critical').contains('button', 'On').click();
+        cy.contains('By Key').parent().parent().contains('li', 'critical').contains('button', 'On').click();
         cy.get('#diagram-container text.messageText').contains('Greetings').should('exist');
       });
   });
@@ -175,7 +191,7 @@ describe('Visual editing (e2e)', () => {
         // node color
         cy.contains('#diagram-container g.node', 'Alice').click();
         cy.contains('label', 'Label').find('input').should('have.value', 'Alice');
-        cy.contains('label', 'Color').find('input').invoke('val', '#e11d48').trigger('input').trigger('change');
+        setColorPicker('#e11d48');
         saved();
         cy.request(fileApi(name, dir)).then((res) => {
           const content = (res.body as { content: string }).content;
@@ -189,7 +205,7 @@ describe('Visual editing (e2e)', () => {
         // edge style (the labeled edge)
         cy.contains('#diagram-container g.edgeLabel', 'Reply').click();
         cy.contains('label', 'Label').find('input').should('have.value', 'Reply');
-        cy.contains('label', 'Color').find('input').invoke('val', '#0ea5e9').trigger('input').trigger('change');
+        setColorPicker('#0ea5e9');
         cy.contains('label', 'Width').find('input').clear().type('2');
         cy.contains('label', 'Dash').find('select').select('dotted');
         saved();

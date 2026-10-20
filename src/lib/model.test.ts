@@ -21,7 +21,7 @@ describe('parseModel — repo fixtures', () => {
       { key: 'm:0', kind: 'message', from: 'C', to: 'API', operator: '->>', label: 'POST /login', lineStart: 8, lineEnd: 8 },
       { key: 'm:1', kind: 'message', from: 'API', to: 'Auth', operator: '->>', label: 'Validate Credentials', lineStart: 9, lineEnd: 9 },
       { key: 'r:1', kind: 'region', regionType: 'note', value: undefined, lineStart: 11, lineEnd: 11 },
-      { key: 'note:0', kind: 'note', over: ['API', 'Auth'], text: 'Passwords must be hashed via bcrypt', lineStart: 12, lineEnd: 12 },
+      { key: 'note:0', kind: 'note', placement: 'over', over: ['API', 'Auth'], text: 'Passwords must be hashed via bcrypt', lineStart: 12, lineEnd: 12 },
       { key: 'r:2', kind: 'region', regionType: 'edge-case', value: 'invalid-password', lineStart: 15, lineEnd: 15 },
       { key: 'm:2', kind: 'message', from: 'Auth', to: 'API', operator: '-->>', label: '401 Unauthorized', lineStart: 16, lineEnd: 16 },
       { key: 'm:3', kind: 'message', from: 'C', to: 'API', operator: '->>', label: 'New message', lineStart: 17, lineEnd: 17 },
@@ -81,6 +81,26 @@ ${bareOps.map((op, i) => `    A${op}B: bare ${i}`).join('\n')}`;
     expect(messages.every(m => m.from === 'A' && m.to === 'B')).toBe(true);
   });
 
+  it('reports the placement keyword on every note and keeps line spans exact', () => {
+    const code = `sequenceDiagram
+    participant A
+    participant B
+    Note over A: n0
+    Note over A,B: n1
+    Note left of A: n2
+    Note right of B: n3
+    Note over A:`;
+    const model = parseModel(code);
+    const notes = model.elements.filter(e => e.kind === 'note');
+    expect(notes.map(n => [n.placement, n.over, n.text, n.lineStart, n.lineEnd])).toEqual([
+      ['over', ['A'], 'n0', 3, 3],
+      ['over', ['A', 'B'], 'n1', 4, 4],
+      ['left of', ['A'], 'n2', 5, 5],
+      ['right of', ['B'], 'n3', 6, 6],
+      ['over', ['A'], '', 7, 7],   // empty text is allowed; the line is kept
+    ]);
+  });
+
   it('parses notes over single actors, spans and left/right of', () => {
     const code = `sequenceDiagram
     participant A
@@ -92,10 +112,10 @@ ${bareOps.map((op, i) => `    A${op}B: bare ${i}`).join('\n')}`;
     const model = parseModel(code);
     const notes = model.elements.filter(e => e.kind === 'note');
     expect(notes).toEqual([
-      { key: 'note:0', kind: 'note', over: ['A'], text: 'single', lineStart: 3, lineEnd: 3 },
-      { key: 'note:1', kind: 'note', over: ['A', 'B'], text: 'span', lineStart: 4, lineEnd: 4 },
-      { key: 'note:2', kind: 'note', over: ['A'], text: 'left', lineStart: 5, lineEnd: 5 },
-      { key: 'note:3', kind: 'note', over: ['B'], text: 'right', lineStart: 6, lineEnd: 6 },
+      { key: 'note:0', kind: 'note', placement: 'over', over: ['A'], text: 'single', lineStart: 3, lineEnd: 3 },
+      { key: 'note:1', kind: 'note', placement: 'over', over: ['A', 'B'], text: 'span', lineStart: 4, lineEnd: 4 },
+      { key: 'note:2', kind: 'note', placement: 'left of', over: ['A'], text: 'left', lineStart: 5, lineEnd: 5 },
+      { key: 'note:3', kind: 'note', placement: 'right of', over: ['B'], text: 'right', lineStart: 6, lineEnd: 6 },
     ]);
   });
 
@@ -117,7 +137,7 @@ ${bareOps.map((op, i) => `    A${op}B: bare ${i}`).join('\n')}`;
       { key: 'b:0', kind: 'block', blockType: 'alt', title: 'Condition', lineStart: 2, lineEnd: 9 },
       { key: 'm:0', kind: 'message', from: 'A', to: 'A', operator: '->>', label: 'self', lineStart: 3, lineEnd: 3 },
       { key: 'b:1', kind: 'block', blockType: 'rect', title: 'rgb(255, 255, 255)', lineStart: 4, lineEnd: 6 },
-      { key: 'note:0', kind: 'note', over: ['A'], text: 'note text', lineStart: 5, lineEnd: 5 },
+      { key: 'note:0', kind: 'note', placement: 'over', over: ['A'], text: 'note text', lineStart: 5, lineEnd: 5 },
       { key: 'm:1', kind: 'message', from: 'A', to: 'A', operator: '->>', label: 'other', lineStart: 8, lineEnd: 8 },
       { key: 'm:2', kind: 'message', from: 'A', to: 'A', operator: '->>', label: 'after', lineStart: 10, lineEnd: 10 },
     ]);

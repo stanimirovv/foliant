@@ -4,7 +4,7 @@
 // (NFR-02), and malformed input is a no-op with a warning, never a
 // corruption (NFR-01).
 
-import { parseModel, parseShapeToken, parseParticipantLine, parseFlowchartLine, ParsedFlowchartLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeElement, NodeShape, ParticipantType } from './model';
+import { parseModel, parseShapeToken, parseParticipantLine, parseFlowchartLine, ParsedFlowchartLine, SHAPE_DELIMITERS, ModelElement, MessageElement, EdgeElement, ParticipantElement, NoteElement, NodeElement, NodeShape, ParticipantType, NotePlacement, BlockType, BLOCK_OPEN_RE, BLOCK_END_RE, BLOCK_CONT_RE } from './model';
 import { ArrowStyle, ArrowKeyMode, ArrowAnimationType, ArrowStyleDefaults, DiagramConfig, NoteTagEntry, updateViewsData } from './views';
 import { ANIMATED_ARROW_COLORS } from './styling';
 import { buildSubgraphTagIndex } from './subgraphTags';
@@ -35,6 +35,11 @@ const UNSUPPORTED = 'Unsupported diagram type (editing supports sequence and flo
 // Verbose line regexes: capture every whitespace segment so rebuilt lines
 // preserve the original spacing byte-for-byte outside the edited span.
 const SEQ_MSG_V = /^(\s*)([A-Za-z0-9_-]+?)(\s*)(-->>|->>|--x|-x|-->o|->o|-->\*|->\*|--\)|-\)|-->|->|--|-)([+-]?)(\s*)([A-Za-z0-9_-]+?)(\s*)(?::([ \t]*)(.*))?$/;
+// Verbose note regex: captures every whitespace segment so rebuilt note
+// lines preserve the original spacing byte-for-byte outside the edited span.
+const SEQ_NOTE_V = /^(\s*)Note(\s+)(over|left of|right of)(\s+)([A-Za-z0-9_-]+(?:\s*,\s*[A-Za-z0-9_-]+)*)(\s*)(:)([ \t]*)(.*)$/;
+const NOTE_PLACEMENTS = new Set(['over', 'left of', 'right of']);
+
 const FC_EDGE_PIPE_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)(${FC_OPS})(\\s*)(\\|([^|]*)\\|)?(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
 const FC_EDGE_TEXT_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)(--|---|-\\.)(\\s+)(.+?)(\\s+)(\\.->|\\.-|${FC_OPS})(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
 const FC_NODE_V = new RegExp(`^(\\s*)(${ID})(\\s*)(${SHAPE})?(\\s*)$`);
@@ -165,6 +170,65 @@ function notesMatchEntry(entry: NoteTagEntry, over: string[], text: string, occu
   return entry.over.length === over.length && entry.over.every((id, i) => id === over[i]) &&
     entry.text === text &&
     (entry.occurrence ?? 0) === occurrence;
+}
+
+// Composite lookup key for a note CONFIG entry's (over, text, occurrence)
+// identity (same encoding idea as arrowEntryKey; ids cannot contain NUL).
+function noteEntryKey(over: string[], text: string, occurrence: number): string {
+  return `${over.join('\u0000')}\u0000${text}\u0000${occurrence}`;
+}
+
+// Retarget CONFIG noteTags entries across a note edit (text/placement/span).
+// Entries are keyed by (over, text, occurrence), so the entry that tagged a
+// note follows it when its key changes — the editMessageLabel arrow pattern:
+// old and new elements are matched by key (index-stable across a single-line
+// rewrite) and occurrences are recomputed in the new model, never guessed.
+// Returns the rewritten config, or null when nothing changed.
+function retargetNoteEntries(
+  oldModel: ReturnType<typeof parseModel>,
+  newModel: ReturnType<typeof parseModel>,
+  config: DiagramConfig | null,
+): DiagramConfig | null {
+  if (!config?.noteTags || config.noteTags.length === 0) return null;
+  const newByKey = new Map<string, ModelElement>();
+  for (const e of newModel.elements) newByKey.set(e.key, e);
+  const retargeted = new Map<string, { over: string[]; text: string; occurrence?: number }>();
+  for (const e of oldModel.elements) {
+    if (e.kind !== 'note') continue;
+    const n = newByKey.get(e.key);
+    if (!n || n.kind !== 'note') continue;
+    const newOccurrence = noteOccurrence(newModel, n);
+    const before = noteEntryKey(e.over, e.text, noteOccurrence(oldModel, e));
+    const after = noteEntryKey(n.over, n.text, newOccurrence);
+    if (before === after) continue;
+    retargeted.set(before, {
+      over: n.over,
+      text: n.text,
+      occurrence: newOccurrence > 0 ? newOccurrence : undefined,
+    });
+  }
+  if (retargeted.size === 0) return null;
+  const newConfig = cloneConfig(config)!;
+  newConfig.noteTags = newConfig.noteTags!.map(n => {
+    const target = retargeted.get(noteEntryKey(n.over, n.text, n.occurrence ?? 0));
+    if (!target) return n;
+    const entry: NoteTagEntry = { ...n, over: [...target.over], text: target.text };
+    if (target.occurrence !== undefined) entry.occurrence = target.occurrence; else delete entry.occurrence;
+    return entry;
+  });
+  return newConfig;
+}
+
+// All actor ids a sequence note may span: declared participants, message
+// endpoints (implicit actors) and actors already spanned by other notes.
+function sequenceActorIds(model: ReturnType<typeof parseModel>): Set<string> {
+  const ids = new Set<string>();
+  for (const e of model.elements) {
+    if (isComponent(e)) ids.add(e.id);
+    if (isArrow(e)) { ids.add(e.from); ids.add(e.to); }
+    if (e.kind === 'note') e.over.forEach(id => ids.add(id));
+  }
+  return ids;
 }
 
 function isArrow(el: ModelElement): el is ModelElement & { from: string; to: string; label?: string } {
@@ -2002,6 +2066,602 @@ export function toggleActivation(
       return { code: lines.join('\n'), config };
     }
   }
+}
+
+// --- Sequence notes ---------------------------------------------------------
+
+// Create a native `Note over <actor>: New note` line (sequence diagrams only).
+// The actor is the requested participant, else the first declared participant,
+// else the first implicit actor (a message endpoint). The line lands after the
+// requested element — hopping over its trailing activate/deactivate companion
+// lines, which parseModel attributes to the message via the immediately
+// following line — else after the last message/note, else after the last
+// participant. Placement and span are edited afterwards; the created line must
+// be valid on its own, so it is always created with `over`.
+export function addSequenceNote(
+  code: string,
+  config: DiagramConfig | null,
+  opts?: { overKey?: string; afterKey?: string },
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+
+  let actorId: string | undefined;
+  if (opts?.overKey !== undefined) {
+    const over = findElement(model, opts.overKey);
+    if (!over || over.kind !== 'participant') {
+      return fail(code, config, `Unknown participant key: ${opts.overKey}`);
+    }
+    actorId = over.id;
+  } else {
+    const firstParticipant = model.elements.find(e => e.kind === 'participant');
+    if (firstParticipant && firstParticipant.kind === 'participant') actorId = firstParticipant.id;
+    if (!actorId) {
+      const firstMessage = model.elements.find(e => e.kind === 'message');
+      if (firstMessage && firstMessage.kind === 'message') actorId = firstMessage.from;
+    }
+  }
+  if (!actorId) return fail(code, config, 'Add a participant first');
+
+  const lines = code.split('\n');
+  const isCompanion = (line: string) => /^\s*(?:activate|deactivate)\s+[A-Za-z0-9_-]+\s*$/.test(line);
+
+  let insertAt: number;
+  const anchor = opts?.afterKey !== undefined ? findElement(model, opts.afterKey) : undefined;
+  if (opts?.afterKey !== undefined && !anchor) {
+    return fail(code, config, `Unknown element key: ${opts.afterKey}`);
+  }
+  if (anchor) {
+    insertAt = anchor.lineEnd + 1;
+    while (insertAt < lines.length && isCompanion(lines[insertAt])) insertAt++;
+  } else {
+    const lastMsgOrNote = [...model.elements].reverse().find(e => e.kind === 'message' || e.kind === 'note');
+    if (lastMsgOrNote) {
+      insertAt = lastMsgOrNote.lineEnd + 1;
+      while (insertAt < lines.length && isCompanion(lines[insertAt])) insertAt++;
+    } else {
+      const lastParticipant = [...model.elements].reverse().find(e => e.kind === 'participant');
+      insertAt = lastParticipant
+        ? lastParticipant.lineEnd + 1
+        : lines.findIndex(l => /^\s*sequenceDiagram\b/.test(l)) + 1;
+    }
+  }
+
+  lines.splice(insertAt, 0, `    Note over ${actorId}: New note`);
+  const newCode = lines.join('\n');
+  const created = parseModel(newCode).elements.find(e => e.kind === 'note' && e.lineStart === insertAt);
+  return { code: newCode, config, newKey: created?.key };
+}
+
+// Edit a sequence note's text. Only the text span of the line changes; the
+// CONFIG noteTags entry that tagged the note follows the new (over, text,
+// occurrence) key.
+export function editNoteText(code: string, config: DiagramConfig | null, key: string, text: string): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'note') return fail(code, config, `Element ${key} is not a note`);
+  if (text.includes('\n')) return fail(code, config, 'Note text must be a single line');
+
+  const line = code.split('\n')[el.lineStart];
+  const m = line.match(SEQ_NOTE_V);
+  if (!m) return fail(code, config, `Cannot parse note line: ${line.trim()}`);
+  const newLine = `${m[1]}Note${m[2]}${m[3]}${m[4]}${m[5]}${m[6]}:${text === '' ? '' : `${m[8]}${text}`}`;
+  if (newLine === line) return { code, config };
+  const newCode = replaceLines(code, el.lineStart, el.lineEnd, [newLine]);
+
+  const newConfig = retargetNoteEntries(model, parseModel(newCode), config);
+  if (!newConfig) return { code: newCode, config };
+  return { code: updateViewsData(newCode, newConfig), config: newConfig };
+}
+
+// Edit a sequence note's placement keyword (over / left of / right of).
+// `left of` / `right of` span exactly one actor in Mermaid, so switching away
+// from `over` on a multi-actor note is refused.
+export function setNotePlacement(code: string, config: DiagramConfig | null, key: string, placement: NotePlacement): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'note') return fail(code, config, `Element ${key} is not a note`);
+  if (!NOTE_PLACEMENTS.has(placement)) return fail(code, config, `Invalid note placement: ${placement}`);
+  if (placement !== 'over' && el.over.length > 1) {
+    return fail(code, config, 'A left of / right of note can span only one participant');
+  }
+  if (el.placement === placement) return { code, config };
+
+  const line = code.split('\n')[el.lineStart];
+  const m = line.match(SEQ_NOTE_V);
+  if (!m) return fail(code, config, `Cannot parse note line: ${line.trim()}`);
+  const newLine = `${m[1]}Note${m[2]}${placement}${m[4]}${m[5]}${m[6]}:${m[8]}${m[9]}`;
+  const newCode = replaceLines(code, el.lineStart, el.lineEnd, [newLine]);
+
+  // Placement is not part of the CONFIG tag key, so this retarget is a no-op
+  // in practice — run uniformly so the invariant does not depend on the caller.
+  const newConfig = retargetNoteEntries(model, parseModel(newCode), config);
+  if (!newConfig) return { code: newCode, config };
+  return { code: updateViewsData(newCode, newConfig), config: newConfig };
+}
+
+// Edit the participant span of a sequence note. Ids are deduped (a literal
+// `Note over A,A` must not survive a rewrite), must be actors of this diagram
+// (declared participants, message endpoints, or actors of other notes) and
+// keep the caller's order. A left of / right of note stays single-actor.
+export function setNoteSpan(code: string, config: DiagramConfig | null, key: string, overIds: string[]): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'note') return fail(code, config, `Element ${key} is not a note`);
+
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const id of overIds) {
+    if (!seen.has(id)) { seen.add(id); ids.push(id); }
+  }
+  if (ids.length === 0) return fail(code, config, 'A note must span at least one participant');
+  if (el.placement !== 'over' && ids.length > 1) {
+    return fail(code, config, 'A left of / right of note can span only one participant');
+  }
+  const actors = sequenceActorIds(model);
+  for (const id of ids) {
+    if (!actors.has(id)) return fail(code, config, `Unknown participant: ${id}`);
+  }
+  if (ids.length === el.over.length && ids.every((id, i) => id === el.over[i])) return { code, config };
+
+  const line = code.split('\n')[el.lineStart];
+  const m = line.match(SEQ_NOTE_V);
+  if (!m) return fail(code, config, `Cannot parse note line: ${line.trim()}`);
+  const newLine = `${m[1]}Note${m[2]}${m[3]}${m[4]}${ids.join(',')}${m[6]}:${m[8]}${m[9]}`;
+  const newCode = replaceLines(code, el.lineStart, el.lineEnd, [newLine]);
+
+  const newConfig = retargetNoteEntries(model, parseModel(newCode), config);
+  if (!newConfig) return { code: newCode, config };
+  return { code: updateViewsData(newCode, newConfig), config: newConfig };
+}
+
+// --- Sequence blocks (alt/opt/loop/par/rect/box) -----------------------------
+
+// Verbose block-header regex: captures every whitespace segment so rebuilt
+// lines preserve the original spacing byte-for-byte outside the edited span.
+const SEQ_BLOCK_V = /^(\s*)(alt|opt|loop|par|rect|box|subgraph)(\s+)?(.*?)(\s*)$/;
+
+// Block types the panel can edit (title + type). box blocks encode color and
+// name in their title and are managed by Group into Box; subgraphs are not a
+// sequence construct.
+const EDITABLE_BLOCK_TYPES: ReadonlySet<BlockType> = new Set(['alt', 'opt', 'loop', 'par', 'rect']);
+
+// Default color when converting a block to rect without an rgb(...) title
+// (edge W11; the rect color row in the panel starts from it).
+export const DEFAULT_RECT_COLOR = 'rgb(200,150,255)';
+
+const RGB_COLOR_RE = /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/;
+
+function isRgbColor(title: string): boolean {
+  const m = title.trim().match(RGB_COLOR_RE);
+  return !!m && Number(m[1]) <= 255 && Number(m[2]) <= 255 && Number(m[3]) <= 255;
+}
+
+// hex (#rrggbb) -> rgb(r,g,b) for rect block titles (edge B10); null when the
+// input is not a 6-digit hex color.
+export function hexToRgbColor(hex: string): string | null {
+  const m = hex.trim().match(/^#([0-9a-f]{6})$/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return `rgb(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255})`;
+}
+
+// rgb(r,g,b) -> hex (#rrggbb) for the rect color picker; null when the input
+// is not a valid rgb() color.
+export function rgbToHexColor(rgb: string): string | null {
+  const m = rgb.trim().match(RGB_COLOR_RE);
+  if (!m) return null;
+  const [r, g, b] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (r > 255 || g > 255 || b > 255) return null;
+  return `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+// The line of the `end` that closes the block opened at headerLine, or null
+// when the block is unclosed. Recomputed from the lines (not the model) so a
+// nested unclosed block is not mistaken for closed by a later sibling's `end`.
+function matchingEndLine(lines: string[], headerLine: number): number | null {
+  let depth = 0;
+  for (let i = headerLine; i < lines.length; i++) {
+    if (BLOCK_OPEN_RE.test(lines[i])) depth++;
+    else if (BLOCK_END_RE.test(lines[i])) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return null;
+}
+
+// Rebuild a block header line, replacing only the keyword and/or title span.
+function rebuildBlockHeader(line: string, keyword: BlockType, title: string | undefined): string | null {
+  const m = line.match(SEQ_BLOCK_V);
+  if (!m) return null;
+  const titleText = title ?? '';
+  return `${m[1]}${keyword}${titleText !== '' ? (m[3] ?? ' ') + titleText : ''}${m[5]}`;
+}
+
+// Edit a block's title. Only the header line's title span changes (NFR-02).
+// rect titles are colors: a non-empty rect title must be a validated rgb(...)
+// string (the panel converts hex <-> rgb, edge B10). Empty title -> bare
+// keyword line. box titles encode color and name and are not editable.
+export function setBlockTitle(code: string, config: DiagramConfig | null, key: string, title: string): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'block') return fail(code, config, `Element ${key} is not a block`);
+  if (el.blockType === 'box') {
+    return fail(code, config, 'A box block title encodes its color and name; unwrap the box or regroup its participants instead');
+  }
+  if (el.blockType === 'subgraph') return fail(code, config, 'Subgraph titles are not editable');
+  if (title.includes('\n')) return fail(code, config, 'Block title must be a single line');
+  if (el.blockType === 'rect' && title !== '' && !isRgbColor(title)) {
+    return fail(code, config, `A rect block title must be an rgb(...) color, e.g. ${DEFAULT_RECT_COLOR}`);
+  }
+  if ((el.title ?? '') === title) return { code, config };
+
+  const line = code.split('\n')[el.lineStart];
+  const newLine = rebuildBlockHeader(line, el.blockType, title);
+  if (newLine === null) return fail(code, config, `Cannot parse block line: ${line.trim()}`);
+  return { code: replaceLines(code, el.lineStart, el.lineStart, [newLine]), config };
+}
+
+// Change a block's type among alt|opt|loop|par|rect (box/subgraph refused both
+// as source and target). Only the keyword span changes; converting to rect
+// requires an rgb(...) title, so a non-color title becomes the default color
+// (edge W11). A block whose span contains else/and separator lines cannot be
+// converted (edge B5: else is only legal in alt, and only in par).
+export function setBlockType(code: string, config: DiagramConfig | null, key: string, blockType: BlockType): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'block') return fail(code, config, `Element ${key} is not a block`);
+  if (!EDITABLE_BLOCK_TYPES.has(el.blockType)) {
+    return fail(code, config, `Cannot change the type of a ${el.blockType} block`);
+  }
+  if (!EDITABLE_BLOCK_TYPES.has(blockType)) {
+    return fail(code, config, `Cannot convert a block to '${blockType}'`);
+  }
+  if (el.blockType === blockType) return { code, config };
+
+  const lines = code.split('\n');
+  const endLine = matchingEndLine(lines, el.lineStart) ?? lines.length;
+  let separators = 0;
+  for (let i = el.lineStart + 1; i < endLine; i++) {
+    if (BLOCK_CONT_RE.test(lines[i])) separators++;
+  }
+  if (separators > 0) {
+    return fail(code, config,
+      `Cannot convert a block with ${separators === 1 ? 'an else/and separator' : `${separators} else/and separators`} to '${blockType}'`);
+  }
+
+  let title = el.title;
+  if (blockType === 'rect' && (!title || !isRgbColor(title))) title = DEFAULT_RECT_COLOR;
+
+  const newLine = rebuildBlockHeader(lines[el.lineStart], blockType, title);
+  if (newLine === null) return fail(code, config, `Cannot parse block line: ${lines[el.lineStart].trim()}`);
+  return { code: replaceLines(code, el.lineStart, el.lineStart, [newLine]), config };
+}
+
+// Unwrap a block: drop the header line and the matching `end` line, drop
+// else/and separator lines inside the span (edge B6 — leaving them would be a
+// Mermaid syntax error), and de-indent only content lines that start with
+// headerIndent + 4 spaces (edge B7). An unclosed block (edge B8) loses only
+// its header. Blank lines are preserved byte-for-byte.
+export function unwrapBlock(code: string, config: DiagramConfig | null, key: string): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'block') return fail(code, config, `Element ${key} is not a block`);
+
+  const lines = code.split('\n');
+  const headerIndent = lines[el.lineStart].match(/^\s*/)?.[0] ?? '';
+  const endLine = matchingEndLine(lines, el.lineStart);
+
+  if (endLine === null) {
+    // Unclosed block: drop the header only; the content stays as written.
+    return { code: replaceLines(code, el.lineStart, el.lineStart, []), config };
+  }
+
+  let separators = 0;
+  const kept: string[] = [];
+  const deindent = headerIndent + '    ';
+  for (let i = el.lineStart + 1; i < endLine; i++) {
+    const line = lines[i];
+    if (BLOCK_CONT_RE.test(line)) { separators++; continue; }
+    if (line.trim() === '') { kept.push(line); continue; }
+    // De-indent one level (edge B7): only lines that actually start with
+    // headerIndent + 4 spaces move up to the header's own indent.
+    kept.push(line.startsWith(deindent) ? headerIndent + line.slice(deindent.length) : line);
+  }
+  const newCode = replaceLines(code, el.lineStart, endLine, kept);
+  return {
+    code: newCode,
+    config,
+    ...(separators > 0
+      ? { warning: `${separators} separator ${separators === 1 ? 'line' : 'lines'} removed` }
+      : {}),
+  };
+}
+
+// Delete a block with its content: drop the whole span (header through the
+// matching `end`, or to EOF for an unclosed block). CONFIG cleanup mirrors
+// deleteElement: the arrows entries and noteTags entries of every contained
+// message/note are filtered out, actor entries of participants declared
+// inside the span are dropped, and occurrences of surviving entries are NOT
+// renumbered (edge B9, same trade-off as deleteElement). `cascaded` lists the
+// contained messages/notes for the confirmation dialog. withContent: false
+// unwraps instead (same as unwrapBlock).
+export function deleteBlock(
+  code: string,
+  config: DiagramConfig | null,
+  key: string,
+  opts?: { withContent?: boolean },
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const el = findElement(model, key);
+  if (!el || el.kind !== 'block') return fail(code, config, `Element ${key} is not a block`);
+  if (opts?.withContent === false) return unwrapBlock(code, config, key);
+
+  // Everything whose lines live inside the span goes away with the block.
+  const contained: ModelElement[] = [];
+  const containedParticipants: ParticipantElement[] = [];
+  for (const e of model.elements) {
+    if (e === el) continue;
+    if (e.lineStart <= el.lineStart || e.lineEnd > el.lineEnd) continue;
+    if (e.kind === 'message' || e.kind === 'note') contained.push(e);
+    else if (e.kind === 'participant') containedParticipants.push(e);
+  }
+
+  const newCode = replaceLines(code, el.lineStart, el.lineEnd, []);
+
+  const newConfig = cloneConfig(config);
+  if (newConfig) {
+    if (containedParticipants.length > 0 && newConfig.actors) {
+      for (const p of containedParticipants) delete newConfig.actors[p.id];
+    }
+    const arrowTargets = contained
+      .filter(isArrow)
+      .map(m => ({ from: m.from, to: m.to, label: m.label, occurrence: elementOccurrence(model, m) }));
+    if (newConfig.arrows && arrowTargets.length > 0) {
+      newConfig.arrows = newConfig.arrows.filter(a =>
+        !arrowTargets.some(t => arrowsMatchEntry(a, t.from, t.to, t.label, t.occurrence)));
+    }
+    const noteTargets = contained
+      .filter((e): e is NoteElement => e.kind === 'note')
+      .map(n => ({ over: n.over, text: n.text, occurrence: noteOccurrence(model, n) }));
+    if (newConfig.noteTags && noteTargets.length > 0) {
+      newConfig.noteTags = newConfig.noteTags.filter(n =>
+        !noteTargets.some(t => notesMatchEntry(n, t.over, t.text, t.occurrence)));
+    }
+    pruneConfig(newConfig);
+  }
+
+  return {
+    code: newConfig ? updateViewsData(newCode, newConfig) : newCode,
+    config: newConfig,
+    cascaded: contained.map(c => c.key),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Wrapping a selection (messages/notes) in a block or a %% @region (W1–W16).
+// ---------------------------------------------------------------------------
+
+// Block types a selection can be wrapped in. box encodes color+name in its
+// title and subgraphs are not a sequence construct (same set as the panel).
+const WRAP_BLOCK_TYPES: ReadonlySet<BlockType> = new Set(['alt', 'opt', 'loop', 'par', 'rect']);
+
+const REGION_NAME_RE = /^[a-zA-Z0-9_-]+$/;
+const REGION_START_LINE_RE = /^%%\s*@region-start:/;
+const REGION_END_LINE_RE = /^%%\s*@region-end\b/;
+// `activate X` / `deactivate X` companion lines follow the message they modify
+// (parseModel reads them from the next line only); they are not elements.
+const COMPANION_LINE_RE = /^\s*(?:activate|deactivate)\s+[A-Za-z0-9_-]+\s*$/;
+
+interface WrapSpan {
+  spanStart: number;
+  spanEnd: number;
+  lines: string[];
+}
+
+// Running count of BLOCK_OPEN_RE minus BLOCK_END_RE over lines[0..upto).
+// else/and separators and region comments do not change the depth.
+function blockDepthAt(lines: string[], upto: number): number {
+  let depth = 0;
+  for (let i = 0; i < upto && i < lines.length; i++) {
+    if (BLOCK_OPEN_RE.test(lines[i])) depth++;
+    else if (BLOCK_END_RE.test(lines[i])) depth = Math.max(0, depth - 1);
+  }
+  return depth;
+}
+
+// Resolve the selected keys to a wrappable span: all keys must be messages or
+// notes (W4), sorted by lineStart (W5), at least two distinct ones, spanning
+// first lineStart .. last lineEnd and extended over trailing activate /
+// deactivate companion lines of the last message (W3). The span must not
+// touch line 0 (W16, defensive — CONFIG / diagram-type line).
+function resolveWrapSpan(
+  code: string,
+  model: ReturnType<typeof parseModel>,
+  keys: string[],
+): { ok: true; span: WrapSpan } | { ok: false; reason: string } {
+  if (model.type !== 'sequence') return { ok: false, reason: UNSUPPORTED };
+  const uniqueKeys = [...new Set(keys)];
+  if (uniqueKeys.length < 2) {
+    return { ok: false, reason: 'Select at least two messages or notes to wrap' };
+  }
+  const elements = uniqueKeys.map(k => findElement(model, k));
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (!el) return { ok: false, reason: `Unknown element key: ${uniqueKeys[i]}` };
+    if (el.kind !== 'message' && el.kind !== 'note') {
+      return { ok: false, reason: `Only messages and notes can be wrapped (${uniqueKeys[i]} is a ${el.kind})` };
+    }
+  }
+  const selected = (elements as (MessageElement | NoteElement)[]).slice().sort((a, b) => a.lineStart - b.lineStart);
+  const lines = code.split('\n');
+  const spanStart = selected[0].lineStart;
+  let spanEnd = selected[selected.length - 1].lineEnd;
+  // W3: absorb trailing companion lines so the wrap never separates a message
+  // from its activation.
+  while (spanEnd + 1 < lines.length && COMPANION_LINE_RE.test(lines[spanEnd + 1])) spanEnd++;
+  if (spanStart === 0) {
+    return { ok: false, reason: 'The selection must not include the diagram header line' };
+  }
+  return { ok: true, span: { spanStart, spanEnd, lines } };
+}
+
+// Shared gate for canWrapSelection and both wrap transforms. W1 (both modes,
+// checked first): every model element fully contained in the span must be
+// selected (blank lines and %% comments inside are fine). Mode 'block' (W2):
+// no block open/end/else/and line inside the span and equal block depth
+// before and after it — a wrap fully inside a single block arm is allowed.
+// Mode 'region' (W9/W10): block structure lines are fine (region tags are
+// stripped comments), but an existing %% @region-start/@region-end line inside
+// the span is refused.
+function checkWrap(
+  code: string,
+  model: ReturnType<typeof parseModel>,
+  keys: string[],
+  mode: 'block' | 'region',
+): { ok: true; span: WrapSpan } | { ok: false; reason: string } {
+  const resolved = resolveWrapSpan(code, model, keys);
+  if (!resolved.ok) return resolved;
+  const { spanStart, spanEnd, lines } = resolved.span;
+
+  // W1 first: every model element fully contained in the span must be
+  // selected (blank lines and %% comments inside are fine).
+  const selectedKeys = new Set(keys);
+  for (const e of model.elements) {
+    if (e.kind === 'config') continue;
+    if (e.lineStart >= spanStart && e.lineEnd <= spanEnd && !selectedKeys.has(e.key)) {
+      return { ok: false, reason: `The selection is not contiguous (${e.key} sits inside the span but is not selected)` };
+    }
+  }
+
+  if (mode === 'block') {
+    for (let i = spanStart; i <= spanEnd; i++) {
+      if (BLOCK_CONT_RE.test(lines[i])) {
+        return { ok: false, reason: 'The selection crosses an else/and arm of a block' };
+      }
+      if (BLOCK_OPEN_RE.test(lines[i])) {
+        return { ok: false, reason: 'The selection contains a block header (alt/opt/loop/par/rect/box)' };
+      }
+      if (BLOCK_END_RE.test(lines[i])) {
+        return { ok: false, reason: 'The selection contains a block end line' };
+      }
+    }
+    if (blockDepthAt(lines, spanStart) !== blockDepthAt(lines, spanEnd + 1)) {
+      return { ok: false, reason: 'The selection starts and ends at different block depths' };
+    }
+  } else {
+    for (let i = spanStart; i <= spanEnd; i++) {
+      const trimmed = lines[i].trim();
+      if (REGION_START_LINE_RE.test(trimmed)) {
+        return { ok: false, reason: 'The selection contains a %% @region-start tag' };
+      }
+      if (REGION_END_LINE_RE.test(trimmed)) {
+        return { ok: false, reason: 'The selection contains a %% @region-end tag' };
+      }
+    }
+  }
+  return { ok: true, span: resolved.span };
+}
+
+// The single source of truth for wrap gating, used by the panel (to enable /
+// disable the wrap controls and show the reason verbatim) and by the transforms.
+export function canWrapSelection(
+  code: string,
+  model: ReturnType<typeof parseModel>,
+  keys: string[],
+  mode: 'block' | 'region',
+): { ok: true } | { ok: false; reason: string } {
+  const r = checkWrap(code, model, keys, mode);
+  return r.ok ? { ok: true } : { ok: false, reason: r.reason };
+}
+
+// Wrap the selected messages/notes in an alt/opt/loop/par/rect block. The
+// header takes the first span line's indent, content lines get +4 spaces (blank
+// lines untouched), `end` sits at the header indent. No CONFIG changes: arrow /
+// note entry keys are order-based and the wrap preserves element order.
+export function wrapInBlock(
+  code: string,
+  config: DiagramConfig | null,
+  keys: string[],
+  blockType: BlockType,
+  title?: string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  if (!WRAP_BLOCK_TYPES.has(blockType)) {
+    return fail(code, config, `A ${blockType} block cannot wrap a selection`);
+  }
+  const trimmedTitle = (title ?? '').trim();
+  if (trimmedTitle.includes('\n')) return fail(code, config, 'Block title must be a single line');
+  let headerTitle = trimmedTitle;
+  if (blockType === 'rect') {
+    // W11: a rect title is a color; empty falls back to the default (B10).
+    if (headerTitle === '') headerTitle = DEFAULT_RECT_COLOR;
+    else if (!isRgbColor(headerTitle)) {
+      return fail(code, config, `A rect block title must be an rgb(...) color, e.g. ${DEFAULT_RECT_COLOR}`);
+    }
+  }
+
+  const check = checkWrap(code, model, keys, 'block');
+  if (!check.ok) return fail(code, config, check.reason);
+  const { spanStart, spanEnd, lines } = check.span;
+
+  const indentMatch = lines[spanStart].match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '    ';
+  const header = headerTitle === '' ? `${indent}${blockType}` : `${indent}${blockType} ${headerTitle}`;
+  const wrapped = lines
+    .slice(spanStart, spanEnd + 1)
+    .map(l => (l.trim() === '' ? l : `    ${l}`));
+  const newCode = replaceLines(code, spanStart, spanEnd, [header, ...wrapped, `${indent}end`]);
+
+  const created = parseModel(newCode).elements.find(e => e.kind === 'block' && e.lineStart === spanStart);
+  return { code: newCode, config, newKey: created?.key };
+}
+
+// Wrap the selected messages/notes in a %% @region-start/@region-end pair
+// (W8–W10). The two comment lines are inserted at the span's indent; content
+// lines are byte-untouched (NFR-02). No CONFIG changes (order preserved).
+export function wrapInRegion(
+  code: string,
+  config: DiagramConfig | null,
+  keys: string[],
+  type: string,
+  value?: string,
+): EditResult {
+  const model = parseModel(code);
+  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  const regionType = type.trim();
+  if (!REGION_NAME_RE.test(regionType)) {
+    return fail(code, config, 'Region type must be non-empty and use only letters, digits, _ and -');
+  }
+  const regionValue = (value ?? '').trim();
+  if (regionValue !== '' && !REGION_NAME_RE.test(regionValue)) {
+    return fail(code, config, 'Region value must use only letters, digits, _ and -');
+  }
+
+  const check = checkWrap(code, model, keys, 'region');
+  if (!check.ok) return fail(code, config, check.reason);
+  const { spanStart, spanEnd, lines } = check.span;
+
+  const indentMatch = lines[spanStart].match(/^(\s*)/);
+  const indent = indentMatch ? indentMatch[1] : '    ';
+  const startLine = regionValue === ''
+    ? `${indent}%% @region-start: ${regionType}`
+    : `${indent}%% @region-start: ${regionType}=${regionValue}`;
+  const endLine = `${indent}%% @region-end`;
+  const content = lines.slice(spanStart, spanEnd + 1);
+  const newCode = replaceLines(code, spanStart, spanEnd, [startLine, ...content, endLine]);
+
+  const created = parseModel(newCode).elements.find(e => e.kind === 'region' && e.lineStart === spanStart);
+  return { code: newCode, config, newKey: created?.key };
 }
 
 export function groupParticipants(

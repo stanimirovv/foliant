@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
-import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, NoteElement, StickyNoteElement, DiagramType, NodeShape, ParticipantType } from '@/lib/model';
-import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS } from '@/lib/editor';
+import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, NoteElement, StickyNoteElement, BlockElement, BlockType, DiagramType, NodeShape, ParticipantType, NotePlacement } from '@/lib/model';
+import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS, hexToRgbColor, rgbToHexColor, DEFAULT_RECT_COLOR } from '@/lib/editor';
 import { DiagramConfig, ArrowKeyMode, ArrowAnimationType, ArrowStyleDefaults, StickyNote, StickyNoteColor } from '@/lib/views';
 import AnimatedArrowSelector from './AnimatedArrowSelector';
 import { NOTE_COLORS, STICKY_NOTE_COLOR_KEYS } from './StickyNote';
@@ -24,6 +24,13 @@ export interface ElementTagItem {
   element: ModelElement;
   ownTags: string[];
   inheritedTags?: string[];
+}
+
+// Normalized canWrapSelection result for the wrap sections (the reason is
+// shown verbatim when the check refuses).
+export interface WrapCheck {
+  ok: boolean;
+  reason?: string;
 }
 
 export const NAMED_COLORS: Record<string, string> = {
@@ -86,6 +93,17 @@ interface EditorPanelProps {
   onSetGlobalWidth?: (width: number | '') => void;  // edit the all-arrows default width ('' clears)
   noteTags?: string[] | null;   // tags of the selected note (null when no note is selected)
   stickyNoteTags?: string[] | null;  // tags of the selected sticky note (null when no sticky note is selected)
+  noteActorIds?: string[];      // actors a selected sequence note can span (source order)
+  onEditNoteText?: (text: string) => void;          // edit the selected sequence note's text
+  onSetNotePlacement?: (placement: NotePlacement) => void;  // edit the selected note's placement
+  onSetNoteSpan?: (overIds: string[]) => void;      // edit the selected note's spanned actors
+  onEditBlockTitle?: (title: string) => void;       // edit the selected block's title (rgb(...) for rect)
+  onSetBlockType?: (blockType: BlockType) => void;  // change the selected block's type
+  onUnwrapBlock?: () => void;                       // unwrap the selected block (keep its content)
+  wrapChecks?: { block: WrapCheck; region: WrapCheck } | null;  // canWrapSelection for the multi-selection
+  onWrapInBlock?: (blockType: BlockType, title?: string) => void;  // wrap the selected messages/notes in a block
+  onWrapInRegion?: (type: string, value?: string) => void;         // wrap the selected messages/notes in a %% @region
+  regionTypes?: string[];                           // existing region types (datalist for the region type input)
   onUpdateNote?: (id: string, patch: Partial<Omit<StickyNote, 'id'>>) => void;  // edit the selected sticky note
   warning?: string | null;
   pendingDelete: PendingDelete | null; // delete confirmation state
@@ -151,6 +169,17 @@ export default function EditorPanel({
   onSetGlobalWidth,
   noteTags,
   stickyNoteTags,
+  noteActorIds,
+  onEditNoteText,
+  onSetNotePlacement,
+  onSetNoteSpan,
+  onEditBlockTitle,
+  onSetBlockType,
+  onUnwrapBlock,
+  wrapChecks,
+  onWrapInBlock,
+  onWrapInRegion,
+  regionTypes,
   onUpdateNote,
   warning,
   pendingDelete,
@@ -233,6 +262,11 @@ export default function EditorPanel({
           elements={selectedElements!}
           elementsTagInfo={elementsTagInfo ?? []}
           actorKeys={actorKeys}
+          diagramType={diagramType}
+          wrapChecks={wrapChecks ?? null}
+          regionTypes={regionTypes ?? []}
+          onWrapInBlock={onWrapInBlock}
+          onWrapInRegion={onWrapInRegion}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
           onGroupParticipants={onGroupParticipants}
@@ -284,9 +318,24 @@ export default function EditorPanel({
           element={activeElement}
           tags={noteTags ?? []}
           actorKeys={actorKeys}
+          actorIds={noteActorIds ?? []}
           inheritedTags={activeInheritedTags}
+          onEditNoteText={onEditNoteText}
+          onSetNotePlacement={onSetNotePlacement}
+          onSetNoteSpan={onSetNoteSpan}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
+          onRequestDelete={onRequestDelete}
+        />
+      )}
+      {!isMultiSelect && activeElement && activeElement.kind === 'block' && (
+        <BlockFields
+          key={activeElement.key}
+          element={activeElement}
+          onEditBlockTitle={onEditBlockTitle}
+          onSetBlockType={onSetBlockType}
+          onUnwrapBlock={onUnwrapBlock}
+          onRequestDelete={onRequestDelete}
         />
       )}
       {!isMultiSelect && activeElement && activeElement.kind === 'sticky' && (
@@ -300,7 +349,7 @@ export default function EditorPanel({
           onRemoveTag={onRemoveTag}
         />
       )}
-      {!isMultiSelect && activeElement && !isComponent(activeElement) && !isArrow(activeElement) && activeElement.kind !== 'note' && activeElement.kind !== 'sticky' && (
+      {!isMultiSelect && activeElement && !isComponent(activeElement) && !isArrow(activeElement) && activeElement.kind !== 'note' && activeElement.kind !== 'block' && activeElement.kind !== 'sticky' && (
         <p className="text-xs text-gray-500 dark:text-slate-400 italic">
           This element is not editable.
         </p>
@@ -356,6 +405,11 @@ interface MultiElementFieldsProps {
   elements: ModelElement[];
   elementsTagInfo: ElementTagItem[];
   actorKeys: string[];
+  diagramType: DiagramType;
+  wrapChecks: { block: WrapCheck; region: WrapCheck } | null;
+  regionTypes: string[];
+  onWrapInBlock?: (blockType: BlockType, title?: string) => void;
+  onWrapInRegion?: (type: string, value?: string) => void;
   onAddTag: (tag: string, targetKey?: string) => void;
   onRemoveTag: (tag: string, targetKey?: string) => void;
   onGroupParticipants?: (participantKeys: string[], title: string, color?: string) => void;
@@ -366,6 +420,11 @@ function MultiElementFields({
   elements,
   elementsTagInfo,
   actorKeys,
+  diagramType,
+  wrapChecks,
+  regionTypes,
+  onWrapInBlock,
+  onWrapInRegion,
   onAddTag,
   onRemoveTag,
   onGroupParticipants,
@@ -376,9 +435,18 @@ function MultiElementFields({
   const [boxTitle, setBoxTitle] = useState('Group');
   const [boxColor, setBoxColor] = useState('');
   const [subgraphTitle, setSubgraphTitle] = useState('Subgraph');
+  const [wrapBlockType, setWrapBlockType] = useState<BlockType>('loop');
+  const [wrapBlockTitle, setWrapBlockTitle] = useState('');
+  const [wrapBlockColor, setWrapBlockColor] = useState(DEFAULT_RECT_COLOR);
+  const [wrapRegionType, setWrapRegionType] = useState('flow');
+  const [wrapRegionValue, setWrapRegionValue] = useState('');
 
   const participants = elements.filter((el): el is ParticipantElement => el.kind === 'participant');
   const nodes = elements.filter((el): el is NodeElement => el.kind === 'node');
+  // Only messages and notes are wrappable (W4); the panel counts them for the
+  // ≥2 requirement, participants keep the Box group control.
+  const wrappable = elements.filter(el => el.kind === 'message' || el.kind === 'note');
+  const showWrap = diagramType === 'sequence' && wrappable.length >= 2 && Boolean(onWrapInBlock && onWrapInRegion);
 
   const submitTag = () => {
     const tag = tagInput.trim();
@@ -456,6 +524,103 @@ function MultiElementFields({
             >
               Group into Subgraph
             </button>
+          </div>
+        </div>
+      )}
+
+      {showWrap && (
+        <div className="space-y-2 border border-emerald-100 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20 rounded p-2.5">
+          <span className={fieldLabel}>Wrap in Block ({wrappable.length} elements)</span>
+          <div className="space-y-1.5">
+            <select
+              className={fieldInput}
+              value={wrapBlockType}
+              onChange={(e) => setWrapBlockType(e.target.value as BlockType)}
+              data-testid="wrap-block-type"
+              aria-label="Block type"
+            >
+              <option value="alt">alt</option>
+              <option value="opt">opt</option>
+              <option value="loop">loop</option>
+              <option value="par">par</option>
+              <option value="rect">rect</option>
+            </select>
+            {wrapBlockType === 'rect' ? (
+              <input
+                type="text"
+                className={fieldInput}
+                placeholder="rgb(200,150,255)"
+                value={wrapBlockColor}
+                onChange={(e) => setWrapBlockColor(e.target.value)}
+                data-testid="wrap-block-color"
+                aria-label="Block color"
+              />
+            ) : (
+              <input
+                type="text"
+                className={fieldInput}
+                placeholder="Title (optional)"
+                value={wrapBlockTitle}
+                onChange={(e) => setWrapBlockTitle(e.target.value)}
+                data-testid="wrap-block-title"
+              />
+            )}
+            <button
+              type="button"
+              data-testid="wrap-block-button"
+              disabled={!wrapChecks?.block.ok}
+              onClick={() => onWrapInBlock?.(wrapBlockType, wrapBlockType === 'rect' ? wrapBlockColor : wrapBlockTitle)}
+              className="w-full py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium transition-colors disabled:opacity-40"
+            >
+              Wrap in Block ({wrappable.length} elements)
+            </button>
+            {!wrapChecks?.block.ok && wrapChecks?.block.reason && (
+              <p className="text-[11px] text-gray-400 dark:text-slate-500" data-testid="wrap-reason">
+                {wrapChecks.block.reason}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showWrap && (
+        <div className="space-y-2 border border-emerald-100 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20 rounded p-2.5">
+          <span className={fieldLabel}>Wrap in Region ({wrappable.length} elements)</span>
+          <div className="space-y-1.5">
+            <input
+              type="text"
+              className={fieldInput}
+              placeholder="Region type (e.g. flow)"
+              list="editor-wrap-region-types"
+              value={wrapRegionType}
+              onChange={(e) => setWrapRegionType(e.target.value)}
+              data-testid="wrap-region-type"
+            />
+            <datalist id="editor-wrap-region-types">
+              {regionTypes.map(t => <option key={t} value={t} />)}
+            </datalist>
+            <input
+              type="text"
+              className={fieldInput}
+              placeholder="Value (optional)"
+              value={wrapRegionValue}
+              onChange={(e) => setWrapRegionValue(e.target.value)}
+              data-testid="wrap-region-value"
+            />
+            <button
+              type="button"
+              data-testid="wrap-region-button"
+              disabled={!wrapChecks?.region.ok}
+              onClick={() => onWrapInRegion?.(wrapRegionType, wrapRegionValue)}
+              className="w-full py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium transition-colors disabled:opacity-40"
+            >
+              Wrap in Region
+            </button>
+            {!wrapChecks?.region.ok && wrapChecks?.region.reason && (
+              <p className="text-[11px] text-gray-400 dark:text-slate-500" data-testid="wrap-region-reason">
+                {wrapChecks.region.reason}
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -919,16 +1084,45 @@ interface NoteFieldsProps {
   element: NoteElement;
   tags: string[];
   actorKeys: string[];
+  actorIds: string[];          // actors the note can span (participants + implicit actors)
   inheritedTags?: string[];     // structural (subgraph) tags, read-only
+  onEditNoteText?: (text: string) => void;
+  onSetNotePlacement?: (placement: NotePlacement) => void;
+  onSetNoteSpan?: (overIds: string[]) => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
+  onRequestDelete: () => void;
 }
 
+// Single-selection fields for a native sequence note (`Note over/left of/right
+// of …`): text, placement, spanned actors, tags and delete. Distinct from
+// StickyNoteFields (the free-floating CONFIG cards).
 function NoteFields({
-  element, tags, actorKeys, inheritedTags, onAddTag, onRemoveTag,
+  element, tags, actorKeys, actorIds, inheritedTags,
+  onEditNoteText, onSetNotePlacement, onSetNoteSpan, onAddTag, onRemoveTag, onRequestDelete,
 }: NoteFieldsProps) {
   const [tagInput, setTagInput] = useState('');
   const [existingTagSelect, setExistingTagSelect] = useState('');
+  const [text, setText] = useState(element.text);
+
+  // Keep the local text in sync when another note is selected or the text is
+  // edited elsewhere (mirrors StickyNoteFields).
+  useEffect(() => {
+    setText(element.text);
+  }, [element.text]);
+
+  const commitText = () => {
+    if (text !== element.text) onEditNoteText?.(text);
+  };
+
+  // Toggling a span chip rebuilds the ordered list: the current order first,
+  // additions appended (unchecking the last actor is refused by the transform).
+  const toggleSpan = (id: string) => {
+    const next = element.over.includes(id)
+      ? element.over.filter(x => x !== id)
+      : [...element.over, id];
+    onSetNoteSpan?.(next);
+  };
 
   const submitTag = () => {
     const tag = tagInput.trim();
@@ -943,14 +1137,72 @@ function NoteFields({
     }
   };
 
+  // `left of` / `right of` span exactly one actor in Mermaid: the select is
+  // disabled while the note spans more than one.
+  const placementDisabled = element.over.length > 1;
+
   return (
     <div className="space-y-3">
       <p className="text-xs text-gray-400 dark:text-slate-500">
-        Note over <span className="font-mono">{element.over.join(', ')}</span>
+        Sequence note {element.placement} <span className="font-mono">{element.over.join(', ')}</span>
       </p>
-      <p className="text-xs text-gray-600 dark:text-slate-300 italic">
-        {element.text}
-      </p>
+
+      <div>
+        <span className={fieldLabel}>Text</span>
+        <textarea
+          data-testid="note-text"
+          className={fieldInput}
+          rows={3}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commitText}
+          placeholder="Note text..."
+        />
+      </div>
+
+      <div>
+        <span className={fieldLabel}>Placement</span>
+        <select
+          className={fieldInput}
+          data-testid="note-placement"
+          aria-label="Note placement"
+          value={element.placement}
+          disabled={placementDisabled}
+          title={placementDisabled
+            ? 'A left of / right of note can span only one participant'
+            : 'Note placement'}
+          onChange={(e) => onSetNotePlacement?.(e.target.value as NotePlacement)}
+        >
+          <option value="over">over</option>
+          <option value="left of">left of</option>
+          <option value="right of">right of</option>
+        </select>
+      </div>
+
+      <div>
+        <span className={fieldLabel}>Spans</span>
+        <div className="flex flex-wrap gap-1.5" data-testid="note-span-chips">
+          {actorIds.map(id => (
+            <label
+              key={id}
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs cursor-pointer ${
+                element.over.includes(id)
+                  ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                  : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300'
+              }`}
+            >
+              <input
+                type="checkbox"
+                data-testid={`note-span-${id}`}
+                checked={element.over.includes(id)}
+                onChange={() => toggleSpan(id)}
+                className="accent-blue-600"
+              />
+              <span className="font-mono">{id}</span>
+            </label>
+          ))}
+        </div>
+      </div>
 
       <div>
         <span className={fieldLabel}>Tags</span>
@@ -1038,6 +1290,130 @@ function NoteFields({
         <datalist id="editor-note-tag-list">
           {actorKeys.map(k => <option key={k} value={k} />)}
         </datalist>
+      </div>
+
+      <DeleteButton onRequestDelete={onRequestDelete} />
+    </div>
+  );
+}
+
+interface BlockFieldsProps {
+  element: BlockElement;
+  onEditBlockTitle?: (title: string) => void;
+  onSetBlockType?: (blockType: BlockType) => void;
+  onUnwrapBlock?: () => void;
+  onRequestDelete: () => void;
+}
+
+// Single-selection fields for a sequence block (alt/opt/loop/par/rect/box):
+// title (free text for the labeled types, a color for rect), type, unwrap and
+// delete. box blocks are read-only (their title encodes color and name; they
+// are created by Group into Box) but can still be unwrapped or deleted.
+function BlockFields({
+  element, onEditBlockTitle, onSetBlockType, onUnwrapBlock, onRequestDelete,
+}: BlockFieldsProps) {
+  const [title, setTitle] = useState(element.title ?? '');
+
+  // Keep the local title in sync when another block is selected or the title
+  // is edited elsewhere (mirrors NoteFields).
+  useEffect(() => {
+    setTitle(element.title ?? '');
+  }, [element.title]);
+
+  const commitTitle = () => {
+    if (title !== (element.title ?? '')) onEditBlockTitle?.(title);
+  };
+
+  const isRect = element.blockType === 'rect';
+  const isLabeled = element.blockType === 'alt' || element.blockType === 'opt'
+    || element.blockType === 'loop' || element.blockType === 'par';
+  const isBox = element.blockType === 'box';
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-gray-400 dark:text-slate-500">
+        {element.blockType} block{element.title ? <> <span className="font-mono">"{element.title}"</span></> : null}
+      </p>
+
+      {isBox && (
+        <p className="text-xs text-gray-500 dark:text-slate-400 italic">
+          Box group — edit via Group into Box. Unwrap removes the grouping and keeps the participants.
+        </p>
+      )}
+
+      {isLabeled && (
+        <div>
+          <span className={fieldLabel}>Title</span>
+          <input
+            type="text"
+            className={fieldInput}
+            data-testid="block-title"
+            placeholder="Title (optional)"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={commitTitle}
+          />
+        </div>
+      )}
+
+      {isRect && (
+        <div>
+          <span className={fieldLabel}>Color</span>
+          <div className="flex items-center space-x-1.5">
+            <input
+              type="color"
+              aria-label="Block color"
+              data-testid="block-color-picker"
+              className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
+              value={rgbToHexColor(element.title ?? '') ?? colorToHex(element.title, '#c896ff')}
+              onChange={(e) => {
+                const rgb = hexToRgbColor(e.target.value);
+                if (rgb) onEditBlockTitle?.(rgb);
+              }}
+            />
+            <span
+              className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0"
+              title={element.title || 'Default'}
+              data-testid="block-color-label"
+            >
+              {element.title || 'Default'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {(isLabeled || isRect) && (
+        <div>
+          <span className={fieldLabel}>Type</span>
+          <select
+            className={fieldInput}
+            data-testid="block-type"
+            aria-label="Block type"
+            value={element.blockType}
+            onChange={(e) => onSetBlockType?.(e.target.value as BlockType)}
+          >
+            <option value="alt">alt (alternative)</option>
+            <option value="opt">opt (option)</option>
+            <option value="loop">loop</option>
+            <option value="par">par (parallel)</option>
+            <option value="rect">rect (background)</option>
+          </select>
+        </div>
+      )}
+
+      <div className="flex space-x-2">
+        <button
+          type="button"
+          data-testid="block-unwrap"
+          onClick={onUnwrapBlock}
+          title="Remove the block frame, keep its content"
+          className="flex-1 flex items-center justify-center px-2 py-1 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700"
+        >
+          Unwrap
+        </button>
+        <div className="flex-1">
+          <DeleteButton onRequestDelete={onRequestDelete} />
+        </div>
       </div>
     </div>
   );

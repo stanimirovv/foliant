@@ -280,6 +280,23 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] Two diagrams with different views/tags in one file: set block 0 to view A and hide a tag in block 1 → both apply independently → F5 → both survive (state is in the URL).
 - [ ] Blocks without a CONFIG, and documents in Edit mode (Monaco), show no controls and render as before.
 
+## Sequence notes & blocks
+
+> Stop here: sequence-diagram notes are first-class (create/edit/place/delete) and blocks (`alt`/`opt`/`loop`/`par`/`rect`) are selectable, editable, unwrappable, and deletable — and multi-selections can be wrapped in a block or a region.
+
+- [ ] Open a sequence diagram → the toolbar shows a Note button (hidden on other diagram types; disabled with no actors or while visual edits are locked) → click it → a note appears on the canvas and is selected, with the panel showing "Sequence note" (distinct from "Sticky note").
+- [ ] Type note text and blur → the note label updates on the canvas.
+- [ ] Switch placement (`left of` / `right of` / `over`) and re-span to two actors via the span chips → the note moves/resizes.
+- [ ] Add a tag to the note, then edit its text → the tag chip survives (CONFIG tags follow note edits).
+- [ ] Delete the note → confirmation dialog → the note is gone; `Cmd+Z` restores it.
+- [ ] Hand-edit the source once to add `alt … else … end` → click the `alt` label → the block is selected and the panel shows its fields.
+- [ ] Rename the block title → the frame label updates on the canvas; convert `alt` → `opt` (works); convert the `else`-bearing block to another type → refused with a warning; unwrap the `else` block → separators gone, messages intact.
+- [ ] Delete a block that contains messages → the dialog lists the contained messages → confirm removes them; `Cmd+Z` restores everything.
+- [ ] Shift-click two adjacent messages → the wrap sections appear → Wrap in Loop → the frame renders, the block is selected, and the source shows the wrapped lines indented.
+- [ ] Select non-adjacent messages (skip one) → a reason is shown and the Wrap buttons are disabled; the source is unchanged.
+- [ ] Wrap two messages in a region (`%% @region-start: flow=auth` … `%% @region-end`), then hide the flow via the views/filters UI → the messages disappear; unhide → they return.
+- [ ] Reload the file after each feature → all changes persist; finish with an undo/redo pass to confirm the undo stack is intact.
+
 ## Increment 15 — Final automated gates
 
 > Stop here: everything is green before you call it done.

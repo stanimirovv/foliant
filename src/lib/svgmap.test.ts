@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { parseModel, DiagramModel, ParticipantElement, MessageElement } from './model';
-import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, labelElementForKey, SvgZip, EDGE_HIT_CLASS } from './svgmap';
+import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, labelElementForKey, svgElementForKey, SvgZip, EDGE_HIT_CLASS } from './svgmap';
 import { addEdgeHitPaths } from './styling';
 import { transformActors, processMermaid } from './preprocessor';
 import { DiagramConfig } from './views';
@@ -290,6 +290,117 @@ describe('buildSelectionMap', () => {
     const map = buildSelectionMap(RAW_SEQ, 'flowchart TD\n    A --> B', config, {});
     expect(map.size).toBe(0);
   });
+
+  it('does not cross-match an `over` note and a `left of` note with the same actor and text', () => {
+    const raw = `sequenceDiagram
+    participant A
+    participant B
+    Note over A: same text
+    Note left of A: same text`;
+    // No merges: processed code is the raw code modulo region/cleanup passes.
+    const processed = process(raw, null, {});
+    const map = buildSelectionMap(raw, processed, null, {});
+    const rawModel = parseModel(raw);
+    const processedModel = parseModel(processed);
+    const rawOver = rawModel.elements.find(e => e.kind === 'note' && e.placement === 'over')!;
+    const rawLeft = rawModel.elements.find(e => e.kind === 'note' && e.placement === 'left of')!;
+    const processedOver = processedModel.elements.find(e => e.kind === 'note' && e.placement === 'over')!;
+    const processedLeft = processedModel.elements.find(e => e.kind === 'note' && e.placement === 'left of')!;
+    expect(map.get(processedOver.key)?.key).toBe(rawOver.key);
+    expect(map.get(processedLeft.key)?.key).toBe(rawLeft.key);
+  });
+
+  it('maps blocks raw<->processed by (type, title), duplicates in order', () => {
+    const raw = `sequenceDiagram
+    participant A
+    participant B
+    alt first
+        A->>B: m1
+    end
+    alt first
+        A->>B: m2
+    end
+    loop solo
+        A->>B: m3
+    end`;
+    const processed = process(raw, null, {});
+    const map = buildSelectionMap(raw, processed, null, {});
+    const rawModel = parseModel(raw);
+    const processedModel = parseModel(processed);
+    const rawBlocks = rawModel.elements.filter(e => e.kind === 'block');
+    const processedBlocks = processedModel.elements.filter(e => e.kind === 'block');
+    expect(processedBlocks.map(b => b.key)).toEqual(['b:0', 'b:1', 'b:2']);
+    processedBlocks.forEach((b, i) => {
+      expect(map.get(b.key)?.key).toBe(rawBlocks[i].key);
+    });
+    // distinct titles never cross-match
+    const altSig = map.get('b:0')!;
+    expect(altSig).toMatchObject({ kind: 'block', blockType: 'alt', title: 'first' });
+    expect(map.get('b:2')).toMatchObject({ kind: 'block', blockType: 'loop', title: 'solo' });
+  });
+
+  it('maps raw box and rect blocks through unchanged processing', () => {
+    const raw = `sequenceDiagram
+    participant A
+    box red BoxOne
+        participant B
+    end
+    rect rgb(1,2,3)
+        A->>B: m1
+    end`;
+    const processed = process(raw, null, {});
+    const map = buildSelectionMap(raw, processed, null, {});
+    const processedModel = parseModel(processed);
+    const box = processedModel.elements.find(e => e.kind === 'block' && e.blockType === 'box')!;
+    const rect = processedModel.elements.find(e => e.kind === 'block' && e.blockType === 'rect')!;
+    expect(map.get(box.key)?.key).toBe('b:0');
+    expect(map.get(rect.key)?.key).toBe('b:1');
+  });
+
+  it('tolerates blocks stripped from processed code (hidden region, empty-block cleanup)', () => {
+    const raw = `sequenceDiagram
+    participant A
+    participant B
+    %% @region-start: hide
+    loop hidden loop
+        A->>B: m1
+    end
+    %% @region-end
+    loop visible loop
+        A->>B: m2
+    end`;
+    const processed = processMermaid(raw, { isRegionVisible: () => false }).code;
+    const map = buildSelectionMap(raw, processed, null, {});
+    const processedModel = parseModel(processed);
+    const blocks = processedModel.elements.filter(e => e.kind === 'block');
+    expect(blocks).toHaveLength(1);
+    // the surviving processed loop maps to the raw loop with the same title
+    expect(map.get(blocks[0].key)).toMatchObject({ kind: 'block', blockType: 'loop', title: 'visible loop' });
+    expect(map.get(blocks[0].key)?.key).toBe('b:1');
+  });
+
+  it('does not map processed-only blocks (generated boxes)', () => {
+    const raw = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: m1`;
+    // transformActors injects `box #ccc ... Zone` wrappers for merge groups;
+    // those boxes have no raw counterpart and stay unselectable.
+    const processed = `sequenceDiagram
+    box #ccc BACKEND Zone
+        participant A
+        participant B
+    end
+    A->>B: m1`;
+    const map = buildSelectionMap(raw, processed, null, {});
+    const processedModel = parseModel(processed);
+    const box = processedModel.elements.find(e => e.kind === 'block')!;
+    expect(box).toMatchObject({ kind: 'block', blockType: 'box' });
+    expect(map.get(box.key)).toBeUndefined();
+    // the message still maps straight through
+    const msg = processedModel.elements.find(e => e.kind === 'message')!;
+    expect(map.get(msg.key)?.key).toBe('m:0');
+  });
 });
 
 describe('zip + click against real mermaid renders', () => {
@@ -336,6 +447,138 @@ describe('zip + click against real mermaid renders', () => {
     const doc = parseOut(svg);
     expect(doc.querySelector('svg')).not.toBeNull();
     expect(doc.querySelector('svg')?.getAttribute('viewBox')).toBeTruthy();
+  });
+});
+
+// --- Sequence blocks: zip + click resolution against real mermaid renders ---
+
+const BLOCK_DEMO = `sequenceDiagram
+    participant A
+    participant B
+    box red BoxOne
+        participant C
+    end
+    A->>B: m0
+    alt outer title
+        A->>B: m1
+        loop inner
+            A->>B: m2
+        end
+    end
+    rect rgb(1,2,3)
+        A->>B: r1
+    end`;
+
+describe('sequence blocks (real mermaid renders)', () => {
+  it('zips nested alt/loop, rect and box blocks without warnings, model-aligned', async () => {
+    const { svg, model } = await renderPipeline(BLOCK_DEMO);
+    const root = parseSvg(svg);
+    const zip = zipModelToSvg(root, model);
+    expect(zip.warnings).toEqual([]);
+
+    const blocks = model.elements.filter(e => e.kind === 'block');
+    expect(blocks.map(b => `${b.blockType}:${b.title}`)).toEqual([
+      'box:red BoxOne', 'alt:outer title', 'loop:inner', 'rect:rgb(1,2,3)',
+    ]);
+    expect(zip.blocks).toHaveLength(4);
+    expect(zip.blocks.every(el => el !== null)).toBe(true);
+
+    // box block zips to the bare top-level box group (rect.rect + title text)
+    const boxG = zip.blocks[0]!;
+    expect(boxG.tagName.toLowerCase()).toBe('g');
+    expect(boxG.querySelector(':scope > rect.rect')).not.toBeNull();
+    expect(boxG.querySelector('text')?.textContent).toContain('BoxOne');
+
+    // control-structure blocks zip in model (source) order — outer alt before
+    // inner loop — even though the DOM is post-order (loop group first)
+    const csGroups = root.querySelectorAll('g[data-et="control-structure"]');
+    expect(csGroups).toHaveLength(2);
+    expect(csGroups[0].querySelector('text.labelText')?.textContent?.trim()).toBe('loop');
+    expect(csGroups[1].querySelector('text.labelText')?.textContent?.trim()).toBe('alt');
+    expect(zip.blocks[1]).toBe(csGroups[1]);
+    expect(zip.blocks[2]).toBe(csGroups[0]);
+
+    // rect block zips to the bare top-level rect.rect
+    const rect = zip.blocks[3]!;
+    expect(rect.tagName.toLowerCase()).toBe('rect');
+    expect(rect.getAttribute('fill')).toBe('rgb(1,2,3)');
+    expect(rect.parentElement).toBe(root);
+  });
+
+  it('soft-fails control-structure blocks on count or label mismatch (never guesses)', async () => {
+    const { svg, model } = await renderPipeline(BLOCK_DEMO);
+
+    // count mismatch: drop one control-structure group from the rendered SVG
+    const root1 = parseSvg(svg);
+    root1.querySelectorAll('g[data-et="control-structure"]')[1].remove();
+    const zip1 = zipModelToSvg(root1, model);
+    expect(zip1.warnings.some(w => w.includes('block count mismatch'))).toBe(true);
+    expect(zip1.blocks[1]).toBeNull();
+    expect(zip1.blocks[2]).toBeNull();
+    // the box and rect blocks still zip
+    expect(zip1.blocks[0]).not.toBeNull();
+    expect(zip1.blocks[3]).not.toBeNull();
+
+    // label mismatch: rename a label keyword
+    const root2 = parseSvg(svg);
+    root2.querySelector('g[data-et="control-structure"] text.labelText')!.textContent = 'bogus';
+    const zip2 = zipModelToSvg(root2, model);
+    expect(zip2.warnings.some(w => w.includes('block label mismatch'))).toBe(true);
+    expect(zip2.blocks[1]).toBeNull();
+    expect(zip2.blocks[2]).toBeNull();
+  });
+
+  it('resolves label-chip clicks to the block and frame-interior clicks to null', async () => {
+    const { svg, model } = await renderPipeline(BLOCK_DEMO);
+    const root = parseSvg(svg);
+    const zip = zipModelToSvg(root, model);
+    const altGroup = zip.blocks[1]!;
+    const loopGroup = zip.blocks[2]!;
+
+    // the label chip: polygon, keyword text and title text all select the block
+    expect(elementKeyAtTarget(altGroup.querySelector('polygon.labelBox'), root, model)).toBe('b:1');
+    expect(elementKeyAtTarget(altGroup.querySelector('text.labelText'), root, model)).toBe('b:1');
+    expect(elementKeyAtTarget(altGroup.querySelector('text.loopText'), root, model)).toBe('b:1');
+    // nested: the inner loop's own chip selects the inner block
+    expect(elementKeyAtTarget(loopGroup.querySelector('polygon.labelBox'), root, model)).toBe('b:2');
+
+    // the frame interior (loop lines) is not selectable
+    const frameLine = altGroup.querySelector('line.loopLine')!;
+    expect(elementKeyAtTarget(frameLine, root, model)).toBeNull();
+
+    // ...unless the click point lies inside the label box (the top frame line
+    // crosses the chip): then the block wins
+    const labelBox = altGroup.querySelector('polygon.labelBox')!;
+    vi.spyOn(labelBox, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 100, bottom: 20, width: 100, height: 20, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    expect(elementKeyAtTarget(frameLine, root, model, { x: 50, y: 10 })).toBe('b:1');
+    expect(elementKeyAtTarget(frameLine, root, model, { x: 500, y: 500 })).toBeNull();
+  });
+
+  it('resolves rect block and box group clicks', async () => {
+    const { svg, model } = await renderPipeline(BLOCK_DEMO);
+    const root = parseSvg(svg);
+    const zip = zipModelToSvg(root, model);
+
+    // rect block: the bare top-level rect (pointer-events:none in the app, so
+    // real clicks never target it — synthetic targets still resolve)
+    expect(elementKeyAtTarget(zip.blocks[3], root, model)).toBe('b:3');
+
+    // box group: the title text selects it, and so does its inner rect
+    const boxG = zip.blocks[0]!;
+    expect(elementKeyAtTarget(boxG.querySelector('text'), root, model)).toBe('b:0');
+    expect(elementKeyAtTarget(boxG.querySelector('rect'), root, model)).toBe('b:0');
+  });
+
+  it('highlights blocks via svgElementForKey', async () => {
+    const { svg, model } = await renderPipeline(BLOCK_DEMO);
+    const root = parseSvg(svg);
+    const zip = zipModelToSvg(root, model);
+    expect(svgElementForKey(root, model, 'b:1')).toBe(zip.blocks[1]);
+    expect(svgElementForKey(root, model, 'b:3')).toBe(zip.blocks[3]);
+    expect(svgElementForKey(root, model, 'b:99')).toBeNull();
   });
 });
 

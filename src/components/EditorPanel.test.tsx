@@ -368,9 +368,9 @@ describe('EditorPanel', () => {
   });
 
   it('shows a note for elements that are not editable', () => {
-    const blockModel = parseModel(`sequenceDiagram\n    participant A\n    alt x\n    end`);
-    const block0 = el(blockModel, 'b:0');
-    render(<EditorPanel {...makeProps({ element: block0 })} />);
+    const regionModel = parseModel(`sequenceDiagram\n    participant A\n    %% @region-start: flow=login\n    A->>A: x\n    %% @region-end`);
+    const region0 = el(regionModel, 'r:0');
+    render(<EditorPanel {...makeProps({ element: region0 })} />);
     expect(screen.getByText('This element is not editable.')).toBeTruthy();
   });
 
@@ -404,6 +404,153 @@ describe('EditorPanel', () => {
     // remove a tag chip
     fireEvent.click(screen.getByTestId('remove-note-tag-backend'));
     expect(props.onRemoveTag).toHaveBeenCalledWith('backend');
+  });
+
+  it('note fields expose editable text, placement and span; edits dispatch handlers', () => {
+    const spanModel = parseModel(`sequenceDiagram\n    participant A\n    participant B\n    A->>B: Hello\n    Note over A,B: greeting`);
+    const spanNote = el(spanModel, 'note:0');
+    const props = makeProps({
+      element: spanNote,
+      noteTags: [],
+      noteActorIds: ['A', 'B'],
+      onEditNoteText: vi.fn(),
+      onSetNotePlacement: vi.fn(),
+      onSetNoteSpan: vi.fn(),
+      onRequestDelete: vi.fn(),
+    });
+    render(<EditorPanel {...props} />);
+
+    // header: distinct "Sequence note" copy + the spanned actors
+    expect(screen.getByText(/Sequence note/)).toBeTruthy();
+    expect(screen.getByText('A, B')).toBeTruthy();
+
+    // text: textarea mirrors the note text; blur commits the edit
+    const textarea = screen.getByTestId('note-text') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('greeting');
+    // no commit when the text is unchanged
+    fireEvent.blur(textarea);
+    expect(props.onEditNoteText).not.toHaveBeenCalled();
+    fireEvent.change(textarea, { target: { value: 'renamed' } });
+    fireEvent.blur(textarea);
+    expect(props.onEditNoteText).toHaveBeenCalledWith('renamed');
+    expect(props.onEditNoteText).toHaveBeenCalledTimes(1);
+
+    // placement: multi-actor span disables the select (N4)
+    const placement = screen.getByTestId('note-placement') as HTMLSelectElement;
+    expect(placement.value).toBe('over');
+    expect(placement.disabled).toBe(true);
+
+    // span chips: checked for the current span; unchecking rebuilds the list
+    const chipA = screen.getByTestId('note-span-A') as HTMLInputElement;
+    const chipB = screen.getByTestId('note-span-B') as HTMLInputElement;
+    expect(chipA.checked).toBe(true);
+    expect(chipB.checked).toBe(true);
+    fireEvent.click(chipB);
+    expect(props.onSetNoteSpan).toHaveBeenCalledWith(['A']);
+
+    // delete button routes through onRequestDelete
+    fireEvent.click(screen.getByTestId('panel-delete'));
+    expect(props.onRequestDelete).toHaveBeenCalled();
+  });
+
+  it('note fields enable placement and append spans on a single-actor note', () => {
+    const props = makeProps({
+      element: note0,   // Note over A: hi
+      noteTags: [],
+      noteActorIds: ['A', 'B'],
+      onSetNotePlacement: vi.fn(),
+      onSetNoteSpan: vi.fn(),
+    });
+    render(<EditorPanel {...props} />);
+
+    const placement = screen.getByTestId('note-placement') as HTMLSelectElement;
+    expect(placement.disabled).toBe(false);
+    fireEvent.change(placement, { target: { value: 'left of' } });
+    expect(props.onSetNotePlacement).toHaveBeenCalledWith('left of');
+
+    // checking B appends it after the current span (order preserved)
+    fireEvent.click(screen.getByTestId('note-span-B'));
+    expect(props.onSetNoteSpan).toHaveBeenCalledWith(['A', 'B']);
+  });
+
+  it('block fields render title and type for labeled blocks; edits dispatch handlers', () => {
+    const blockModel = parseModel(`sequenceDiagram\n    participant A\n    participant B\n    A->>B: Hello\n    loop retry\n        B-->>A: Hi\n    end`);
+    const loop0 = el(blockModel, 'b:0');
+    const props = makeProps({
+      element: loop0,
+      onEditBlockTitle: vi.fn(),
+      onSetBlockType: vi.fn(),
+      onUnwrapBlock: vi.fn(),
+      onRequestDelete: vi.fn(),
+    });
+    render(<EditorPanel {...props} />);
+
+    expect(screen.getByText(/loop block/)).toBeTruthy();
+    expect(screen.getByText('"retry"')).toBeTruthy();
+
+    // title input mirrors the title; blur commits the edit
+    const title = screen.getByTestId('block-title') as HTMLInputElement;
+    expect(title.value).toBe('retry');
+    fireEvent.blur(title);
+    expect(props.onEditBlockTitle).not.toHaveBeenCalled();
+    fireEvent.change(title, { target: { value: 'retry loop' } });
+    fireEvent.blur(title);
+    expect(props.onEditBlockTitle).toHaveBeenCalledWith('retry loop');
+    expect(props.onEditBlockTitle).toHaveBeenCalledTimes(1);
+
+    // type select dispatches the new type
+    fireEvent.change(screen.getByTestId('block-type'), { target: { value: 'par' } });
+    expect(props.onSetBlockType).toHaveBeenCalledWith('par');
+
+    // unwrap and delete route through their handlers
+    fireEvent.click(screen.getByTestId('block-unwrap'));
+    expect(props.onUnwrapBlock).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('panel-delete'));
+    expect(props.onRequestDelete).toHaveBeenCalled();
+  });
+
+  it('block fields show a color row for rect blocks and convert hex to rgb', () => {
+    const rectModel = parseModel(`sequenceDiagram\n    participant A\n    participant B\n    rect rgb(1,2,3)\n        A->>B: m\n    end`);
+    const rect0 = el(rectModel, 'b:0');
+    const props = makeProps({
+      element: rect0,
+      onEditBlockTitle: vi.fn(),
+      onSetBlockType: vi.fn(),
+    });
+    render(<EditorPanel {...props} />);
+
+    expect(screen.queryByTestId('block-title')).toBeNull();
+    const picker = screen.getByTestId('block-color-picker') as HTMLInputElement;
+    expect(picker.type).toBe('color');
+    expect(picker.value).toBe('#010203');
+    expect(screen.getByTestId('block-color-label').textContent).toBe('rgb(1,2,3)');
+    fireEvent.change(picker, { target: { value: '#c896ff' } });
+    expect(props.onEditBlockTitle).toHaveBeenCalledWith('rgb(200,150,255)');
+    // the type select is still offered for rect blocks
+    fireEvent.change(screen.getByTestId('block-type'), { target: { value: 'loop' } });
+    expect(props.onSetBlockType).toHaveBeenCalledWith('loop');
+  });
+
+  it('block fields show read-only controls for box blocks but keep unwrap and delete', () => {
+    const boxModel = parseModel(`sequenceDiagram\n    participant A\n    box red BoxOne\n        participant B\n    end`);
+    const box0 = el(boxModel, 'b:0');
+    const props = makeProps({
+      element: box0,
+      onEditBlockTitle: vi.fn(),
+      onSetBlockType: vi.fn(),
+      onUnwrapBlock: vi.fn(),
+      onRequestDelete: vi.fn(),
+    });
+    render(<EditorPanel {...props} />);
+
+    expect(screen.getByText(/Box group/)).toBeTruthy();
+    expect(screen.queryByTestId('block-title')).toBeNull();
+    expect(screen.queryByTestId('block-type')).toBeNull();
+    expect(screen.queryByTestId('block-color-picker')).toBeNull();
+    fireEvent.click(screen.getByTestId('block-unwrap'));
+    expect(props.onUnwrapBlock).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('panel-delete'));
+    expect(props.onRequestDelete).toHaveBeenCalled();
   });
 
   it('allows adding existing tag from select dropdown in participant view', () => {
@@ -651,6 +798,107 @@ describe('EditorPanel', () => {
     })} />);
     expect(screen.queryByTestId('group-subgraph-button')).toBeNull();
     expect(screen.queryByTestId('group-box-button')).toBeTruthy();
+  });
+
+  describe('wrap sections (MultiElementFields)', () => {
+    const message1 = el(seqModel, 'm:1');
+    const participantB = el(seqModel, 'p:1');
+    const nodeB = el(flowModel, 'n:1');
+
+    it('renders the wrap sections for a 2-message sequence selection and dispatches both handlers', () => {
+      const onWrapInBlock = vi.fn();
+      const onWrapInRegion = vi.fn();
+      render(<EditorPanel {...makeProps({
+        selectedElements: [message0, message1],
+        wrapChecks: { block: { ok: true }, region: { ok: true } },
+        regionTypes: ['flow', 'auth'],
+        onWrapInBlock,
+        onWrapInRegion,
+      })} />);
+
+      // block wrap: default type loop + title input
+      const titleInput = screen.getByTestId('wrap-block-title') as HTMLInputElement;
+      fireEvent.change(titleInput, { target: { value: 'retry' } });
+      fireEvent.click(screen.getByTestId('wrap-block-button'));
+      expect(onWrapInBlock).toHaveBeenCalledWith('loop', 'retry');
+
+      // rect swaps the title input for a color input defaulting to rgb(...)
+      fireEvent.change(screen.getByTestId('wrap-block-type'), { target: { value: 'rect' } });
+      expect(screen.queryByTestId('wrap-block-title')).toBeNull();
+      const colorInput = screen.getByTestId('wrap-block-color') as HTMLInputElement;
+      expect(colorInput.value).toBe('rgb(200,150,255)');
+      fireEvent.click(screen.getByTestId('wrap-block-button'));
+      expect(onWrapInBlock).toHaveBeenCalledWith('rect', 'rgb(200,150,255)');
+
+      // region wrap: type defaults to flow, value passed through
+      const typeInput = screen.getByTestId('wrap-region-type') as HTMLInputElement;
+      expect(typeInput.value).toBe('flow');
+      fireEvent.change(screen.getByTestId('wrap-region-value'), { target: { value: 'login' } });
+      fireEvent.click(screen.getByTestId('wrap-region-button'));
+      expect(onWrapInRegion).toHaveBeenCalledWith('flow', 'login');
+    });
+
+    it('disables the wrap buttons and shows the refusal reason verbatim (W1/W2/W9)', () => {
+      const onWrapInBlock = vi.fn();
+      const onWrapInRegion = vi.fn();
+      render(<EditorPanel {...makeProps({
+        selectedElements: [message0, message1],
+        wrapChecks: {
+          block: { ok: false, reason: 'The selection is not contiguous (m:1 sits inside the span but is not selected)' },
+          region: { ok: false, reason: 'The selection contains a %% @region-end tag' },
+        },
+        onWrapInBlock,
+        onWrapInRegion,
+      })} />);
+
+      const blockButton = screen.getByTestId('wrap-block-button') as HTMLButtonElement;
+      const regionButton = screen.getByTestId('wrap-region-button') as HTMLButtonElement;
+      expect(blockButton.disabled).toBe(true);
+      expect(regionButton.disabled).toBe(true);
+      expect(screen.getByTestId('wrap-reason').textContent).toContain('not contiguous');
+      expect(screen.getByTestId('wrap-region-reason').textContent).toContain('@region-end');
+      fireEvent.click(blockButton);
+      fireEvent.click(regionButton);
+      expect(onWrapInBlock).not.toHaveBeenCalled();
+      expect(onWrapInRegion).not.toHaveBeenCalled();
+    });
+
+    it('hides the wrap sections for flowcharts and for selections without 2 wrappable elements (W4)', () => {
+      // flowchart nodes are never wrappable
+      const { unmount } = render(<EditorPanel {...makeProps({
+        selectedElements: [nodeA, nodeB],
+        diagramType: 'flowchart',
+        wrapChecks: { block: { ok: true }, region: { ok: true } },
+        onWrapInBlock: vi.fn(),
+        onWrapInRegion: vi.fn(),
+      })} />);
+      expect(screen.queryByTestId('wrap-block-button')).toBeNull();
+      expect(screen.queryByTestId('wrap-region-button')).toBeNull();
+      unmount();
+
+      // two participants: box grouping shows, wrap sections stay hidden
+      render(<EditorPanel {...makeProps({
+        selectedElements: [participantA, participantB],
+        diagramType: 'sequence',
+        wrapChecks: { block: { ok: true }, region: { ok: true } },
+        onWrapInBlock: vi.fn(),
+        onWrapInRegion: vi.fn(),
+        onGroupParticipants: vi.fn(),
+      })} />);
+      expect(screen.getByTestId('group-box-button')).toBeTruthy();
+      expect(screen.queryByTestId('wrap-block-button')).toBeNull();
+      unmount();
+
+      // one message + one participant: only one wrappable element
+      render(<EditorPanel {...makeProps({
+        selectedElements: [participantA, message0],
+        diagramType: 'sequence',
+        wrapChecks: { block: { ok: true }, region: { ok: true } },
+        onWrapInBlock: vi.fn(),
+        onWrapInRegion: vi.fn(),
+      })} />);
+      expect(screen.queryByTestId('wrap-block-button')).toBeNull();
+    });
   });
 
   it('renders type and color in one row, and width and dash in one row for arrows', () => {

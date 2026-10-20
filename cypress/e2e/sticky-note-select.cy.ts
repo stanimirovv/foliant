@@ -157,11 +157,11 @@ describe('Sticky note selection (e2e)', () => {
   it('hides the card when its tag is Off in By Key and restores it with On', () => {
     setup(STICKY_DIAGRAM).then(() => {
       // the note's own tag shows up in the By Key filter
-      cy.contains('By Key').parent().contains('li', 'legacy').contains('button', 'Off').click();
+      cy.contains('By Key').parent().parent().contains('li', 'legacy').contains('button', 'Off').click();
       cy.url().should('include', 'hide_key=legacy');
       card().should('not.exist');
       // the card is still selected-aware: turning the key back On restores it
-      cy.contains('By Key').parent().contains('li', 'legacy').contains('button', 'On').click();
+      cy.contains('By Key').parent().parent().contains('li', 'legacy').contains('button', 'On').click();
       cy.url().should('not.include', 'hide_key');
       card().should('exist');
     });
