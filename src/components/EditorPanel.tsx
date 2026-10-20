@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, ChevronDown, ChevronUp, Play } from 'lucide-react';
 import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, NoteElement, StickyNoteElement, BlockElement, BlockType, DiagramType, NodeShape, ParticipantType, NotePlacement } from '@/lib/model';
 import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS, hexToRgbColor, rgbToHexColor, DEFAULT_RECT_COLOR } from '@/lib/editor';
 import { DiagramConfig, ArrowKeyMode, ArrowAnimationType, ArrowStyleDefaults, StickyNote, StickyNoteColor } from '@/lib/views';
+import { ANIMATED_ARROW_PRESETS } from '@/lib/styling';
 import AnimatedArrowSelector from './AnimatedArrowSelector';
 import { NOTE_COLORS, STICKY_NOTE_COLOR_KEYS } from './StickyNote';
 
@@ -464,6 +465,7 @@ function MultiElementFields({
   const [wrapBlockColor, setWrapBlockColor] = useState(DEFAULT_RECT_COLOR);
   const [wrapRegionType, setWrapRegionType] = useState('flow');
   const [wrapRegionValue, setWrapRegionValue] = useState('');
+  const [isAnimDropdownOpen, setIsAnimDropdownOpen] = useState(false);
 
   const participants = elements.filter((el): el is ParticipantElement => el.kind === 'participant');
   const nodes = elements.filter((el): el is NodeElement => el.kind === 'node');
@@ -603,14 +605,34 @@ function MultiElementFields({
 
           {onSetAnimation && (
             <div className="pt-2 border-t border-gray-200 dark:border-slate-800">
-              <AnimatedArrowSelector
-                currentAnimation={arrowStyle?.animation ?? 'none'}
-                currentColor={arrowStyle?.color ? colorToHex(arrowStyle?.color) : '#00ff9d'}
-                onSelectAnimation={onSetAnimation}
-                onSelectColor={onSetColor}
-                hasSelectedArrow={true}
-                compact={true}
-              />
+              <button
+                type="button"
+                data-testid="multi-arrow-animation-dropdown-toggle"
+                aria-expanded={isAnimDropdownOpen}
+                onClick={() => setIsAnimDropdownOpen(prev => !prev)}
+                className="w-full flex items-center justify-between px-2 py-1.5 text-xs font-semibold rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-700/70 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Play size={12} className="text-blue-500" />
+                  <span>Animated Arrows</span>
+                  <span className="text-[11px] font-normal text-gray-400 dark:text-slate-500">
+                    ({ANIMATED_ARROW_PRESETS.find(p => p.id === (arrowStyle?.animation ?? 'none'))?.name ?? 'None'})
+                  </span>
+                </span>
+                {isAnimDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+              {isAnimDropdownOpen && (
+                <div className="mt-2" data-testid="multi-arrow-animation-dropdown-content">
+                  <AnimatedArrowSelector
+                    currentAnimation={arrowStyle?.animation ?? 'none'}
+                    currentColor={arrowStyle?.color ? colorToHex(arrowStyle?.color) : '#00ff9d'}
+                    onSelectAnimation={onSetAnimation}
+                    onSelectColor={onSetColor}
+                    hasSelectedArrow={true}
+                    compact={true}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

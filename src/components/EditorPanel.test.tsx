@@ -1007,9 +1007,22 @@ describe('EditorPanel', () => {
       fireEvent.change(dashSelect, { target: { value: 'dotted' } });
       expect(onSetDash).toHaveBeenCalledWith('dotted');
 
-      // Animation selector
+      // Animation selector is inside a collapsible dropdown (collapsed by default)
+      const animToggle = screen.getByTestId('multi-arrow-animation-dropdown-toggle');
+      expect(animToggle.getAttribute('aria-expanded')).toBe('false');
+      expect(animToggle.textContent).toContain('Stream');
+      expect(screen.queryByTestId('select-animation-pulse')).toBeNull();
+
+      // Opening the dropdown reveals AnimatedArrowSelector
+      fireEvent.click(animToggle);
+      expect(animToggle.getAttribute('aria-expanded')).toBe('true');
       fireEvent.click(screen.getByTestId('select-animation-pulse'));
       expect(onSetAnimation).toHaveBeenCalledWith('pulse');
+
+      // Clicking the toggle again collapses it
+      fireEvent.click(animToggle);
+      expect(animToggle.getAttribute('aria-expanded')).toBe('false');
+      expect(screen.queryByTestId('select-animation-pulse')).toBeNull();
 
       // Existing wrap & tag sections remain intact
       expect(screen.getByTestId('wrap-block-button')).toBeTruthy();

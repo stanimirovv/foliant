@@ -4241,8 +4241,9 @@ describe('ClientPage shift-select arrow controls, delete, and new markdown file 
       ]);
     }, { timeout: 3000 });
 
-    // 4. Set animation on all selected arrows from the shift-select menu
+    // 4. Set animation on all selected arrows from the shift-select menu dropdown
     const panel = screen.getByTestId('multi-arrow-fields');
+    fireEvent.click(within(panel).getByTestId('multi-arrow-animation-dropdown-toggle'));
     fireEvent.click(within(panel).getByTestId('select-animation-pulse'));
     await waitFor(() => {
       const cfg = parseViewsData(viewer.getAttribute('data-code') ?? '');
