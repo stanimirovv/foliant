@@ -4325,3 +4325,30 @@ describe('ClientPage — presentation mode (walkthrough player)', () => {
   });
 });
 
+describe('ClientPage — top menu bar responsiveness', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renders top menu bar with flex-wrap and responsive spacing so it fits the screen in two rows', async () => {
+    currentMockParams = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    mockFetchWithFile('sequenceDiagram\n    participant A\n    participant B\n    A->>B: Ping');
+
+    render(<ClientPage />);
+    const topBar = await screen.findByTestId('top-menu-bar');
+    expect(topBar).toBeTruthy();
+    expect(topBar.className).toContain('flex-wrap');
+    expect(topBar.className).toContain('gap-y-2');
+    expect(topBar.className).toContain('justify-between');
+
+    // Both action group and status group inside top bar support wrapping cleanly
+    const actionGroup = topBar.children[0] as HTMLElement;
+    expect(actionGroup.className).toContain('flex-wrap');
+    expect(actionGroup.className).toContain('min-w-0');
+
+    const statusGroup = topBar.children[1] as HTMLElement;
+    expect(statusGroup.className).toContain('flex-wrap');
+  });
+});
+

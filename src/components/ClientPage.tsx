@@ -2681,10 +2681,10 @@ export default function ClientPage() {
       </div>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className={`p-4 border-b flex items-center justify-between transition-colors ${
+        <div data-testid="top-menu-bar" className={`px-4 py-2.5 border-b flex flex-wrap items-center justify-between gap-y-2 gap-x-3 transition-colors ${
           isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
         }`}>
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
             {isMarkdownDoc ? (
               <span
                 data-testid="markdown-file-badge"
@@ -2945,7 +2945,7 @@ export default function ClientPage() {
             </>
             )}
           </div>
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-shrink-0 ml-auto">
             {isEmbeddedDiagram && diagramIndex !== null && (
               <button
                 onClick={backToMarkdownDoc}
