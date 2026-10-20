@@ -2752,19 +2752,15 @@ sequenceDiagram
     });
   });
 
-  it('selects animation style and base color from bottom bar for selected arrow', async () => {
+  it('selects animation style and base color for selected arrow', async () => {
     const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
     fireEvent.click(screen.getByTestId('select-m:0'));
     await screen.findByDisplayValue('Hello');
 
-    // Expand bottom bar
-    const bar = screen.getByTestId('bottom-animated-arrow-bar');
-    fireEvent.click(within(bar).getByTestId('toggle-animated-arrows-bar'));
-
-    // Select cyber animation and teal color within the bottom bar
-    const cyberBtn = await within(bar).findByTestId('select-animation-cyber');
+    // Select cyber animation and teal color
+    const cyberBtn = await screen.findByTestId('select-animation-cyber');
     fireEvent.click(cyberBtn);
-    fireEvent.click(within(bar).getByTestId('color-positive-teal'));
+    fireEvent.click(screen.getByTestId('color-positive-teal'));
 
     await waitFor(() => {
       const code = viewer.getAttribute('data-code') ?? '';
@@ -2781,12 +2777,8 @@ sequenceDiagram
     fireEvent.click(screen.getByTestId('select-m:0'));
     await screen.findByDisplayValue('Hello');
 
-    // Expand bottom bar
-    const bar = screen.getByTestId('bottom-animated-arrow-bar');
-    fireEvent.click(within(bar).getByTestId('toggle-animated-arrows-bar'));
-
     // Select flow animation (happy path)
-    const flowBtn = await within(bar).findByTestId('select-animation-flow');
+    const flowBtn = await screen.findByTestId('select-animation-flow');
     fireEvent.click(flowBtn);
 
     await waitFor(() => {
@@ -2804,12 +2796,8 @@ sequenceDiagram
     fireEvent.click(screen.getByTestId('select-m:0'));
     await screen.findByDisplayValue('Hello');
 
-    // Expand bottom bar
-    const bar = screen.getByTestId('bottom-animated-arrow-bar');
-    fireEvent.click(within(bar).getByTestId('toggle-animated-arrows-bar'));
-
     // Select broken-sender animation (negative path)
-    const brokenSenderBtn = await within(bar).findByTestId('select-animation-broken-sender');
+    const brokenSenderBtn = await screen.findByTestId('select-animation-broken-sender');
     fireEvent.click(brokenSenderBtn);
 
     await waitFor(() => {
@@ -2834,12 +2822,9 @@ sequenceDiagram
     fireEvent.click(screen.getByTestId('select-m:0'));
     await screen.findByDisplayValue('First');
 
-    const bar = screen.getByTestId('bottom-animated-arrow-bar');
-    fireEvent.click(within(bar).getByTestId('toggle-animated-arrows-bar'));
-
     // Select flow animation and set color to teal (#00f0ff)
-    fireEvent.click(await within(bar).findByTestId('select-animation-flow'));
-    fireEvent.click(within(bar).getByTestId('color-positive-teal'));
+    fireEvent.click(await screen.findByTestId('select-animation-flow'));
+    fireEvent.click(screen.getByTestId('color-positive-teal'));
 
     await waitFor(() => {
       const code = viewer.getAttribute('data-code') ?? '';
@@ -2848,7 +2833,7 @@ sequenceDiagram
     }, { timeout: 3000 });
 
     // Switch style on first message to cyber: it should PRESERVE the existing color (#00f0ff)
-    fireEvent.click(within(bar).getByTestId('select-animation-cyber'));
+    fireEvent.click(screen.getByTestId('select-animation-cyber'));
     await waitFor(() => {
       const code = viewer.getAttribute('data-code') ?? '';
       const parsed = parseViewsData(code);
@@ -2863,7 +2848,7 @@ sequenceDiagram
     await screen.findByDisplayValue('Second');
 
     // Select cyber animation: should INHERIT the last used positive color (#00f0ff)
-    fireEvent.click(within(bar).getByTestId('select-animation-cyber'));
+    fireEvent.click(screen.getByTestId('select-animation-cyber'));
     await waitFor(() => {
       const code = viewer.getAttribute('data-code') ?? '';
       const parsed = parseViewsData(code);
@@ -2873,18 +2858,6 @@ sequenceDiagram
       });
     }, { timeout: 3000 });
   }, 25000);
-
-  it('renders the bottom bar Convert Diagram button as disabled', async () => {
-    const DEMO_ERR = `sequenceDiagram
-    participant A
-    participant B
-    A->>B: Request
-    B-x A: Error occurred`;
-    await renderInEditMode(DEMO_ERR, 'A->>B: Request');
-
-    const btn = screen.getByTestId('convert-diagram-bar-btn') as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-  });
 
   it('toggles between Properties tab and Mermaid Source tab', async () => {
     await renderInEditMode(DEMO, 'A->>B: Hello');

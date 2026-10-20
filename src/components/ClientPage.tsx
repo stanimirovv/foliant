@@ -6,7 +6,6 @@ import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
 import MarkdownEditor from './MarkdownEditor';
 import SourceCodePanel from './SourceCodePanel';
-import BottomAnimatedArrowBar from './BottomAnimatedArrowBar';
 import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
@@ -18,7 +17,7 @@ import mermaid from 'mermaid';
 import {
   editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement, deleteElements,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
-  getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
+  getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode,
   moveNode, moveMessage, moveMessageEndpoint, moveEdgeEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, groupNodes, toggleDiagramOrientation,
   toggleNumberedSteps, hasNumberedSteps, addSequenceNote, editNoteText, setNotePlacement, setNoteSpan,
@@ -1772,10 +1771,6 @@ export default function ClientPage() {
     applyEditResult({ code: currentCode, config: currentConfig });
   };
 
-  const handleConvertDiagram = () => {
-    applyEditResult(convertDiagramToAnimatedArrows(rawCode, viewsData));
-  };
-
   const handleAddTag = (tag: string, targetKey?: string) => {
     const keysToAdd = targetKey
       ? [targetKey]
@@ -3066,16 +3061,6 @@ export default function ClientPage() {
                 onUpdateNote={handleUpdateNote}
                 onDeleteNote={handleDeleteNote}
                 onLabelEdit={handleInlineLabelEdit}
-              />
-            )}
-            {!isVisualLocked && !isMarkdownDoc && (
-              <BottomAnimatedArrowBar
-                currentAnimation={selectedArrowStyle?.animation}
-                currentColor={selectedArrowStyle?.color}
-                hasSelectedArrow={selectedArrows.length > 0}
-                onSelectAnimation={handleSetAnimation}
-                onSelectColor={handleSetColor}
-                onConvertDiagram={handleConvertDiagram}
               />
             )}
           </div>
