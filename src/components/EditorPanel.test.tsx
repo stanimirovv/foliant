@@ -1048,6 +1048,38 @@ describe('EditorPanel', () => {
       expect(onRequestDelete).toHaveBeenCalledTimes(1);
     });
 
+    it('switches preset actor color swatches and resolved color when theme changes between dark and default', () => {
+      const configWithDarkPreset: DiagramConfig = {
+        version: 1,
+        actors: { A: { color: '#213b5e' } },
+      };
+      const { rerender } = render(
+        <EditorPanel
+          {...makeProps({
+            element: participantA,
+            config: configWithDarkPreset,
+            theme: 'dark',
+          })}
+        />
+      );
+
+      expect(screen.getByTestId('actor-color-preset-#213b5e')).toBeTruthy();
+      expect((screen.getByTestId('actor-color-picker') as HTMLInputElement).value).toBe('#213b5e');
+
+      rerender(
+        <EditorPanel
+          {...makeProps({
+            element: participantA,
+            config: configWithDarkPreset,
+            theme: 'default',
+          })}
+        />
+      );
+
+      expect(screen.getByTestId('actor-color-preset-#cfe2f3')).toBeTruthy();
+      expect((screen.getByTestId('actor-color-picker') as HTMLInputElement).value).toBe('#cfe2f3');
+    });
+
     it('renders adding tags and deletion at the top of MultiElementFields before arrow, group, and wrap sections', () => {
       render(<EditorPanel {...makeProps({
         selectedElements: [participantA, participantB, message0, message1],

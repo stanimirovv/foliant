@@ -869,42 +869,79 @@ export const PRESET_ACTOR_COLORS: string[] = [
   '#621d2b', '#19481d', '#371d62', '#5a4720', '#1a5653',
 ];
 
-export function getNextFreeActorColor(config: DiagramConfig | null): string {
-  const actors = config?.actors ?? {};
-  const colorUsage = new Map<string, number>();
-  for (const c of PRESET_ACTOR_COLORS) {
-    colorUsage.set(c.toLowerCase(), 0);
+export const PRESET_ACTOR_COLORS_LIGHT: string[] = [
+  '#cfe2f3', '#f8d0d6', '#cdeed3', '#e2d0f8', '#f5ebc8',
+  '#c9f0f2', '#f5d0e8', '#dcf2ce', '#d2d5f5', '#f8d8cf',
+  '#ccf0de', '#efd0f8', '#eff2cc', '#cde6f5', '#f5d0dc',
+  '#ccf0ca', '#dbd2f5', '#f7e4cd', '#cdf2eb', '#f8d0f2',
+  '#e3f0d0', '#d0dcf8', '#f5d0d0', '#cbf2d6', '#e6d2f5',
+  '#f2edc9', '#cfeef5', '#f8d0e5', '#d5edcc', '#d2d0f8',
+  '#f5ddd0', '#caf2e3', '#f3d2f5', '#eaf2cb', '#d2e4f5',
+  '#f8d0d8', '#ccefd0', '#dfd0f8', '#f3e8d0', '#caf2f0',
+];
+
+export function getPresetActorColors(theme: 'default' | 'dark' = 'dark'): string[] {
+  return theme === 'default' ? PRESET_ACTOR_COLORS_LIGHT : PRESET_ACTOR_COLORS;
+}
+
+export function resolveActorColorForTheme(color: string, theme: 'default' | 'dark' = 'dark'): string {
+  const trimmed = color.trim();
+  if (!trimmed) return color;
+  const normalized = (/^rgb\(/i.test(trimmed) ? rgbToHexColor(trimmed) : trimmed).toLowerCase();
+  const darkIdx = PRESET_ACTOR_COLORS.findIndex(c => c.toLowerCase() === normalized);
+  if (darkIdx >= 0) {
+    return getPresetActorColors(theme)[darkIdx];
   }
+  const lightIdx = PRESET_ACTOR_COLORS_LIGHT.findIndex(c => c.toLowerCase() === normalized);
+  if (lightIdx >= 0) {
+    return getPresetActorColors(theme)[lightIdx];
+  }
+  return color;
+}
+
+export function getNextFreeActorColor(
+  config: DiagramConfig | null,
+  theme: 'default' | 'dark' = 'dark',
+): string {
+  const palette = getPresetActorColors(theme);
+  const actors = config?.actors ?? {};
+  const indexUsage = new Array<number>(PRESET_ACTOR_COLORS.length).fill(0);
 
   for (const meta of Object.values(actors)) {
     if (meta.color) {
       const lower = meta.color.trim().toLowerCase();
-      if (colorUsage.has(lower)) {
-        colorUsage.set(lower, (colorUsage.get(lower) ?? 0) + 1);
+      const darkIdx = PRESET_ACTOR_COLORS.findIndex(c => c.toLowerCase() === lower);
+      if (darkIdx >= 0) {
+        indexUsage[darkIdx]++;
+        continue;
+      }
+      const lightIdx = PRESET_ACTOR_COLORS_LIGHT.findIndex(c => c.toLowerCase() === lower);
+      if (lightIdx >= 0) {
+        indexUsage[lightIdx]++;
       }
     }
   }
 
-  // Find the first preset color that is free
-  for (const color of PRESET_ACTOR_COLORS) {
-    if (colorUsage.get(color.toLowerCase()) === 0) {
-      return color;
+  // Find the first preset color index that is free
+  for (let i = 0; i < palette.length; i++) {
+    if (indexUsage[i] === 0) {
+      return palette[i];
     }
   }
 
   // If all colors are added, start rotating again:
   // Find minimum usage count, and pick the first preset color matching that minimum usage
   let minCount = Infinity;
-  for (const count of colorUsage.values()) {
+  for (const count of indexUsage) {
     if (count < minCount) minCount = count;
   }
-  for (const color of PRESET_ACTOR_COLORS) {
-    if (colorUsage.get(color.toLowerCase()) === minCount) {
-      return color;
+  for (let i = 0; i < palette.length; i++) {
+    if (indexUsage[i] === minCount) {
+      return palette[i];
     }
   }
 
-  return PRESET_ACTOR_COLORS[0];
+  return palette[0];
 }
 
 export function addParticipant(
@@ -913,6 +950,7 @@ export function addParticipant(
   afterKey?: string,
   color?: string,
   kind: ParticipantType = 'participant',
+  theme: 'default' | 'dark' = 'dark',
 ): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);
@@ -929,7 +967,7 @@ export function addParticipant(
   while (taken.has(`New${n}`)) n++;
   const id = `New${n}`;
 
-  const assignedColor = color ?? getNextFreeActorColor(config);
+  const assignedColor = color ?? getNextFreeActorColor(config, theme);
   const newConfig = cloneConfig(config) ?? { version: 1 };
   newConfig.actors = newConfig.actors ?? {};
   newConfig.actors[id] = {

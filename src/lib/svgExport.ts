@@ -1,5 +1,7 @@
 import { StickyNote as StickyNoteType, StickyNoteColor } from './views';
 import { EDGE_HIT_CLASS } from './svgmap';
+import { resolveActorColorForTheme } from './editor';
+import { isLightColor } from './styling';
 
 export interface SvgExportOptions {
   notes?: StickyNoteType[];
@@ -241,7 +243,60 @@ export function prepareSvgForExport(svg: SVGElement, options: SvgExportOptions =
   }
 
   const isDark = !!options.isDark;
+  const exportTheme: 'default' | 'dark' = isDark ? 'dark' : 'default';
+  clone.classList.remove('theme-dark', 'theme-light');
   clone.classList.add(isDark ? 'theme-dark' : 'theme-light');
+
+  // Normalize any preset actor colors on colored sequence actors and flowchart nodes
+  // so exported SVGs always match the target export theme.
+  clone.querySelectorAll('rect[data-colored="true"], circle[data-colored="true"]').forEach((shape) => {
+    const styleable = shape as Element & { style: CSSStyleDeclaration };
+    const rawFill = shape.getAttribute('fill') || styleable.style?.fill || '';
+    if (!rawFill) return;
+    const resolved = resolveActorColorForTheme(rawFill, exportTheme);
+    if (resolved.toLowerCase() !== rawFill.toLowerCase()) {
+      shape.setAttribute('fill', resolved);
+      shape.setAttribute('stroke', resolved);
+      styleable.style?.setProperty('fill', resolved, 'important');
+      styleable.style?.setProperty('stroke', resolved, 'important');
+      const textColor = isLightColor(resolved) ? '#0f172a' : '#ffffff';
+      const group = shape.closest('g[data-et="participant"]') || shape.parentElement;
+      group?.querySelectorAll('text[data-colored="true"], tspan[data-colored="true"]').forEach((t) => {
+        const ts = t as Element & { style: CSSStyleDeclaration };
+        t.setAttribute('fill', textColor);
+        ts.style?.setProperty('fill', textColor, 'important');
+      });
+    }
+  });
+  clone.querySelectorAll('line[data-colored="true"], path[data-colored="true"], g.actor-man[data-colored="true"], .actor-man[data-colored="true"]').forEach((el) => {
+    const styleable = el as Element & { style: CSSStyleDeclaration };
+    const rawStroke = el.getAttribute('stroke') || styleable.style?.stroke || '';
+    if (rawStroke) {
+      const resolvedStroke = resolveActorColorForTheme(rawStroke, exportTheme);
+      if (resolvedStroke.toLowerCase() !== rawStroke.toLowerCase()) {
+        if (el.hasAttribute('stroke')) el.setAttribute('stroke', resolvedStroke);
+        styleable.style?.setProperty('stroke', resolvedStroke, 'important');
+      }
+    }
+    const rawFill = el.getAttribute('fill') || styleable.style?.fill || '';
+    if (rawFill) {
+      const resolvedFill = resolveActorColorForTheme(rawFill, exportTheme);
+      if (resolvedFill.toLowerCase() !== rawFill.toLowerCase()) {
+        if (el.hasAttribute('fill')) el.setAttribute('fill', resolvedFill);
+        styleable.style?.setProperty('fill', resolvedFill, 'important');
+      }
+    }
+  });
+  clone.querySelectorAll('g.node .label-container').forEach((shape) => {
+    const styleable = shape as Element & { style: CSSStyleDeclaration };
+    const rawFill = styleable.style?.fill || shape.getAttribute('fill') || '';
+    if (!rawFill) return;
+    const resolved = resolveActorColorForTheme(rawFill, exportTheme);
+    if (resolved.toLowerCase() !== rawFill.toLowerCase() && styleable.style) {
+      styleable.style.fill = resolved;
+      styleable.style.stroke = resolved;
+    }
+  });
 
   const actorStyles = isDark ? `
 /* --- Sequence Diagram Actor & Lifeline Styles (Dark Mode) --- */

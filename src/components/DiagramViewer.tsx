@@ -589,7 +589,7 @@ export default function DiagramViewer({
         const model = parseModel(code);
         let styled = reorderSequenceLayers(svg);
         styled = applyArrowStyles(styled, model, arrowStyles);
-        styled = applyNodeColors(styled, nodeColors);
+        styled = applyNodeColors(styled, nodeColors, theme);
         styled = addEdgeHitPaths(styled);
         styled = markPanExclusionTargets(styled);
         if (isMounted) {

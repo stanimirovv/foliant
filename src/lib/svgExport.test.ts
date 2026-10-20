@@ -108,6 +108,36 @@ describe('svgExport', () => {
       expect(bg.getAttribute('fill')).toBe('#ffffff');
     });
 
+    it('normalizes preset actor colors and text contrast to match the exported theme', () => {
+      const svgWithColoredActor = createSvgElement(`
+        <svg id="test-svg" viewBox="0 0 500 400">
+          <g data-et="participant" data-id="A" data-colored="true">
+            <rect class="actor" data-colored="true" fill="#213b5e" stroke="#213b5e" style="fill: #213b5e !important; stroke: #213b5e !important;"></rect>
+            <text class="actor" data-colored="true" fill="#ffffff" style="fill: #ffffff !important;"><tspan data-colored="true" fill="#ffffff" style="fill: #ffffff !important;">Alice</tspan></text>
+          </g>
+        </svg>
+      `);
+
+      // Exporting in light mode (isDark: false) converts #213b5e -> #cfe2f3 and text -> #0f172a
+      const lightExport = prepareSvgForExport(svgWithColoredActor, { isDark: false });
+      const lightDiv = document.createElement('div');
+      lightDiv.innerHTML = lightExport;
+      const lightRect = lightDiv.querySelector('rect.actor')!;
+      const lightText = lightDiv.querySelector('text.actor')!;
+      expect(lightRect.getAttribute('fill')).toBe('#cfe2f3');
+      expect(lightText.getAttribute('fill')).toBe('#0f172a');
+
+      // Exporting that light-colored SVG in dark mode (isDark: true) converts #cfe2f3 -> #213b5e and text -> #ffffff
+      const lightSvgEl = lightDiv.querySelector('svg') as SVGElement;
+      const darkExport = prepareSvgForExport(lightSvgEl, { isDark: true });
+      const darkDiv = document.createElement('div');
+      darkDiv.innerHTML = darkExport;
+      const darkRect = darkDiv.querySelector('rect.actor')!;
+      const darkText = darkDiv.querySelector('text.actor')!;
+      expect(darkRect.getAttribute('fill')).toBe('#213b5e');
+      expect(darkText.getAttribute('fill')).toBe('#ffffff');
+    });
+
     it('embeds sticky notes into SVG with cards, headers, pins, and text', () => {
       const svg = createSvgElement();
       const sampleNotes: StickyNote[] = [

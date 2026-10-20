@@ -4,7 +4,7 @@ import { buildActorRewriteMap, transformActors } from './preprocessor';
 import { parseModel, MessageElement, EdgeElement } from './model';
 import { updateViewsData, DiagramConfig } from './views';
 import { createSequenceDiagram, createFlowchartDiagram, parseConfig, renderPipeline, applyStyles, svgText } from './editorTestHarness';
-import { setArrowStyle, setActorColor, addTag } from './editor';
+import { setArrowStyle, setActorColor, addTag, PRESET_ACTOR_COLORS, PRESET_ACTOR_COLORS_LIGHT } from './editor';
 import { buildSelectionMap, zipModelToSvg } from './svgmap';
 import { SEQ_SVG, SEQ_CODE, FLOW_SVG, FLOW_CODE, parseSvgRoot } from './svgTestFixtures';
 
@@ -747,6 +747,40 @@ describe('applyNodeColors', () => {
 
     // Uncolored actor does not have data-colored and receives default dark mode styles
     expect(topB.getAttribute('data-colored')).toBeNull();
+  });
+
+  it('adapts preset actor colors and text contrast when theme changes between dark and default (light)', () => {
+    const config: DiagramConfig = {
+      version: 1,
+      actors: { A: { color: PRESET_ACTOR_COLORS[0] } },
+    };
+
+    // In light mode ('default'), dark preset color maps to light preset color with dark text (#0f172a)
+    const lightOut = applyNodeColors(SEQ_SVG, config, 'default');
+    const lightRoot = parseSvgRoot(lightOut);
+    const lightRect = lightRoot.querySelector('g[data-id="A"] rect.actor')!;
+    const lightText = lightRoot.querySelector('g[data-id="A"] text.actor')!;
+    expect(lightRect.getAttribute('fill')).toBe(PRESET_ACTOR_COLORS_LIGHT[0]);
+    expect(styleOf(lightRect).fill).toBe(rgb(PRESET_ACTOR_COLORS_LIGHT[0]));
+    expect(styleOf(lightText).fill).toBe(rgb('#0f172a'));
+
+    // In dark mode ('dark'), light preset color maps back to dark preset color with white text (#ffffff)
+    const lightConfig: DiagramConfig = {
+      version: 1,
+      actors: { A: { color: PRESET_ACTOR_COLORS_LIGHT[0] } },
+    };
+    const darkOut = applyNodeColors(SEQ_SVG, lightConfig, 'dark');
+    const darkRoot = parseSvgRoot(darkOut);
+    const darkRect = darkRoot.querySelector('g[data-id="A"] rect.actor')!;
+    const darkText = darkRoot.querySelector('g[data-id="A"] text.actor')!;
+    expect(darkRect.getAttribute('fill')).toBe(PRESET_ACTOR_COLORS[0]);
+    expect(styleOf(darkRect).fill).toBe(rgb(PRESET_ACTOR_COLORS[0]));
+    expect(styleOf(darkText).fill).toBe(rgb('#ffffff'));
+
+    // Flowchart nodes also adapt preset colors to the active theme
+    const flowLightOut = applyNodeColors(FLOW_SVG, config, 'default');
+    const flowLightNode = parseSvgRoot(flowLightOut).querySelector('g.node[id$="-A-0"] .label-container')!;
+    expect(styleOf(flowLightNode).fill).toBe(rgb(PRESET_ACTOR_COLORS_LIGHT[0]));
   });
 
   it('is a no-op when actors or colors are missing', () => {

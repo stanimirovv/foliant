@@ -3,7 +3,7 @@ import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
   deleteElement, deleteElements, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
   getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, moveEdgeEndpoint, MessageInsertPosition,
-  PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
+  PRESET_ACTOR_COLORS, PRESET_ACTOR_COLORS_LIGHT, getPresetActorColors, resolveActorColorForTheme, getNextFreeActorColor, convertDiagramToAnimatedArrows,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, groupNodes, toggleDiagramOrientation, insertMessage,
   toggleNumberedSteps, hasNumberedSteps, addSequenceNote, editNoteText, setNotePlacement, setNoteSpan,
   setBlockTitle, setBlockType, unwrapBlock, deleteBlock, hexToRgbColor, rgbToHexColor, DEFAULT_RECT_COLOR,
@@ -980,6 +980,34 @@ describe('addParticipant', () => {
     for (const c of PRESET_ACTOR_COLORS) {
       expect(c).toMatch(/^#[0-9a-f]{6}$/i);
     }
+  });
+
+  it('has 40 unique light-mode preset colors aligned with dark presets and assigns them when theme is default', () => {
+    expect(PRESET_ACTOR_COLORS_LIGHT.length).toBe(40);
+    const uniqueLight = new Set(PRESET_ACTOR_COLORS_LIGHT.map(c => c.toLowerCase()));
+    expect(uniqueLight.size).toBe(40);
+
+    for (const c of PRESET_ACTOR_COLORS_LIGHT) {
+      expect(c).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+
+    expect(getPresetActorColors('default')).toBe(PRESET_ACTOR_COLORS_LIGHT);
+    expect(getPresetActorColors('dark')).toBe(PRESET_ACTOR_COLORS);
+
+    // Creating a participant in light mode assigns from PRESET_ACTOR_COLORS_LIGHT
+    const code = `sequenceDiagram\n    A->>B: Hello`;
+    const res1 = addParticipant(code, null, undefined, undefined, 'participant', 'default');
+    expect(res1.config?.actors?.New1?.color).toBe(PRESET_ACTOR_COLORS_LIGHT[0]);
+
+    // Creating the next participant in dark mode recognizes index 0 is taken and assigns PRESET_ACTOR_COLORS[1]
+    const res2 = addParticipant(res1.code, res1.config, undefined, undefined, 'participant', 'dark');
+    expect(res2.config?.actors?.New2?.color).toBe(PRESET_ACTOR_COLORS[1]);
+
+    // resolveActorColorForTheme maps between light and dark palettes and preserves custom colors
+    expect(resolveActorColorForTheme(PRESET_ACTOR_COLORS[0], 'default')).toBe(PRESET_ACTOR_COLORS_LIGHT[0]);
+    expect(resolveActorColorForTheme(PRESET_ACTOR_COLORS_LIGHT[0], 'dark')).toBe(PRESET_ACTOR_COLORS[0]);
+    expect(resolveActorColorForTheme('rgb(33, 59, 94)', 'default')).toBe(PRESET_ACTOR_COLORS_LIGHT[0]);
+    expect(resolveActorColorForTheme('#ff0000', 'default')).toBe('#ff0000');
   });
 });
 

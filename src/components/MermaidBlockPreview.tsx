@@ -13,6 +13,7 @@ import {
 } from '@/lib/diagramView';
 import { WALKTHROUGH_MIN_ZOOM, WALKTHROUGH_MAX_ZOOM } from '@/lib/walkthrough';
 import { useWalkthroughPlayback } from '@/lib/useWalkthroughPlayback';
+import { applyNodeColors } from '@/lib/styling';
 import WalkthroughBar from './WalkthroughBar';
 
 export interface MermaidBlockPreviewProps {
@@ -199,8 +200,9 @@ export default function MermaidBlockPreview({
         try {
           const { svg } = await mermaid.render(id, renderInput.code);
           if (cancelled) return;
-          lastGoodRef.current = svg;
-          setSvg(svg);
+          const styled = applyNodeColors(svg, config, theme);
+          lastGoodRef.current = styled;
+          setSvg(styled);
           setError(null);
         } catch (err: unknown) {
           // mermaid 12 renders parse failures into a temp element

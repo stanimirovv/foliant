@@ -6,6 +6,7 @@ import { ActorTransformOptions, buildActorRewriteMap } from './preprocessor';
 import { ArrowStyle, DiagramConfig, ArrowAnimationType } from './views';
 import { DiagramModel, ModelElement } from './model';
 import { zipModelToSvg, EDGE_HIT_CLASS } from './svgmap';
+import { resolveActorColorForTheme } from './editor';
 
 export interface AnimatedArrowPreset {
   id: ArrowAnimationType;
@@ -688,7 +689,7 @@ function resolveNodeColor(nodeId: string, config: DiagramConfig): string | null 
   return meta && meta.color ? meta.color : null;
 }
 
-function isLightColor(colorStr: string): boolean {
+export function isLightColor(colorStr: string): boolean {
   const c = colorStr.trim().toLowerCase();
   if (c.startsWith('#')) {
     const raw = c.slice(1);
@@ -709,7 +710,11 @@ function isLightColor(colorStr: string): boolean {
   return lightNames.includes(c);
 }
 
-export function applyNodeColors(svg: string, config: DiagramConfig | null): string {
+export function applyNodeColors(
+  svg: string,
+  config: DiagramConfig | null,
+  theme?: 'default' | 'dark',
+): string {
   if (!config || !config.actors) return svg;
   const root = parseSvgRoot(svg);
   if (!root) return svg;
@@ -726,8 +731,9 @@ export function applyNodeColors(svg: string, config: DiagramConfig | null): stri
         if (!id) return;
         const m = id.match(/-flowchart-(.+)-(\d+)$/);
         if (!m) return;
-        const color = resolveNodeColor(m[1], config);
-        if (!color) return;
+        const rawColor = resolveNodeColor(m[1], config);
+        if (!rawColor) return;
+        const color = theme ? resolveActorColorForTheme(rawColor, theme) : rawColor;
         const shape = g.querySelector('.label-container');
         if (!shape) return;
         (shape as Styleable).style.fill = color;
@@ -742,8 +748,9 @@ export function applyNodeColors(svg: string, config: DiagramConfig | null): stri
     if (actorEntries.length === 0) return svg;
 
     for (const actorId of actorEntries) {
-      const color = resolveNodeColor(actorId, config);
-      if (!color) continue;
+      const rawColor = resolveNodeColor(actorId, config);
+      if (!rawColor) continue;
+      const color = theme ? resolveActorColorForTheme(rawColor, theme) : rawColor;
       const textColor = isLightColor(color) ? '#0f172a' : '#ffffff';
 
       // 1. Participant top groups: g[data-et="participant"]

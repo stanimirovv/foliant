@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { X, Trash2, ChevronDown, ChevronUp, Play } from 'lucide-react';
 import { ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, NoteElement, StickyNoteElement, BlockElement, BlockType, DiagramType, NodeShape, ParticipantType, NotePlacement } from '@/lib/model';
-import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS, hexToRgbColor, rgbToHexColor, DEFAULT_RECT_COLOR } from '@/lib/editor';
+import { ArrowStylePatch, ArrowTagInfo, PRESET_ACTOR_COLORS, getPresetActorColors, resolveActorColorForTheme, hexToRgbColor, rgbToHexColor, DEFAULT_RECT_COLOR } from '@/lib/editor';
 import { DiagramConfig, ArrowKeyMode, ArrowAnimationType, ArrowStyleDefaults, StickyNote, StickyNoteColor } from '@/lib/views';
 import { ANIMATED_ARROW_PRESETS } from '@/lib/styling';
 import AnimatedArrowSelector from './AnimatedArrowSelector';
@@ -86,6 +86,7 @@ interface EditorPanelProps {
   selectedElements?: ModelElement[];  // all selected raw elements
   elementsTagInfo?: ElementTagItem[]; // tag details for all selected elements
   diagramType: DiagramType;
+  theme?: 'default' | 'dark';
   config: DiagramConfig | null;   // current CONFIG (field values + datalists)
   arrowStyle: ArrowStylePatch | null;  // current style of the selected message/edge
   arrowTags: ArrowTagInfo | null; // tags of the selected message/edge (own + behavior)
@@ -162,6 +163,7 @@ export default function EditorPanel({
   selectedElements,
   elementsTagInfo,
   diagramType,
+  theme = 'dark',
   config,
   arrowStyle,
   arrowTags,
@@ -286,6 +288,7 @@ export default function EditorPanel({
         <ParticipantFields
           key={activeElement.key}
           element={activeElement}
+          theme={theme}
           config={config}
           actorColors={actorColors}
           actorKeys={actorKeys}
@@ -912,6 +915,7 @@ function MultiElementFields({
 
 interface ComponentFieldsProps {
   element: ParticipantElement | NodeElement;
+  theme?: 'default' | 'dark';
   config: DiagramConfig | null;
   actorColors: string[];
   actorKeys: string[];
@@ -926,12 +930,14 @@ interface ComponentFieldsProps {
 }
 
 function ParticipantFields({
-  element, config, actorColors, actorKeys, inheritedTags,
+  element, theme = 'dark', config, actorColors, actorKeys, inheritedTags,
   onEditLabel, onSetColor, onSetParticipantKind, onSetNodeShape, onAddTag, onRemoveTag, onRequestDelete,
 }: ComponentFieldsProps) {
   const [tagInput, setTagInput] = useState('');
   const [existingTagSelect, setExistingTagSelect] = useState('');
   const meta = config?.actors?.[element.id];
+  const effectiveColor = meta?.color ? resolveActorColorForTheme(meta.color, theme) : undefined;
+  const presetPalette = getPresetActorColors(theme);
   const label = element.kind === 'participant' ? (element.alias ?? '') : (element.label ?? '');
   const tags = meta?.keys ?? [];
 
@@ -995,11 +1001,11 @@ function ParticipantFields({
                 data-testid="actor-color-picker"
                 className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
                 list="editor-actor-color-list"
-                value={colorToHex(meta?.color)}
+                value={colorToHex(effectiveColor)}
                 onChange={(e) => onSetColor(e.target.value)}
               />
-              <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={meta?.color || 'Default'}>
-                {meta?.color || 'Default'}
+              <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={effectiveColor || 'Default'}>
+                {effectiveColor || 'Default'}
               </span>
               {meta?.color && (
                 <span
@@ -1057,11 +1063,11 @@ function ParticipantFields({
                 data-testid="actor-color-picker"
                 className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
                 list="editor-actor-color-list"
-                value={colorToHex(meta?.color)}
+                value={colorToHex(effectiveColor)}
                 onChange={(e) => onSetColor(e.target.value)}
               />
-              <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={meta?.color || 'Default'}>
-                {meta?.color || 'Default'}
+              <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={effectiveColor || 'Default'}>
+                {effectiveColor || 'Default'}
               </span>
               {meta?.color && (
                 <span
@@ -1101,11 +1107,11 @@ function ParticipantFields({
               data-testid="actor-color-picker"
               className="h-8 w-12 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5"
               list="editor-actor-color-list"
-              value={colorToHex(meta?.color)}
+              value={colorToHex(effectiveColor)}
               onChange={(e) => onSetColor(e.target.value)}
             />
             <span className="text-xs text-gray-500 dark:text-slate-400 font-mono flex-1">
-              {meta?.color || 'Default'}
+              {effectiveColor || 'Default'}
             </span>
             {meta?.color && (
               <span
@@ -1139,8 +1145,8 @@ function ParticipantFields({
       <div>
         <span className="text-[11px] text-gray-500 dark:text-slate-400 block mb-1">Preset Tones</span>
         <div className="flex flex-wrap gap-1.5" data-testid="actor-color-presets">
-          {PRESET_ACTOR_COLORS.slice(0, 10).map((c) => {
-            const isSelected = meta?.color?.toLowerCase() === c.toLowerCase();
+          {presetPalette.slice(0, 10).map((c) => {
+            const isSelected = effectiveColor?.toLowerCase() === c.toLowerCase();
             return (
               <button
                 key={c}

@@ -1986,7 +1986,7 @@ export default function ClientPage() {
 
   const handleAddParticipant = () => {
     const afterKey = selectedComponent ? selectedComponent.key : undefined;
-    applyEditResult(addParticipant(rawCode, viewsData, afterKey));
+    applyEditResult(addParticipant(rawCode, viewsData, afterKey, undefined, 'participant', theme));
   };
 
   const handleAddMessage = () => {
@@ -3150,6 +3150,7 @@ export default function ClientPage() {
                         selectedElements={selectedRawElements}
                         elementsTagInfo={selectedElementsTagInfo}
                         diagramType={rawModel.type}
+                        theme={theme}
                         config={viewsData}
                         arrowStyle={selectedArrowStyle}
                         arrowTags={selectedArrowTags}
@@ -3213,6 +3214,7 @@ export default function ClientPage() {
                       selectedElements={selectedRawElements}
                       elementsTagInfo={selectedElementsTagInfo}
                       diagramType={rawModel.type}
+                      theme={theme}
                       config={viewsData}
                       arrowStyle={selectedArrowStyle}
                       arrowTags={selectedArrowTags}
