@@ -12,11 +12,11 @@ import { extractRegions, RegionNode } from '@/lib/parser';
 import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
-import { parseModel, ModelElement, NodeShape, ParticipantType, StickyNoteElement, NotePlacement, BlockType } from '@/lib/model';
+import { parseModel, ModelElement, MessageElement, EdgeElement, NodeShape, ParticipantType, StickyNoteElement, NotePlacement, BlockType } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
 import mermaid from 'mermaid';
 import {
-  editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement,
+  editMessageLabel, renameParticipant, addParticipant, addMessage, deleteElement, deleteElements,
   setArrowType, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
   getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, convertDiagramToAnimatedArrows,
   moveNode, moveMessage, moveMessageEndpoint, moveEdgeEndpoint, EditResult, ArrowStylePatch, MessageInsertPosition,
@@ -135,7 +135,7 @@ export default function ClientPage() {
   // New file dialog: create a brand-new .mmd diagram or .md architecture
   // document in the current directory (the user picks the file name and the
   // kind) and open it.
-  const [pendingNew, setPendingNew] = useState(false);
+  const [pendingNew, setPendingNew] = useState<NewFileKind | null>(null);
 
   // Auto-save state (EDITING_PLAN.md Section 4.10): lastWrittenRef holds the
   // exact content string of the last successful POST. The auto-save effect
@@ -1560,11 +1560,29 @@ export default function ClientPage() {
   const selectedArrow = selectedRawElement && (selectedRawElement.kind === 'message' || selectedRawElement.kind === 'edge')
     ? selectedRawElement
     : null;
-
-  const selectedArrowStyle = useMemo(
-    () => (selectedArrow ? getArrowStyle(rawCode, viewsData, selectedArrow.key) : null),
-    [selectedArrow, rawCode, viewsData]
+  const selectedArrows = useMemo(
+    () => selectedRawElements.filter((e): e is MessageElement | EdgeElement => e.kind === 'message' || e.kind === 'edge'),
+    [selectedRawElements]
   );
+
+  const selectedArrowStyle = useMemo<ArrowStylePatch | null>(() => {
+    if (selectedArrows.length === 0) return null;
+    if (selectedArrows.length === 1) {
+      return getArrowStyle(rawCode, viewsData, selectedArrows[0].key);
+    }
+    const styles = selectedArrows.map(a => getArrowStyle(rawCode, viewsData, a.key));
+    const first = styles[0] ?? { dash: 'solid' as const };
+    const sameColor = styles.every(s => (s?.color ?? undefined) === (first.color ?? undefined));
+    const sameWidth = styles.every(s => (s?.width ?? undefined) === (first.width ?? undefined));
+    const sameDash = styles.every(s => (s?.dash ?? 'solid') === (first.dash ?? 'solid'));
+    const sameAnim = styles.every(s => (s?.animation ?? 'none') === (first.animation ?? 'none'));
+    return {
+      color: sameColor ? first.color : undefined,
+      width: sameWidth ? first.width : undefined,
+      dash: sameDash ? (first.dash ?? 'solid') : 'solid',
+      ...(sameAnim && first.animation ? { animation: first.animation } : {}),
+    };
+  }, [selectedArrows, rawCode, viewsData]);
 
   const selectedArrowTags = useMemo(
     () => (selectedArrow ? getArrowTags(rawCode, viewsData, selectedArrow.key) : null),
@@ -1593,10 +1611,10 @@ export default function ClientPage() {
     [selectedStickyNote, viewsData]
   );
 
-  // Current arrow style as a complete patch (setArrowStyle replaces the whole
-  // entry, so single-field edits must carry the other fields along).
-  const currentArrowPatch = (): ArrowStylePatch => {
-    const cur = selectedArrowStyle ?? {};
+  // Current arrow style as a complete patch for a given arrow key (setArrowStyle
+  // replaces the whole entry, so single-field edits carry the other fields along).
+  const arrowPatchForKey = (code: string, config: DiagramConfig | null, key: string): ArrowStylePatch => {
+    const cur = getArrowStyle(code, config, key) ?? {};
     return {
       color: cur.color,
       width: cur.width,
@@ -1646,24 +1664,57 @@ export default function ClientPage() {
 
     if (selectedComponent) {
       applyEditResult(setActorColor(rawCode, viewsData, selectedComponent.key, color));
-    } else if (selectedArrow) {
-      const patch = currentArrowPatch();
-      patch.color = color.trim() || undefined;
-      applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+    } else if (selectedArrows.length > 0) {
+      let currentCode = rawCode;
+      let currentConfig = viewsData;
+      for (const arrow of selectedArrows) {
+        const patch = arrowPatchForKey(currentCode, currentConfig, arrow.key);
+        patch.color = color.trim() || undefined;
+        const res = setArrowStyle(currentCode, currentConfig, arrow.key, patch);
+        if (res.warning) {
+          setEditWarning(res.warning);
+          return;
+        }
+        currentCode = res.code;
+        currentConfig = res.config;
+      }
+      applyEditResult({ code: currentCode, config: currentConfig });
     }
   };
 
   const handleSetType = (operator: string) => {
-    if (!selectedArrow) return;
-    if (selectedArrow.operator === operator) return;
-    applyEditResult(setArrowType(rawCode, viewsData, selectedArrow.key, operator));
+    if (selectedArrows.length === 0) return;
+    let currentCode = rawCode;
+    let currentConfig = viewsData;
+    for (const arrow of selectedArrows) {
+      if (arrow.operator === operator) continue;
+      const res = setArrowType(currentCode, currentConfig, arrow.key, operator);
+      if (res.warning) {
+        setEditWarning(res.warning);
+        return;
+      }
+      currentCode = res.code;
+      currentConfig = res.config;
+    }
+    applyEditResult({ code: currentCode, config: currentConfig });
   };
 
   const handleSetWidth = (width: number | '') => {
-    if (!selectedArrow) return;
-    const patch = currentArrowPatch();
-    patch.width = width === '' ? undefined : width;
-    applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+    if (selectedArrows.length === 0) return;
+    let currentCode = rawCode;
+    let currentConfig = viewsData;
+    for (const arrow of selectedArrows) {
+      const patch = arrowPatchForKey(currentCode, currentConfig, arrow.key);
+      patch.width = width === '' ? undefined : width;
+      const res = setArrowStyle(currentCode, currentConfig, arrow.key, patch);
+      if (res.warning) {
+        setEditWarning(res.warning);
+        return;
+      }
+      currentCode = res.code;
+      currentConfig = res.config;
+    }
+    applyEditResult({ code: currentCode, config: currentConfig });
   };
 
   // All-arrows default style (CONFIG.defaultArrowStyle): the fallback for
@@ -1677,24 +1728,47 @@ export default function ClientPage() {
   };
 
   const handleSetDash = (dash: 'solid' | 'dashed' | 'dotted') => {
-    if (!selectedArrow) return;
-    const patch = currentArrowPatch();
-    patch.dash = dash === 'solid' ? undefined : dash;
-    applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+    if (selectedArrows.length === 0) return;
+    let currentCode = rawCode;
+    let currentConfig = viewsData;
+    for (const arrow of selectedArrows) {
+      const patch = arrowPatchForKey(currentCode, currentConfig, arrow.key);
+      patch.dash = dash === 'solid' ? undefined : dash;
+      const res = setArrowStyle(currentCode, currentConfig, arrow.key, patch);
+      if (res.warning) {
+        setEditWarning(res.warning);
+        return;
+      }
+      currentCode = res.code;
+      currentConfig = res.config;
+    }
+    applyEditResult({ code: currentCode, config: currentConfig });
   };
 
   const handleSetAnimation = (animation: ArrowAnimationType) => {
-    if (!selectedArrow) return;
-    const patch = currentArrowPatch();
-    const isCurrentlyAnimated = Boolean(selectedArrowStyle?.animation && selectedArrowStyle.animation !== 'none');
-    patch.animation = animation === 'none' ? undefined : animation;
+    if (selectedArrows.length === 0) return;
+    let currentCode = rawCode;
+    let currentConfig = viewsData;
+    for (const arrow of selectedArrows) {
+      const curStyle = getArrowStyle(currentCode, currentConfig, arrow.key);
+      const patch = arrowPatchForKey(currentCode, currentConfig, arrow.key);
+      const isCurrentlyAnimated = Boolean(curStyle?.animation && curStyle.animation !== 'none');
+      patch.animation = animation === 'none' ? undefined : animation;
 
-    if (animation !== 'none' && !isCurrentlyAnimated) {
-      const isError = ANIMATED_ARROW_PRESETS.some(p => p.id === animation && p.isError);
-      const inheritedColor = isError ? lastErrorColor : lastPositiveColor;
-      patch.color = inheritedColor;
+      if (animation !== 'none' && !isCurrentlyAnimated) {
+        const isError = ANIMATED_ARROW_PRESETS.some(p => p.id === animation && p.isError);
+        const inheritedColor = isError ? lastErrorColor : lastPositiveColor;
+        patch.color = inheritedColor;
+      }
+      const res = setArrowStyle(currentCode, currentConfig, arrow.key, patch);
+      if (res.warning) {
+        setEditWarning(res.warning);
+        return;
+      }
+      currentCode = res.code;
+      currentConfig = res.config;
     }
-    applyEditResult(setArrowStyle(rawCode, viewsData, selectedArrow.key, patch));
+    applyEditResult({ code: currentCode, config: currentConfig });
   };
 
   const handleConvertDiagram = () => {
@@ -1784,6 +1858,20 @@ export default function ClientPage() {
   };
 
   const handleRequestDelete = () => {
+    if (selectedRawElements.length > 1) {
+      const result = deleteElements(
+        rawCode,
+        viewsData,
+        selectedRawElements.map(e => e.key),
+      );
+      if (result.warning) {
+        setEditWarning(result.warning);
+        return;
+      }
+      applyEditResult(result);
+      setSelection(null);
+      return;
+    }
     if (!selectedRawElement) return;
     // Sticky notes are CONFIG annotations: delete the note entry directly
     // (no line-surgical transform, no cascaded elements).
@@ -1886,7 +1974,7 @@ export default function ClientPage() {
     } else {
       setFiles(prev => [...prev, name].sort());
     }
-    setPendingNew(false);
+    setPendingNew(null);
     const params = new URLSearchParams(searchParams.toString());
     params.set('file', name);
     params.delete('diagram');
@@ -2244,14 +2332,24 @@ export default function ClientPage() {
           <div className="mb-6">
             <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2 flex items-center`}>
               <Folder size={14} className="mr-1" /> Files
-              <button
-                data-testid="new-diagram"
-                title="New file"
-                onClick={() => setPendingNew(true)}
-                className={`ml-auto normal-case font-normal ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500 hover:text-blue-600'} flex items-center space-x-0.5`}
-              >
-                <Plus size={12} /> New
-              </button>
+              <div className="ml-auto flex items-center space-x-2">
+                <button
+                  data-testid="new-diagram"
+                  title="New diagram file"
+                  onClick={() => setPendingNew('sequence')}
+                  className={`normal-case font-normal ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500 hover:text-blue-600'} flex items-center space-x-0.5`}
+                >
+                  <Plus size={12} /> New
+                </button>
+                <button
+                  data-testid="new-markdown"
+                  title="New markdown file"
+                  onClick={() => setPendingNew('markdown')}
+                  className={`normal-case font-normal ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-500 hover:text-blue-600'} flex items-center space-x-0.5`}
+                >
+                  <Plus size={12} /> New MD
+                </button>
+              </div>
             </h2>
             {filesError && (
               <p className="text-xs text-red-500 mb-1" data-testid="files-error">
@@ -2938,7 +3036,7 @@ export default function ClientPage() {
               <BottomAnimatedArrowBar
                 currentAnimation={selectedArrowStyle?.animation}
                 currentColor={selectedArrowStyle?.color}
-                hasSelectedArrow={Boolean(selectedArrow)}
+                hasSelectedArrow={selectedArrows.length > 0}
                 onSelectAnimation={handleSetAnimation}
                 onSelectColor={handleSetColor}
                 onConvertDiagram={handleConvertDiagram}
@@ -3034,6 +3132,9 @@ export default function ClientPage() {
                         config={viewsData}
                         arrowStyle={selectedArrowStyle}
                         arrowTags={selectedArrowTags}
+                        globalArrowStyle={viewsData?.defaultArrowStyle ?? null}
+                        onSetGlobalColor={handleSetGlobalColor}
+                        onSetGlobalWidth={handleSetGlobalWidth}
                         noteTags={selectedNoteTags}
                         noteActorIds={noteActorIds}
                         onEditNoteText={handleEditNoteText}
@@ -3063,6 +3164,7 @@ export default function ClientPage() {
                         onSetNodeShape={handleSetNodeShape}
                         onToggleActivation={handleToggleActivation}
                         onGroupParticipants={handleGroupParticipants}
+                        onGroupNodes={handleGroupNodes}
                         onRequestDelete={handleRequestDelete}
                         onConfirmDelete={handleConfirmDelete}
                         onCancelDelete={handleCancelDelete}
@@ -3155,8 +3257,9 @@ export default function ClientPage() {
 
       {pendingNew && (
         <NewDiagramDialog
+          initialKind={pendingNew}
           onCreate={createNewFile}
-          onCancel={() => setPendingNew(false)}
+          onCancel={() => setPendingNew(null)}
         />
       )}
     </div>
@@ -3164,14 +3267,16 @@ export default function ClientPage() {
 }
 
 function NewDiagramDialog({
+  initialKind = 'sequence',
   onCreate,
   onCancel,
 }: {
+  initialKind?: NewFileKind;
   onCreate: (name: string, kind: NewFileKind) => Promise<string | null>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<NewFileKind>('sequence');
+  const [kind, setKind] = useState<NewFileKind>(initialKind);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 

@@ -263,14 +263,22 @@ export default function EditorPanel({
           elementsTagInfo={elementsTagInfo ?? []}
           actorKeys={actorKeys}
           diagramType={diagramType}
+          arrowStyle={arrowStyle}
+          arrowColors={arrowColors}
           wrapChecks={wrapChecks ?? null}
           regionTypes={regionTypes ?? []}
           onWrapInBlock={onWrapInBlock}
           onWrapInRegion={onWrapInRegion}
+          onSetColor={onSetColor}
+          onSetType={onSetType}
+          onSetWidth={onSetWidth}
+          onSetDash={onSetDash}
+          onSetAnimation={onSetAnimation}
           onAddTag={onAddTag}
           onRemoveTag={onRemoveTag}
           onGroupParticipants={onGroupParticipants}
           onGroupNodes={onGroupNodes}
+          onRequestDelete={onRequestDelete}
         />
       )}
       {!isMultiSelect && activeElement && isComponent(activeElement) && (
@@ -406,14 +414,22 @@ interface MultiElementFieldsProps {
   elementsTagInfo: ElementTagItem[];
   actorKeys: string[];
   diagramType: DiagramType;
+  arrowStyle: ArrowStylePatch | null;
+  arrowColors: string[];
   wrapChecks: { block: WrapCheck; region: WrapCheck } | null;
   regionTypes: string[];
   onWrapInBlock?: (blockType: BlockType, title?: string) => void;
   onWrapInRegion?: (type: string, value?: string) => void;
+  onSetColor: (color: string) => void;
+  onSetType: (operator: string) => void;
+  onSetWidth: (width: number | '') => void;
+  onSetDash: (dash: Dash) => void;
+  onSetAnimation?: (anim: ArrowAnimationType) => void;
   onAddTag: (tag: string, targetKey?: string) => void;
   onRemoveTag: (tag: string, targetKey?: string) => void;
   onGroupParticipants?: (participantKeys: string[], title: string, color?: string) => void;
   onGroupNodes?: (nodeKeys: string[], title: string) => void;
+  onRequestDelete: () => void;
 }
 
 function MultiElementFields({
@@ -421,14 +437,22 @@ function MultiElementFields({
   elementsTagInfo,
   actorKeys,
   diagramType,
+  arrowStyle,
+  arrowColors,
   wrapChecks,
   regionTypes,
   onWrapInBlock,
   onWrapInRegion,
+  onSetColor,
+  onSetType,
+  onSetWidth,
+  onSetDash,
+  onSetAnimation,
   onAddTag,
   onRemoveTag,
   onGroupParticipants,
   onGroupNodes,
+  onRequestDelete,
 }: MultiElementFieldsProps) {
   const [tagInput, setTagInput] = useState('');
   const [existingTagSelect, setExistingTagSelect] = useState('');
@@ -443,10 +467,18 @@ function MultiElementFields({
 
   const participants = elements.filter((el): el is ParticipantElement => el.kind === 'participant');
   const nodes = elements.filter((el): el is NodeElement => el.kind === 'node');
+  const arrows = elements.filter(isArrow);
   // Only messages and notes are wrappable (W4); the panel counts them for the
   // ≥2 requirement, participants keep the Box group control.
   const wrappable = elements.filter(el => el.kind === 'message' || el.kind === 'note');
   const showWrap = diagramType === 'sequence' && wrappable.length >= 2 && Boolean(onWrapInBlock && onWrapInRegion);
+
+  const vocabulary = diagramType === 'flowchart' ? FLOWCHART_OPERATORS : SEQUENCE_OPERATORS;
+  const allSameOperator = arrows.length > 0 && arrows.every(a => a.operator === arrows[0].operator);
+  const currentOperator = allSameOperator ? arrows[0].operator : '';
+  const operators = allSameOperator && !vocabulary.includes(arrows[0].operator)
+    ? [arrows[0].operator, ...vocabulary]
+    : vocabulary;
 
   const submitTag = () => {
     const tag = tagInput.trim();
@@ -471,6 +503,118 @@ function MultiElementFields({
           Hold Shift and click elements in the diagram to add or remove them.
         </p>
       </div>
+
+      {arrows.length > 0 && (
+        <div
+          className="space-y-3 border border-gray-200 dark:border-slate-800 bg-gray-50/40 dark:bg-slate-800/30 rounded p-2.5"
+          data-testid="multi-arrow-fields"
+        >
+          <span className={fieldLabel}>
+            Arrow Style ({arrows.length} {arrows.length === 1 ? 'arrow' : 'arrows'})
+          </span>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className={fieldLabel}>Type</span>
+              <select
+                className={fieldInput}
+                data-testid="multi-arrow-type"
+                value={currentOperator}
+                onChange={(e) => {
+                  if (e.target.value) onSetType(e.target.value);
+                }}
+              >
+                {!allSameOperator && <option value="" disabled>Mixed</option>}
+                {operators.map(op => <option key={op} value={op}>{op}</option>)}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className={fieldLabel}>Color</span>
+              <div className="flex items-center space-x-1.5">
+                <input
+                  type="color"
+                  aria-label="Color"
+                  data-testid="arrow-color-picker"
+                  className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
+                  list="editor-multi-arrow-color-list"
+                  value={colorToHex(arrowStyle?.color, '#00ff9d')}
+                  onChange={(e) => onSetColor(e.target.value)}
+                />
+                <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={arrowStyle?.color || 'Default'}>
+                  {arrowStyle?.color || 'Default'}
+                </span>
+                {arrowStyle?.color && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Clear color"
+                    data-testid="clear-arrow-color"
+                    title="Reset to default color"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onSetColor('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSetColor('');
+                      }
+                    }}
+                    className="text-xs text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-200 px-1 py-0.5 rounded border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer select-none shrink-0"
+                  >
+                    Clear
+                  </span>
+                )}
+              </div>
+              <datalist id="editor-multi-arrow-color-list">
+                {arrowColors.map(c => <option key={c} value={c} />)}
+              </datalist>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className={fieldLabel}>Width</span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                className={fieldInput}
+                placeholder="1-10"
+                data-testid="multi-arrow-width"
+                value={arrowStyle?.width ?? ''}
+                onChange={(e) => onSetWidth(e.target.value === '' ? '' : Number(e.target.value))}
+              />
+            </label>
+
+            <label className="block">
+              <span className={fieldLabel}>Dash</span>
+              <select
+                className={fieldInput}
+                data-testid="multi-arrow-dash"
+                value={arrowStyle?.dash ?? 'solid'}
+                onChange={(e) => onSetDash(e.target.value as Dash)}
+              >
+                {DASH_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </label>
+          </div>
+
+          {onSetAnimation && (
+            <div className="pt-2 border-t border-gray-200 dark:border-slate-800">
+              <AnimatedArrowSelector
+                currentAnimation={arrowStyle?.animation ?? 'none'}
+                currentColor={arrowStyle?.color ? colorToHex(arrowStyle?.color) : '#00ff9d'}
+                onSelectAnimation={onSetAnimation}
+                onSelectColor={onSetColor}
+                hasSelectedArrow={true}
+                compact={true}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {participants.length >= 2 && onGroupParticipants && (
         <div className="space-y-2 border border-emerald-100 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20 rounded p-2.5">
@@ -735,6 +879,8 @@ function MultiElementFields({
           ))}
         </div>
       </div>
+
+      <DeleteButton onRequestDelete={onRequestDelete} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   renameParticipant, editMessageLabel, setArrowType, addParticipant, addMessage,
-  deleteElement, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
+  deleteElement, deleteElements, setActorColor, addTag, removeTag, setArrowStyle, setGlobalArrowStyle, getArrowStyle,
   getArrowTags, getNoteTags, getStickyNoteTags, setArrowKeyMode, moveParticipant, moveNode, moveMessage, moveMessageEndpoint, moveEdgeEndpoint, MessageInsertPosition,
   PRESET_ACTOR_COLORS, getNextFreeActorColor, convertDiagramToAnimatedArrows,
   setParticipantKind, setNodeShape, toggleActivation, groupParticipants, groupNodes, toggleDiagramOrientation, insertMessage,
@@ -3940,4 +3940,56 @@ describe('insertMessage', () => {
     expect(res.code).toBe(`flowchart TD\n    A[Alice] --> B[Bob]\n    A -->|New message| B`);
   });
 });
+
+describe('deleteElements', () => {
+  it('deletes multiple arrows in a single pass and prunes their CONFIG arrow entries', () => {
+    const s1 = setArrowStyle(SEQ, SEQ_CFG, 'm:0', { color: '#ef4444' });
+    const s2 = setArrowStyle(s1.code, s1.config, 'm:1', { color: '#3b82f6' });
+    const s3 = setArrowStyle(s2.code, s2.config, 'm:2', { color: '#10b981' });
+
+    // Delete m:0 and m:2, keeping m:1
+    const res = deleteElements(s3.code, s3.config, ['m:0', 'm:2']);
+    expect(res.warning).toBeUndefined();
+    const model = parseModel(res.code);
+    const messages = model.elements.filter(e => e.kind === 'message');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ from: 'B', to: 'A', label: 'Hi' });
+    expect(res.config?.arrows).toEqual([
+      { from: 'B', to: 'A', label: 'Hi', color: '#3b82f6' },
+    ]);
+  });
+
+  it('deletes mixed elements including participants, notes, and sticky notes', () => {
+    const code = `%% CONFIG: {"version":1,"notes":[{"id":"note_1","x":10,"y":20,"text":"Sticky 1"},{"id":"note_2","x":30,"y":40,"text":"Sticky 2"}]}
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    participant C as Charlie
+    A->>B: Hello
+    B-->>C: Forward
+    Note over B,C: Check`;
+    const cfg = parseConfig(code);
+
+    const res = deleteElements(code, cfg, ['m:0', 'note:0', 'sticky:note_1']);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).not.toContain('A->>B: Hello');
+    expect(res.code).not.toContain('Note over B,C: Check');
+    expect(res.code).toContain('B-->>C: Forward');
+    expect(res.config?.notes).toEqual([{ id: 'note_2', x: 30, y: 40, text: 'Sticky 2' }]);
+  });
+
+  it('deletes multiple flowchart edges including chained edges cleanly', () => {
+    const code = `flowchart TD\n    A --> B --> C\n    C --> D`;
+    const res = deleteElements(code, null, ['e:0', 'e:2']);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A\n    B --> C\n    D`);
+  });
+
+  it('soft-fails when any key is unknown or unsupportable', () => {
+    const res = deleteElements(SEQ, SEQ_CFG, ['m:0', 'm:99']);
+    expect(res.warning).toBe('Unknown element key: m:99');
+    expect(res.code).toBe(SEQ);
+  });
+});
+
 

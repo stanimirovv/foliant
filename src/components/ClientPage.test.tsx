@@ -4188,3 +4188,114 @@ describe('ClientPage inline label editing (double-click on the canvas)', () => {
     expect(viewer.getAttribute('data-code')).toContain('Note over A,B: a note');
   }, 10000);
 });
+
+describe('ClientPage shift-select arrow controls, delete, and new markdown file button', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fileContent.current = '';
+    postControl.fail = false;
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('shift-selecting multiple arrows applies size, color, arrow type, and animation to every selected arrow and supports deleting them', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+
+    // Select m:0 and shift-select m:1
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    fireEvent.click(screen.getByTestId('select-m:1'), { shiftKey: true });
+
+    await screen.findByText('Selected Elements (2)');
+    expect(screen.getByTestId('multi-arrow-fields')).toBeTruthy();
+
+    // 1. Change arrow type to -x on all selected arrows
+    fireEvent.change(screen.getByTestId('multi-arrow-type'), { target: { value: '-x' } });
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('A-xB: Hello');
+      expect(code).toContain('B-xA: Hi there');
+    }, { timeout: 3000 });
+
+    // 2. Set color from color picker on all selected arrows
+    fireEvent.change(screen.getByTestId('arrow-color-picker'), { target: { value: '#9333ea' } });
+    await waitFor(() => {
+      const cfg = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(cfg?.arrows).toEqual([
+        expect.objectContaining({ from: 'A', to: 'B', label: 'Hello', color: '#9333ea' }),
+        expect.objectContaining({ from: 'B', to: 'A', label: 'Hi there', color: '#9333ea' }),
+      ]);
+    }, { timeout: 3000 });
+
+    // 3. Set width (size) on all selected arrows
+    fireEvent.change(screen.getByTestId('multi-arrow-width'), { target: { value: '4' } });
+    await waitFor(() => {
+      const cfg = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(cfg?.arrows).toEqual([
+        expect.objectContaining({ from: 'A', to: 'B', label: 'Hello', color: '#9333ea', width: 4 }),
+        expect.objectContaining({ from: 'B', to: 'A', label: 'Hi there', color: '#9333ea', width: 4 }),
+      ]);
+    }, { timeout: 3000 });
+
+    // 4. Set animation on all selected arrows from the shift-select menu
+    const panel = screen.getByTestId('multi-arrow-fields');
+    fireEvent.click(within(panel).getByTestId('select-animation-pulse'));
+    await waitFor(() => {
+      const cfg = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(cfg?.arrows).toEqual([
+        expect.objectContaining({ from: 'A', to: 'B', label: 'Hello', animation: 'pulse', width: 4 }),
+        expect.objectContaining({ from: 'B', to: 'A', label: 'Hi there', animation: 'pulse', width: 4 }),
+      ]);
+    }, { timeout: 3000 });
+
+    // 5. Existing shift-select capabilities (e.g. adding tag to all) still work
+    fireEvent.change(screen.getByTestId('multi-add-tag-input'), { target: { value: 'batch-tag' } });
+    fireEvent.click(screen.getByTestId('multi-add-tag'));
+    await waitFor(() => {
+      const cfg = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(cfg?.arrows?.[0]?.keys).toContain('batch-tag');
+      expect(cfg?.arrows?.[1]?.keys).toContain('batch-tag');
+    }, { timeout: 3000 });
+
+    // 6. Delete all selected arrows via the shift-select Delete button
+    fireEvent.click(screen.getByTestId('panel-delete'));
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).not.toContain('Hello');
+      expect(code).not.toContain('Hi there');
+      expect(code).toContain('participant A as Alice');
+      expect(code).toContain('participant B as Bob');
+    }, { timeout: 3000 });
+  }, 15000);
+
+  it('creates a new markdown file directly via the + New MD button in the Files menu', async () => {
+    mockParams({ file: 'demo.mmd' });
+    mockFetchWithFile(DEMO);
+    render(<ClientPage />);
+
+    const newMdBtn = await screen.findByTestId('new-markdown');
+    fireEvent.click(newMdBtn);
+
+    const dialog = await screen.findByTestId('new-diagram-dialog');
+    const typeSelect = within(dialog).getByTestId('new-diagram-type') as HTMLSelectElement;
+    // Pre-selected to markdown
+    expect(typeSelect.value).toBe('markdown');
+
+    const nameInput = within(dialog).getByTestId('new-diagram-name');
+    fireEvent.change(nameInput, { target: { value: 'architecture-doc' } });
+    fireEvent.click(within(dialog).getByTestId('new-diagram-create'));
+
+    await waitFor(() => {
+      expect(postCalls().length).toBe(1);
+    });
+    const [url, init] = postCalls()[0];
+    expect(String(url)).toContain('/api/file/architecture-doc.md');
+    const body = JSON.parse((init as { body: string }).body);
+    expect(body.content).toContain('# Architecture');
+    expect(body.content).toContain('```mermaid');
+
+    // Navigates to the new markdown file
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('file=architecture-doc.md'), { scroll: false });
+  });
+});
+

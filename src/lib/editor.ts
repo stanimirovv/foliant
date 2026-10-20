@@ -1559,6 +1559,180 @@ export function deleteElement(code: string, config: DiagramConfig | null, key: s
   };
 }
 
+// Delete multiple elements in one pass (resolving all keys against the initial
+// model so positional keys never shift mid-batch). Supports components,
+// messages/edges, sequence notes, blocks (with content) and sticky notes.
+export function deleteElements(code: string, config: DiagramConfig | null, keys: string[]): EditResult {
+  const uniqueKeys = [...new Set(keys)];
+  if (uniqueKeys.length === 0) return { code, config };
+
+  const stickyIds = new Set<string>();
+  const modelKeys: string[] = [];
+  for (const k of uniqueKeys) {
+    const sid = stickyNoteIdFromKey(k);
+    if (sid !== null) stickyIds.add(sid);
+    else modelKeys.push(k);
+  }
+
+  let newCode = code;
+  const cascaded: ModelElement[] = [];
+
+  const model = parseModel(code);
+  if (modelKeys.length > 0 && model.type === 'unknown') {
+    return fail(code, config, UNSUPPORTED);
+  }
+
+  const targets: ModelElement[] = [];
+  for (const k of modelKeys) {
+    const el = findElement(model, k);
+    if (!el) return fail(code, config, `Unknown element key: ${k}`);
+    if (!isComponent(el) && !isArrow(el) && el.kind !== 'note' && el.kind !== 'block') {
+      return fail(code, config, `Cannot delete element of kind '${el.kind}'`);
+    }
+    targets.push(el);
+  }
+
+  const removed = new Set<ModelElement>(targets);
+  if (targets.length > 0) {
+    // Cascade referencing messages/edges/notes of deleted components, and
+    // contained elements of deleted blocks.
+    const removedComponentIds = new Set<string>();
+    for (const el of targets) {
+      if (isComponent(el)) removedComponentIds.add(el.id);
+      if (el.kind === 'block') {
+        for (const e of model.elements) {
+          if (e.lineStart > el.lineStart && e.lineEnd <= el.lineEnd && isComponent(e)) {
+            removedComponentIds.add(e.id);
+          }
+        }
+      }
+    }
+    for (const e of model.elements) {
+      if (removed.has(e)) continue;
+      const inRemovedBlock = targets.some(
+        b => b.kind === 'block' && e.lineStart > b.lineStart && e.lineEnd <= b.lineEnd &&
+          (isComponent(e) || isArrow(e) || e.kind === 'note' || e.kind === 'block')
+      );
+      const refsRemovedComponent =
+        (isArrow(e) && (removedComponentIds.has(e.from) || removedComponentIds.has(e.to))) ||
+        (e.kind === 'note' && e.over.some(id => removedComponentIds.has(id)));
+      if (inRemovedBlock || refsRemovedComponent) {
+        cascaded.push(e);
+        removed.add(e);
+      }
+    }
+
+    const lines = code.split('\n');
+    const rewriteAt = new Map<number, string[]>();
+    if (model.type === 'flowchart') {
+      const firstDeclaredHere = (id: string, lineNo: number) =>
+        model.elements.some(e => e.kind === 'node' && e.id === id && e.lineStart === lineNo);
+      const byLine = new Map<number, ModelElement[]>();
+      for (const r of removed) {
+        if (r.lineStart !== r.lineEnd) continue;
+        const list = byLine.get(r.lineStart) ?? [];
+        list.push(r);
+        byLine.set(r.lineStart, list);
+      }
+      for (const [lineNo, rs] of byLine) {
+        const parsed = parseFlowchartLine(lines[lineNo]);
+        if (!parsed || parsed.segments.length === 0) continue;
+        const sameLineEdges = model.elements.filter(e => e.kind === 'edge' && e.lineStart === lineNo);
+        const removedSegments = new Set<number>();
+        const removedNodeIds = new Set<string>();
+        for (const r of rs) {
+          if (r.kind === 'node') removedNodeIds.add(r.id);
+          else if (r.kind === 'edge') {
+            const idx = sameLineEdges.findIndex(e => e.key === r.key);
+            if (idx >= 0) removedSegments.add(idx);
+          }
+        }
+        const keptSegment = parsed.segments.map((seg, idx) => {
+          if (removedSegments.has(idx)) return false;
+          return !removedNodeIds.has(parsed.endpoints[seg.from].id)
+            && !removedNodeIds.has(parsed.endpoints[seg.to].id);
+        });
+        const inKeptSegment = (epIdx: number) =>
+          keptSegment.some((kept, segIdx) => kept &&
+            (parsed.segments[segIdx].from === epIdx || parsed.segments[segIdx].to === epIdx));
+        const newLines: string[] = [];
+        let i = 0;
+        while (i < parsed.endpoints.length) {
+          const ep = parsed.endpoints[i];
+          if (!removedNodeIds.has(ep.id) && !inKeptSegment(i) && firstDeclaredHere(ep.id, lineNo)) {
+            newLines.push(`${parsed.indent}${lines[lineNo].slice(ep.start, ep.end)}`);
+            i++;
+            continue;
+          }
+          if (keptSegment[i]) {
+            let j = i;
+            while (j + 1 < keptSegment.length && keptSegment[j + 1]) j++;
+            newLines.push(`${parsed.indent}${lines[lineNo].slice(parsed.endpoints[i].start, parsed.endpoints[j + 1].end)}`);
+            i = j + 2;
+            continue;
+          }
+          i++;
+        }
+        if (newLines.length === 0) continue;
+        rewriteAt.set(lineNo, newLines);
+        for (const r of rs) removed.delete(r);
+      }
+    }
+
+    const drop = new Set<number>();
+    for (const r of removed) {
+      for (let i = r.lineStart; i <= r.lineEnd; i++) drop.add(i);
+    }
+    const kept: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const rewrite = rewriteAt.get(i);
+      if (rewrite) { kept.push(...rewrite); continue; }
+      if (drop.has(i)) continue;
+      kept.push(lines[i]);
+    }
+    newCode = kept.join('\n');
+  }
+
+  const allRemoved = [...targets, ...cascaded];
+  const removedComponentIds = new Set<string>();
+  const arrowTargets: { from: string; to: string; label?: string; occurrence: number }[] = [];
+  const noteTargets: { over: string[]; text: string; occurrence: number }[] = [];
+
+  for (const r of allRemoved) {
+    if (isComponent(r)) removedComponentIds.add(r.id);
+    if (isArrow(r)) arrowTargets.push({ from: r.from, to: r.to, label: r.label, occurrence: elementOccurrence(model, r) });
+    if (r.kind === 'note') noteTargets.push({ over: r.over, text: r.text, occurrence: noteOccurrence(model, r) });
+  }
+
+  const newConfig = cloneConfig(config);
+  if (newConfig) {
+    if (removedComponentIds.size > 0 && newConfig.actors) {
+      for (const id of removedComponentIds) delete newConfig.actors[id];
+    }
+    if (newConfig.arrows) {
+      newConfig.arrows = newConfig.arrows.filter(a => {
+        if (removedComponentIds.has(a.from) || removedComponentIds.has(a.to)) return false;
+        return !arrowTargets.some(t => arrowsMatchEntry(a, t.from, t.to, t.label, t.occurrence));
+      });
+    }
+    if (newConfig.noteTags) {
+      newConfig.noteTags = newConfig.noteTags.filter(n =>
+        !noteTargets.some(t => notesMatchEntry(n, t.over, t.text, t.occurrence)));
+    }
+    if (stickyIds.size > 0 && newConfig.notes) {
+      newConfig.notes = newConfig.notes.filter(n => !stickyIds.has(n.id));
+      if (newConfig.notes.length === 0) delete newConfig.notes;
+    }
+    pruneConfig(newConfig);
+  }
+
+  return {
+    code: newConfig ? updateViewsData(newCode, newConfig) : newCode,
+    config: newConfig,
+    cascaded: cascaded.map(c => c.key),
+  };
+}
+
 export function setActorColor(code: string, config: DiagramConfig | null, key: string, color: string): EditResult {
   const model = parseModel(code);
   if (model.type === 'unknown') return fail(code, config, UNSUPPORTED);

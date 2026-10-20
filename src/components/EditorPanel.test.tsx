@@ -948,6 +948,94 @@ describe('EditorPanel', () => {
     expect(flowBtn.querySelector('marker path')?.getAttribute('fill')).toBe('#00ff9d');
     expect(brokenSenderBtn.querySelector('marker path')?.getAttribute('fill')).toBe('#ff2a85');
   });
+
+  describe('shift-select arrow controls and delete in MultiElementFields', () => {
+    const message1 = el(seqModel, 'm:1');
+    const participantB = el(seqModel, 'p:1');
+
+    it('renders arrow type, color picker, width, dash, animations, and delete for multiple selected arrows while keeping wrap and tag sections', () => {
+      const onSetType = vi.fn();
+      const onSetColor = vi.fn();
+      const onSetWidth = vi.fn();
+      const onSetDash = vi.fn();
+      const onSetAnimation = vi.fn();
+      const onRequestDelete = vi.fn();
+      const onWrapInBlock = vi.fn();
+      const onWrapInRegion = vi.fn();
+
+      const props = makeProps({
+        selectedElements: [message0, message1],
+        arrowStyle: { color: '#ef4444', width: 3, dash: 'dashed', animation: 'flow' },
+        wrapChecks: { block: { ok: true }, region: { ok: true } },
+        onSetType,
+        onSetColor,
+        onSetWidth,
+        onSetDash,
+        onSetAnimation,
+        onRequestDelete,
+        onWrapInBlock,
+        onWrapInRegion,
+      });
+
+      render(<EditorPanel {...props} />);
+
+      expect(screen.getByTestId('multi-arrow-fields')).toBeTruthy();
+
+      // Type select
+      const typeSelect = screen.getByTestId('multi-arrow-type') as HTMLSelectElement;
+      fireEvent.change(typeSelect, { target: { value: '-x' } });
+      expect(onSetType).toHaveBeenCalledWith('-x');
+
+      // Color picker & clear button
+      const colorPicker = screen.getByTestId('arrow-color-picker') as HTMLInputElement;
+      expect(colorPicker.value).toBe('#ef4444');
+      fireEvent.change(colorPicker, { target: { value: '#10b981' } });
+      expect(onSetColor).toHaveBeenCalledWith('#10b981');
+
+      fireEvent.click(screen.getByTestId('clear-arrow-color'));
+      expect(onSetColor).toHaveBeenCalledWith('');
+
+      // Width input
+      const widthInput = screen.getByTestId('multi-arrow-width') as HTMLInputElement;
+      expect(widthInput.value).toBe('3');
+      fireEvent.change(widthInput, { target: { value: '5' } });
+      expect(onSetWidth).toHaveBeenCalledWith(5);
+
+      // Dash select
+      const dashSelect = screen.getByTestId('multi-arrow-dash') as HTMLSelectElement;
+      expect(dashSelect.value).toBe('dashed');
+      fireEvent.change(dashSelect, { target: { value: 'dotted' } });
+      expect(onSetDash).toHaveBeenCalledWith('dotted');
+
+      // Animation selector
+      fireEvent.click(screen.getByTestId('select-animation-pulse'));
+      expect(onSetAnimation).toHaveBeenCalledWith('pulse');
+
+      // Existing wrap & tag sections remain intact
+      expect(screen.getByTestId('wrap-block-button')).toBeTruthy();
+      expect(screen.getByTestId('multi-add-tag-input')).toBeTruthy();
+
+      // Delete button
+      const deleteBtn = screen.getByTestId('panel-delete');
+      fireEvent.click(deleteBtn);
+      expect(onRequestDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it('renders delete button and hides arrow fields when only participants are shift-selected', () => {
+      const onRequestDelete = vi.fn();
+      render(<EditorPanel {...makeProps({
+        selectedElements: [participantA, participantB],
+        onGroupParticipants: vi.fn(),
+        onRequestDelete,
+      })} />);
+
+      expect(screen.queryByTestId('multi-arrow-fields')).toBeNull();
+      expect(screen.getByTestId('group-box-button')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('panel-delete'));
+      expect(onRequestDelete).toHaveBeenCalledTimes(1);
+    });
+  });
 });
+
 
 
