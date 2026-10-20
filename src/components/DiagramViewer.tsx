@@ -16,10 +16,13 @@ import {
   CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo, EdgeEndpointScreenInfo,
 } from '@/lib/svgmap';
-import { DiagramConfig, StickyNote as StickyNoteType } from '@/lib/views';
+import { DiagramConfig, StickyNote as StickyNoteType, parseViewsData } from '@/lib/views';
 import { MessageInsertPosition } from '@/lib/editor';
+import { WALKTHROUGH_MIN_ZOOM, WALKTHROUGH_MAX_ZOOM } from '@/lib/walkthrough';
+import { useWalkthroughPlayback } from '@/lib/useWalkthroughPlayback';
 import { Lock, ZoomIn, ZoomOut, Maximize2, ChevronUp, ChevronDown } from 'lucide-react';
 import StickyNote from './StickyNote';
+import WalkthroughBar from './WalkthroughBar';
 
 interface DiagramViewerProps {
   code: string;
@@ -27,6 +30,8 @@ interface DiagramViewerProps {
   theme: 'default' | 'dark';
   editMode?: boolean;
   isVisualLocked?: boolean;
+  presentation?: boolean;
+  onExitPresentation?: () => void;
   arrowStyles?: DiagramConfig | null;  // resolved config (rewriteArrowStyles); its arrows are applied
   nodeColors?: DiagramConfig | null;   // raw config; actors colors applied to flowchart nodes
   selection?: string | string[] | null;           // selected processed element key(s)
@@ -92,8 +97,8 @@ export const STICKY_PAN_EXCLUSIONS = ['sticky-note-card', 'sticky-note-handle'];
 
 // Canvas zoom range and the pill's step: minScale below 1 lets "Fit to screen"
 // shrink large diagrams (the library default of 1 never zooms out).
-const MIN_ZOOM_SCALE = 0.2;
-const MAX_ZOOM_SCALE = 8;
+const MIN_ZOOM_SCALE = WALKTHROUGH_MIN_ZOOM;
+const MAX_ZOOM_SCALE = WALKTHROUGH_MAX_ZOOM;
 const ZOOM_STEP = 0.5;
 
 interface DragState {
@@ -393,6 +398,8 @@ export default function DiagramViewer({
   theme,
   editMode = false,
   isVisualLocked = false,
+  presentation = false,
+  onExitPresentation,
   arrowStyles = null,
   nodeColors = null,
   selection = null,
@@ -444,6 +451,30 @@ export default function DiagramViewer({
     }
   };
 
+  const walkthroughConfig = useMemo<DiagramConfig | null>(() => {
+    const parsed = parseViewsData(code);
+    const base = parsed ?? arrowStyles ?? nodeColors ?? null;
+    if (!base && (!notes || notes.length === 0)) return null;
+    return {
+      version: base?.version ?? 1,
+      ...base,
+      ...(arrowStyles?.arrows ? { arrows: arrowStyles.arrows } : {}),
+      ...(nodeColors?.actors ? { actors: nodeColors.actors } : {}),
+      ...(notes && notes.length > 0 ? { notes } : {}),
+    };
+  }, [code, arrowStyles, nodeColors, notes]);
+
+  const walkthrough = useWalkthroughPlayback({
+    code,
+    config: walkthroughConfig,
+    containerId: 'diagram-container',
+    transformRef,
+    getZoomScale: () => zoomScaleRef.current,
+    enabled: !!presentation,
+    svgVersion: svgStr,
+    onExit: onExitPresentation,
+  });
+
   // Search matches (the highlighted text nodes, in document order) and the
   // active match for the pill's prev/next navigation + auto-pan.
   const [searchMatches, setSearchMatches] = useState<Element[]>([]);
@@ -482,11 +513,11 @@ export default function DiagramViewer({
 
   // In edit mode, dragging a participant (sequence) or a node (flowchart)
   // must not pan the screen — exclude those elements from TransformWrapper
-  // panning. Sticky notes are always excluded from panning.
+  // panning. While presenting, drag edits are suspended so panning works everywhere.
   const diagramType = useMemo(() => parseModel(code).type, [code]);
   const isSequenceDiagram = diagramType === 'sequence';
   const isFlowchartDiagram = diagramType === 'flowchart';
-  const panExcluded = editMode && !isVisualLocked && (isSequenceDiagram || isFlowchartDiagram) && !!onSelect;
+  const panExcluded = editMode && !isVisualLocked && !presentation && (isSequenceDiagram || isFlowchartDiagram) && !!onSelect;
   const panExclusions = useMemo(() => {
     return [...STICKY_PAN_EXCLUSIONS, ...(panExcluded ? DIAGRAM_PAN_EXCLUSIONS : [])];
   }, [panExcluded]);
@@ -806,7 +837,7 @@ export default function DiagramViewer({
   // flowchart edge glows it (unlabeled edges are only selectable through
   // their invisible hit path — hover makes the target discoverable).
   const handleContainerMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (!editMode || isVisualLocked || dragRef.current?.isDragging) {
+    if (!editMode || isVisualLocked || presentation || dragRef.current?.isDragging) {
       if (hoverConnectHandle) setHoverConnectHandle(null);
       if (hoverNode) setHoverNode(null);
       if (hoverEdge) setHoverEdge(null);
@@ -891,7 +922,7 @@ export default function DiagramViewer({
     if ((e.target as Element).closest('.sticky-note-card')) {
       return;
     }
-    if (!editMode || isVisualLocked || e.button !== 0) return;
+    if (!editMode || isVisualLocked || presentation || e.button !== 0) return;
     const ctx = getSvgAndModel();
     if (!ctx || (ctx.model.type !== 'sequence' && ctx.model.type !== 'flowchart')) return;
     if (!onSelect) return;
@@ -1511,7 +1542,7 @@ export default function DiagramViewer({
   // the clicked label (just like StickyNote's double-click-to-edit). Notes and
   // sticky notes are excluded — sticky notes have their own inline editor.
   const handleDiagramDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (!editMode || isVisualLocked || !onLabelEdit) return;
+    if (!editMode || isVisualLocked || presentation || !onLabelEdit) return;
     if ((e.target as Element).closest('.sticky-note-card')) return;
     const ctx = getSvgAndModel();
     if (!ctx) return;
@@ -1566,6 +1597,15 @@ export default function DiagramViewer({
     }
   };
 
+  const dimmedNoteIds =
+    presentation && walkthrough.visibleStickyNoteIds && notes
+      ? new Set(
+          notes
+            .map((n) => n.id)
+            .filter((id) => !walkthrough.visibleStickyNoteIds!.includes(id)),
+        )
+      : null;
+
   return (
     <div
       ref={rootRef}
@@ -1597,7 +1637,7 @@ export default function DiagramViewer({
       )}
       <div
         id="diagram-container"
-        className={`w-full h-full select-none ${editMode ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
+        className={`w-full h-full select-none ${editMode && !presentation ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
         style={cursorHint ? { cursor: cursorHint } : undefined}
         onClick={handleDiagramClick}
         onDoubleClick={handleDiagramDoubleClick}
@@ -1625,20 +1665,37 @@ export default function DiagramViewer({
               <div className="relative inline-block select-none" data-testid="diagram-canvas-root">
                 <div dangerouslySetInnerHTML={svgInnerHtml} />
                 {showNotes && notes && notes.length > 0 && (
-                  <div className="absolute inset-0 pointer-events-none" data-testid="sticky-notes-layer">
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    data-testid="sticky-notes-layer"
+                    style={presentation ? { pointerEvents: 'none' } : undefined}
+                    onMouseDownCapture={(e) => {
+                      if (presentation) e.stopPropagation();
+                    }}
+                  >
                     {notes.map((note) => (
-                      <StickyNote
+                      <div
                         key={note.id}
-                        note={note}
-                        getZoomScale={zoomScaleOf}
-                        selected={selectedNoteIds?.includes(note.id) ?? false}
-                        onSelect={(shiftKey) => onSelectNote?.(note.id, { shiftKey })}
-                        onMove={(id, x, y) => onUpdateNote?.(id, { x, y })}
-                        onUpdateText={(id, text) => onUpdateNote?.(id, { text })}
-                        onUpdateColor={(id, color) => onUpdateNote?.(id, { color })}
-                        onResize={(id, width, height) => onUpdateNote?.(id, { width, height })}
-                        onDelete={(id) => onDeleteNote?.(id)}
-                      />
+                        data-testid={`sticky-note-wrapper-${note.id}`}
+                        className={dimmedNoteIds?.has(note.id) ? 'walkthrough-dimmed' : undefined}
+                        style={
+                          dimmedNoteIds?.has(note.id)
+                            ? { opacity: 0.2, transition: 'opacity 0.25s ease' }
+                            : undefined
+                        }
+                      >
+                        <StickyNote
+                          note={note}
+                          getZoomScale={zoomScaleOf}
+                          selected={selectedNoteIds?.includes(note.id) ?? false}
+                          onSelect={(shiftKey) => { if (!presentation) onSelectNote?.(note.id, { shiftKey }); }}
+                          onMove={(id, x, y) => { if (!presentation) onUpdateNote?.(id, { x, y }); }}
+                          onUpdateText={(id, text) => { if (!presentation) onUpdateNote?.(id, { text }); }}
+                          onUpdateColor={(id, color) => { if (!presentation) onUpdateNote?.(id, { color }); }}
+                          onResize={(id, width, height) => { if (!presentation) onUpdateNote?.(id, { width, height }); }}
+                          onDelete={(id) => { if (!presentation) onDeleteNote?.(id); }}
+                        />
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1656,6 +1713,19 @@ export default function DiagramViewer({
           </TransformComponent>
         </TransformWrapper>
       </div>
+      {presentation && walkthrough.plan && (
+        <WalkthroughBar
+          theme={theme}
+          stepIndex={walkthrough.activeIndex}
+          totalSteps={walkthrough.plan.steps.length}
+          label={walkthrough.plan.steps[walkthrough.activeIndex]?.label}
+          isPlaying={walkthrough.isPlaying}
+          onPrev={walkthrough.prev}
+          onNext={walkthrough.next}
+          onTogglePlay={walkthrough.togglePlay}
+          onExit={walkthrough.exit}
+        />
+      )}
       {/* Floating bottom-left canvas control pill: zoom out / level / zoom in
           / fit to screen, plus search-match navigation (with auto-pan) when a
           search query is active. Lives outside the TransformWrapper, so it

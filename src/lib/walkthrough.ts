@@ -1,0 +1,573 @@
+import {
+  BlockElement,
+  DiagramModel,
+  EdgeElement,
+  MessageElement,
+  ModelElement,
+  NodeElement,
+  NoteElement,
+  ParticipantElement,
+  parseModel,
+} from './model';
+import {
+  EDGE_HIT_CLASS,
+  labelElementForKey,
+  svgElementForKey,
+  zipModelToSvg,
+} from './svgmap';
+import { getArrowTags, getNoteTags } from './editor';
+import { DiagramConfig } from './views';
+
+export const WALKTHROUGH_MIN_ZOOM = 0.2;
+export const WALKTHROUGH_MAX_ZOOM = 8;
+export const WALKTHROUGH_DIM_OPACITY = 0.2;
+
+export interface WalkthroughStep {
+  index: number;
+  keys: string[];           // element keys newly revealed at this step
+  panKey: string;           // element key to center the canvas on
+  label?: string;           // bar readout: message label (sequence) or level caption (flowchart)
+  revealedKeys: string[];   // element keys at full opacity at this step (cumulative)
+  noteKeys: string[];       // 'note:N' keys revealed at this step
+  stickyNoteIds: string[];  // sticky notes attached to this step (shared tags)
+  dimmedKeys: string[];     // messages/notes/nodes/edges dimmed at this step
+}
+
+export interface WalkthroughPlan {
+  type: 'sequence' | 'flowchart';
+  steps: WalkthroughStep[];
+}
+
+export interface FlowchartLevels {
+  nodeDepth: Map<string, number>;   // node key -> depth level
+  edgeLevel: Map<string, number>;   // edge key -> reveal level
+  maxDepth: number;                 // number of steps - 1
+  isolated: string[];               // isolated node keys (never dimmed)
+}
+
+function ofKind<T extends ModelElement>(model: DiagramModel, kind: string): T[] {
+  return model.elements.filter((e) => e.kind === kind) as T[];
+}
+
+export function computeFlowchartLevels(model: DiagramModel): FlowchartLevels {
+  const nodes = ofKind<NodeElement>(model, 'node');
+  const edges = ofKind<EdgeElement>(model, 'edge');
+  const blocks = ofKind<BlockElement>(model, 'block');
+
+  const subgraphIds = new Set<string>(
+    blocks
+      .filter((b) => b.blockType === 'subgraph' && b.title)
+      .map((b) => b.title!),
+  );
+
+  const nodeById = new Map<string, NodeElement>();
+  for (const n of nodes) {
+    if (!subgraphIds.has(n.id) && !nodeById.has(n.id)) {
+      nodeById.set(n.id, n);
+    }
+  }
+
+  const resolve = (id: string): NodeElement | null => nodeById.get(id) ?? null;
+
+  // A node is part of the flow graph when at least one edge connects it to
+  // another non-subgraph node (or itself). Nodes with no such edges are isolated.
+  const incident = (id: string): boolean =>
+    edges.some(
+      (e) =>
+        (e.from === id || e.to === id) &&
+        resolve(e.from) !== null &&
+        resolve(e.to) !== null,
+    );
+
+  const nonSubgraphNodes = nodes.filter((n) => !subgraphIds.has(n.id));
+  const graphNodes = nonSubgraphNodes.filter((n) => incident(n.id));
+  const isolated = nonSubgraphNodes
+    .filter((n) => !incident(n.id))
+    .map((n) => n.key);
+
+  const incoming = (u: NodeElement): EdgeElement[] =>
+    edges.filter((e) => e.to === u.id && resolve(e.from) !== null);
+  const outgoing = (u: NodeElement): EdgeElement[] =>
+    edges.filter((e) => e.from === u.id && resolve(e.to) !== null);
+
+  // Pass 1: identify back edges via DFS. Start from entry nodes (no incoming
+  // edges) first in source order, then any remaining unvisited nodes (pure cycles)
+  // in source order so pure-cycle components unroll from their first source node.
+  const state = new Map<string, 0 | 1 | 2>();
+  for (const n of graphNodes) state.set(n.key, 0);
+  const backEdges = new Set<string>();
+
+  const dfs = (u: NodeElement) => {
+    state.set(u.key, 1);
+    for (const e of outgoing(u)) {
+      const v = resolve(e.to);
+      if (!v) continue;
+      const st = state.get(v.key) ?? 0;
+      if (st === 1) {
+        backEdges.add(e.key);
+      } else if (st === 0) {
+        dfs(v);
+      }
+    }
+    state.set(u.key, 2);
+  };
+
+  for (const n of graphNodes) {
+    if (incoming(n).length === 0 && state.get(n.key) === 0) {
+      dfs(n);
+    }
+  }
+  for (const n of graphNodes) {
+    if (state.get(n.key) === 0) {
+      dfs(n);
+    }
+  }
+
+  // Pass 2: longest-path depth over the acyclic skeleton (edges \ backEdges).
+  const nodeDepth = new Map<string, number>();
+  const visitingDepth = new Set<string>();
+  const computeDepth = (u: NodeElement): number => {
+    const cached = nodeDepth.get(u.key);
+    if (cached !== undefined) return cached;
+    if (visitingDepth.has(u.key)) return 0;
+    visitingDepth.add(u.key);
+    let best = -1;
+    for (const e of incoming(u)) {
+      if (backEdges.has(e.key)) continue;
+      const pred = resolve(e.from);
+      if (!pred) continue;
+      best = Math.max(best, computeDepth(pred));
+    }
+    visitingDepth.delete(u.key);
+    const d = best + 1;
+    nodeDepth.set(u.key, d);
+    return d;
+  };
+
+  for (const n of graphNodes) {
+    computeDepth(n);
+  }
+
+  const edgeLevel = new Map<string, number>();
+  for (const e of edges) {
+    const fromNode = resolve(e.from);
+    const toNode = resolve(e.to);
+    if (fromNode && toNode) {
+      const df = nodeDepth.get(fromNode.key) ?? 0;
+      const dt = nodeDepth.get(toNode.key) ?? 0;
+      edgeLevel.set(e.key, Math.max(df, dt));
+    } else {
+      edgeLevel.set(e.key, 0);
+    }
+  }
+
+  let maxDepth = 0;
+  for (const d of nodeDepth.values()) {
+    if (d > maxDepth) maxDepth = d;
+  }
+
+  return { nodeDepth, edgeLevel, maxDepth, isolated };
+}
+
+function buildEffectiveTagsMap(
+  code: string,
+  model: DiagramModel,
+  config: DiagramConfig | null,
+): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  for (const el of model.elements) {
+    if (el.kind === 'message' || el.kind === 'edge') {
+      const info = getArrowTags(code, config, el.key);
+      const tags = new Set<string>([...(info?.keys ?? []), ...(info?.inherited ?? [])]);
+      map.set(el.key, tags);
+    } else if (el.kind === 'note') {
+      const tags = new Set<string>(getNoteTags(code, config, el.key));
+      map.set(el.key, tags);
+    } else if (el.kind === 'participant' || el.kind === 'node') {
+      const tags = new Set<string>(config?.actors?.[el.id]?.keys ?? []);
+      map.set(el.key, tags);
+    }
+  }
+  return map;
+}
+
+function stickyNotesForRevealedKeys(
+  revealedKeys: string[],
+  effectiveTags: Map<string, Set<string>>,
+  config: DiagramConfig | null,
+): string[] {
+  const stickyNotes = config?.notes ?? [];
+  if (stickyNotes.length === 0) return [];
+  const attached: string[] = [];
+  for (const note of stickyNotes) {
+    if (!note.keys || note.keys.length === 0) continue; // untagged -> attaches to no step (always visible)
+    const matches = revealedKeys.some((k) => {
+      const elTags = effectiveTags.get(k);
+      if (!elTags || elTags.size === 0) return false;
+      return note.keys!.some((t) => elTags.has(t));
+    });
+    if (matches && !attached.includes(note.id)) {
+      attached.push(note.id);
+    }
+  }
+  return attached;
+}
+
+export function buildWalkthroughPlan(
+  code: string,
+  config: DiagramConfig | null,
+): WalkthroughPlan | null {
+  const model = parseModel(code);
+  if (model.type !== 'sequence' && model.type !== 'flowchart') {
+    return null;
+  }
+
+  const effectiveTags = buildEffectiveTagsMap(code, model, config);
+
+  if (model.type === 'sequence') {
+    const messages = ofKind<MessageElement>(model, 'message');
+    if (messages.length === 0) return null;
+
+    const participants = ofKind<ParticipantElement>(model, 'participant');
+    const notes = ofKind<NoteElement>(model, 'note');
+    const participantKeys = participants.map((p) => p.key);
+
+    // Map each note to its attached step index (nearest preceding message by line span;
+    // notes before the first message -> step 0; trailing notes -> last step).
+    const notesByStep = new Map<number, string[]>();
+    for (let i = 0; i < messages.length; i++) {
+      notesByStep.set(i, []);
+    }
+    for (const note of notes) {
+      let attachedIdx = 0;
+      for (let i = 0; i < messages.length; i++) {
+        if (messages[i].lineStart <= note.lineStart) {
+          attachedIdx = i;
+        } else {
+          break;
+        }
+      }
+      notesByStep.get(attachedIdx)!.push(note.key);
+    }
+
+    const steps: WalkthroughStep[] = messages.map((msg, i) => {
+      const revealedMessageKeys = messages.slice(0, i + 1).map((m) => m.key);
+      const dimmedMessageKeys = messages.slice(i + 1).map((m) => m.key);
+
+      const revealedNoteKeys: string[] = [];
+      const dimmedNoteKeys: string[] = [];
+      for (let s = 0; s < messages.length; s++) {
+        const stepNotes = notesByStep.get(s) ?? [];
+        if (s <= i) {
+          revealedNoteKeys.push(...stepNotes);
+        } else {
+          dimmedNoteKeys.push(...stepNotes);
+        }
+      }
+
+      const revealedKeys = [
+        ...participantKeys,
+        ...revealedMessageKeys,
+        ...revealedNoteKeys,
+      ];
+      const dimmedKeys = [...dimmedMessageKeys, ...dimmedNoteKeys];
+      const noteKeys = notesByStep.get(i) ?? [];
+
+      return {
+        index: i,
+        keys: [msg.key],
+        panKey: msg.key,
+        label: msg.label,
+        revealedKeys,
+        noteKeys,
+        stickyNoteIds: stickyNotesForRevealedKeys(revealedKeys, effectiveTags, config),
+        dimmedKeys,
+      };
+    });
+
+    return { type: 'sequence', steps };
+  }
+
+  // Flowchart
+  const edges = ofKind<EdgeElement>(model, 'edge');
+  if (edges.length === 0) return null;
+
+  const nodes = ofKind<NodeElement>(model, 'node');
+  const blocks = ofKind<BlockElement>(model, 'block');
+  const subgraphIds = new Set<string>(
+    blocks
+      .filter((b) => b.blockType === 'subgraph' && b.title)
+      .map((b) => b.title!),
+  );
+  const realNodes = nodes.filter((n) => !subgraphIds.has(n.id));
+  const levels = computeFlowchartLevels(model);
+
+  const steps: WalkthroughStep[] = [];
+  for (let d = 0; d <= levels.maxDepth; d++) {
+    const stepNodes = realNodes.filter((n) => levels.nodeDepth.get(n.key) === d);
+    const stepEdges = edges.filter((e) => levels.edgeLevel.get(e.key) === d);
+
+    const revealedNodeKeys = realNodes
+      .filter((n) => {
+        const nd = levels.nodeDepth.get(n.key);
+        return nd !== undefined && nd <= d;
+      })
+      .map((n) => n.key);
+    const revealedEdgeKeys = edges
+      .filter((e) => (levels.edgeLevel.get(e.key) ?? 0) <= d)
+      .map((e) => e.key);
+    const revealedKeys = [
+      ...revealedNodeKeys,
+      ...revealedEdgeKeys,
+      ...levels.isolated,
+    ];
+
+    const dimmedNodeKeys = realNodes
+      .filter((n) => {
+        const nd = levels.nodeDepth.get(n.key);
+        return nd !== undefined && nd > d;
+      })
+      .map((n) => n.key);
+    const dimmedEdgeKeys = edges
+      .filter((e) => (levels.edgeLevel.get(e.key) ?? 0) > d)
+      .map((e) => e.key);
+    const dimmedKeys = [...dimmedNodeKeys, ...dimmedEdgeKeys];
+
+    const keys = [
+      ...stepNodes.map((n) => n.key),
+      ...stepEdges.map((e) => e.key),
+    ];
+    const panKey = stepNodes[0]?.key ?? stepEdges[0]?.key ?? '';
+    const nCount = stepNodes.length;
+    const eCount = stepEdges.length;
+    const label = `Depth ${d + 1} · ${nCount} ${nCount === 1 ? 'node' : 'nodes'} · ${eCount} ${eCount === 1 ? 'edge' : 'edges'}`;
+
+    steps.push({
+      index: d,
+      keys,
+      panKey,
+      label,
+      revealedKeys,
+      noteKeys: [],
+      stickyNoteIds: stickyNotesForRevealedKeys(revealedKeys, effectiveTags, config),
+      dimmedKeys,
+    });
+  }
+
+  return { type: 'flowchart', steps };
+}
+
+const OVERLAY_SELECTOR =
+  '.arrow-anim-packet-runner, .arrow-x-mark, .arrow-barrier-wall, .arrow-shockwave-burst, .arrow-breaker-cap';
+
+function collectArrowOverlays(el: Element): Element[] {
+  const overlays: Element[] = [];
+  let sib = el.nextElementSibling;
+  while (sib && sib.matches(OVERLAY_SELECTOR)) {
+    overlays.push(sib);
+    sib = sib.nextElementSibling;
+  }
+  return overlays;
+}
+
+function extractMessageOriginCoords(
+  svg: Element,
+  el: Element,
+  fromId: string,
+): { x: number; y: number } | null {
+  let y = NaN;
+  let x = NaN;
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'line') {
+    y = parseFloat(el.getAttribute('y1') ?? '');
+    x = parseFloat(el.getAttribute('x1') ?? '');
+  } else if (tag === 'path') {
+    const d = el.getAttribute('d');
+    if (d) {
+      const m = d.match(/(-?[\d.]+)[ ,]+(-?[\d.]+)/);
+      if (m) {
+        x = parseFloat(m[1]);
+        y = parseFloat(m[2]);
+      }
+    }
+  }
+  const lifeline = svg.querySelector(`line.actor-line[data-id="${fromId}"]`);
+  if (lifeline) {
+    const lx = parseFloat(lifeline.getAttribute('x1') ?? '');
+    if (!Number.isNaN(lx)) x = lx;
+  }
+  if (Number.isNaN(y) || Number.isNaN(x)) return null;
+  return { x, y };
+}
+
+function findSequenceNumberBadge(
+  svg: Element,
+  el: Element,
+  fromId: string,
+): Element | null {
+  const origin = extractMessageOriginCoords(svg, el, fromId);
+  if (!origin) return null;
+  const badges = Array.from(svg.querySelectorAll('text.sequenceNumber'));
+  let best: Element | null = null;
+  let bestDist = Infinity;
+  for (const b of badges) {
+    const by = parseFloat(b.getAttribute('y') ?? '');
+    const bx = parseFloat(b.getAttribute('x') ?? '');
+    if (Number.isNaN(by) || Number.isNaN(bx)) continue;
+    if (by >= origin.y && by <= origin.y + 10) {
+      const dist = Math.abs(bx - origin.x);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = b;
+      }
+    }
+  }
+  return best;
+}
+
+function pushUnique(list: Element[], el: Element | null | undefined) {
+  if (el && !list.includes(el)) {
+    list.push(el);
+  }
+}
+
+export function dimTargetsForStep(
+  svg: Element,
+  model: DiagramModel,
+  plan: WalkthroughPlan,
+  stepIndex: number,
+): { dimmed: Element[]; active: Element[] } {
+  const dimmed: Element[] = [];
+  const active: Element[] = [];
+  if (plan.steps.length === 0) return { dimmed, active };
+  const clampedIdx = Math.max(0, Math.min(stepIndex, plan.steps.length - 1));
+  const step = plan.steps[clampedIdx];
+  const zip = zipModelToSvg(svg, model);
+
+  if (plan.type === 'sequence') {
+    const messages = ofKind<MessageElement>(model, 'message');
+    const notes = ofKind<NoteElement>(model, 'note');
+    const msgIdxByKey = new Map(messages.map((m, i) => [m.key, i]));
+    const noteIdxByKey = new Map(notes.map((n, i) => [n.key, i]));
+
+    for (const key of step.dimmedKeys) {
+      if (msgIdxByKey.has(key)) {
+        const idx = msgIdxByKey.get(key)!;
+        const el = zip.messages[idx];
+        if (!el) continue;
+        pushUnique(dimmed, el);
+        pushUnique(dimmed, labelElementForKey(svg, model, key));
+        pushUnique(dimmed, findSequenceNumberBadge(svg, el, messages[idx].from));
+        for (const ov of collectArrowOverlays(el)) {
+          pushUnique(dimmed, ov);
+        }
+      } else if (noteIdxByKey.has(key)) {
+        const idx = noteIdxByKey.get(key)!;
+        const el = zip.notes[idx];
+        pushUnique(dimmed, el);
+      }
+    }
+
+    for (const key of step.keys) {
+      if (msgIdxByKey.has(key)) {
+        const idx = msgIdxByKey.get(key)!;
+        const el = zip.messages[idx];
+        pushUnique(active, el);
+        pushUnique(active, labelElementForKey(svg, model, key));
+      }
+    }
+
+    return { dimmed, active };
+  }
+
+  if (plan.type === 'flowchart') {
+    const nodes = ofKind<NodeElement>(model, 'node');
+    const edges = ofKind<EdgeElement>(model, 'edge');
+    const nodeIdxByKey = new Map(nodes.map((n, i) => [n.key, i]));
+    const edgeIdxByKey = new Map(edges.map((e, i) => [e.key, i]));
+
+    const findEdgeLabelElements = (dataId: string | null): Element[] => {
+      if (!dataId) return [];
+      const found: Element[] = [];
+      const inner = Array.from(svg.querySelectorAll('g.edgeLabel g.label[data-id]')).find(
+        (l) => l.getAttribute('data-id') === dataId,
+      );
+      if (inner) {
+        const outer = inner.closest('g.edgeLabel');
+        if (outer) found.push(outer);
+        found.push(inner);
+      }
+      return found;
+    };
+
+    for (const key of step.dimmedKeys) {
+      if (nodeIdxByKey.has(key)) {
+        const idx = nodeIdxByKey.get(key)!;
+        pushUnique(dimmed, zip.nodes[idx]);
+      } else if (edgeIdxByKey.has(key)) {
+        const idx = edgeIdxByKey.get(key)!;
+        const path = zip.edges[idx];
+        if (!path) continue;
+        pushUnique(dimmed, path);
+        const dataId = path.getAttribute('data-id');
+        for (const lab of findEdgeLabelElements(dataId)) {
+          pushUnique(dimmed, lab);
+        }
+        if (dataId) {
+          const hit = Array.from(svg.querySelectorAll(`path.${EDGE_HIT_CLASS}`)).find(
+            (p) => p.getAttribute('data-id') === dataId,
+          );
+          pushUnique(dimmed, hit);
+        }
+        for (const ov of collectArrowOverlays(path)) {
+          pushUnique(dimmed, ov);
+        }
+      }
+    }
+
+    for (const key of step.keys) {
+      if (nodeIdxByKey.has(key)) {
+        const idx = nodeIdxByKey.get(key)!;
+        pushUnique(active, zip.nodes[idx]);
+      } else if (edgeIdxByKey.has(key)) {
+        const idx = edgeIdxByKey.get(key)!;
+        const path = zip.edges[idx];
+        if (!path) continue;
+        pushUnique(active, path);
+        const dataId = path.getAttribute('data-id');
+        for (const lab of findEdgeLabelElements(dataId)) {
+          pushUnique(active, lab);
+        }
+      }
+    }
+
+    return { dimmed, active };
+  }
+
+  return { dimmed, active };
+}
+
+export function panTargetForStep(
+  svg: Element,
+  model: DiagramModel,
+  plan: WalkthroughPlan,
+  stepIndex: number,
+): Element | null {
+  if (plan.steps.length === 0) return null;
+  const clampedIdx = Math.max(0, Math.min(stepIndex, plan.steps.length - 1));
+  const step = plan.steps[clampedIdx];
+  if (!step.panKey) return null;
+
+  if (plan.type === 'sequence') {
+    return (
+      labelElementForKey(svg, model, step.panKey) ??
+      svgElementForKey(svg, model, step.panKey)
+    );
+  }
+
+  if (plan.type === 'flowchart') {
+    return svgElementForKey(svg, model, step.panKey);
+  }
+
+  return null;
+}

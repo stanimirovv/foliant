@@ -50,6 +50,8 @@ vi.mock('./DiagramViewer', () => ({
     onUpdateNote?: (id: string, patch: Partial<StickyNote>) => void;
     onDeleteNote?: (id: string) => void;
     onLabelEdit?: (key: string, label: string) => void;
+    presentation?: boolean;
+    onExitPresentation?: () => void;
   }) => (
     <div
       data-testid="diagram-viewer"
@@ -57,9 +59,11 @@ vi.mock('./DiagramViewer', () => ({
       data-code={props.code}
       data-edit-mode={String(props.editMode ?? false)}
       data-visual-locked={String(props.isVisualLocked ?? false)}
+      data-presentation={String(props.presentation ?? false)}
       data-selection={Array.isArray(props.selection) ? props.selection.join(',') : (props.selection ?? '')}
     >
       <svg data-testid="mock-diagram-svg" viewBox="0 0 100 100"><text>Diagram</text></svg>
+      <button data-testid="mock-exit-presentation" onClick={() => props.onExitPresentation?.()}>exit presentation</button>
       {props.isVisualLocked && <div data-testid="visual-locked-banner">Visual edits locked (editing source code)</div>}
       <div data-testid="mock-notes-info" data-count={props.notes?.length ?? 0} data-show={String(props.showNotes ?? true)} />
       {props.notes && props.notes.length > 0 && (
@@ -4296,6 +4300,54 @@ describe('ClientPage shift-select arrow controls, delete, and new markdown file 
 
     // Navigates to the new markdown file
     expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('file=architecture-doc.md'), { scroll: false });
+  });
+});
+
+describe('ClientPage — presentation mode (walkthrough player)', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('toggles ?present=1 in URL via present-toggle button and passes presentation prop to DiagramViewer', async () => {
+    const DEMO = createSequenceDiagram();
+    currentMockParams = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    mockFetchWithFile(DEMO);
+
+    const { rerender } = render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => expect(viewer.getAttribute('data-code')).toContain('A->>B: Hello'));
+
+    const btn = screen.getByTestId('present-toggle') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toContain('Present');
+    expect(viewer.getAttribute('data-presentation')).toBe('false');
+
+    fireEvent.click(btn);
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('present=1'), { scroll: false });
+
+    currentMockParams.present = '1';
+    rerender(<ClientPage />);
+    expect(viewer.getAttribute('data-presentation')).toBe('true');
+    expect(btn.textContent).toContain('Stop');
+
+    // Exiting presentation via DiagramViewer callback deletes present from URL
+    fireEvent.click(screen.getByTestId('mock-exit-presentation'));
+    const lastCall = mockReplace.mock.calls.at(-1)?.[0] as string;
+    expect(lastCall).not.toContain('present=');
+  });
+
+  it('disables present-toggle when diagram type is unsupported', async () => {
+    currentMockParams = { file: 'unsupported.mmd', edit: '0' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    mockFetchWithFile('classDiagram\n  Animal <|-- Duck');
+
+    render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => expect(viewer.getAttribute('data-code')).toContain('classDiagram'));
+
+    const btn = screen.getByTestId('present-toggle') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
   });
 });
 
