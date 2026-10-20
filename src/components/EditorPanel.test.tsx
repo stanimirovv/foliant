@@ -1103,6 +1103,83 @@ describe('EditorPanel', () => {
       expect(arrowFields.compareDocumentPosition(groupBoxBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(groupBoxBtn.compareDocumentPosition(wrapBlockBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
+
+    it('adapts right menu container and controls to light and dark mode colors based on theme', () => {
+      const configWithActor: DiagramConfig = {
+        version: 1,
+        actors: { A: { color: '#213b5e' } },
+      };
+
+      // 1. Light mode (default)
+      const { rerender } = render(
+        <EditorPanel
+          {...makeProps({
+            element: participantA,
+            config: configWithActor,
+            theme: 'default',
+          })}
+        />
+      );
+
+      const panel = screen.getByTestId('editor-panel');
+      expect(panel.className).toContain('bg-white');
+      expect(panel.className).toContain('text-gray-900');
+      expect(panel.className).not.toContain('bg-slate-900');
+
+      // Actor color datalist contains theme-resolved light color #cfe2f3
+      const datalistLight = document.getElementById('editor-actor-color-list') as HTMLDataListElement;
+      expect(datalistLight).toBeTruthy();
+      const optionsLight = Array.from(datalistLight.querySelectorAll('option')).map(o => o.value);
+      expect(optionsLight).toContain('#cfe2f3');
+
+      // 2. Dark mode
+      rerender(
+        <EditorPanel
+          {...makeProps({
+            element: participantA,
+            config: configWithActor,
+            theme: 'dark',
+          })}
+        />
+      );
+
+      expect(panel.className).toContain('bg-slate-900');
+      expect(panel.className).toContain('text-slate-100');
+      expect(panel.className).toContain('dark');
+
+      // Actor color datalist contains dark color #213b5e
+      const datalistDark = document.getElementById('editor-actor-color-list') as HTMLDataListElement;
+      const optionsDark = Array.from(datalistDark.querySelectorAll('option')).map(o => o.value);
+      expect(optionsDark).toContain('#213b5e');
+    });
+
+    it('adapts MultiElementFields box color placeholder based on theme', () => {
+      const { rerender } = render(
+        <EditorPanel
+          {...makeProps({
+            selectedElements: [participantA, participantB],
+            onGroupParticipants: vi.fn(),
+            theme: 'default',
+          })}
+        />
+      );
+
+      const boxColorInputLight = screen.getByTestId('group-box-color') as HTMLInputElement;
+      expect(boxColorInputLight.placeholder).toContain('#cfe2f3');
+
+      rerender(
+        <EditorPanel
+          {...makeProps({
+            selectedElements: [participantA, participantB],
+            onGroupParticipants: vi.fn(),
+            theme: 'dark',
+          })}
+        />
+      );
+
+      const boxColorInputDark = screen.getByTestId('group-box-color') as HTMLInputElement;
+      expect(boxColorInputDark.placeholder).toContain('#213b5e');
+    });
   });
 });
 

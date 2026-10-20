@@ -209,7 +209,10 @@ export default function EditorPanel({
   const arrowColors: string[] = [];
   if (config?.actors) {
     for (const meta of Object.values(config.actors)) {
-      if (meta.color && !actorColors.includes(meta.color)) actorColors.push(meta.color);
+      if (meta.color) {
+        const resolved = resolveActorColorForTheme(meta.color, theme);
+        if (resolved && !actorColors.includes(resolved)) actorColors.push(resolved);
+      }
       if (meta.keys) for (const k of meta.keys) if (!actorKeys.includes(k)) actorKeys.push(k);
     }
   }
@@ -238,7 +241,7 @@ export default function EditorPanel({
     : undefined;
 
   return (
-    <div className="p-4" data-testid="editor-panel">
+    <div className={`p-4 ${theme === 'dark' ? 'dark text-slate-100 bg-slate-900' : 'text-gray-900 bg-white'}`} data-testid="editor-panel">
       <h2 className="text-xs font-bold uppercase text-gray-500 dark:text-slate-400 mb-2">Editor</h2>
       {!isMultiSelect && !activeElement && (
         <>
@@ -266,6 +269,7 @@ export default function EditorPanel({
           elementsTagInfo={elementsTagInfo ?? []}
           actorKeys={actorKeys}
           diagramType={diagramType}
+          theme={theme}
           arrowStyle={arrowStyle}
           arrowColors={arrowColors}
           wrapChecks={wrapChecks ?? null}
@@ -418,6 +422,7 @@ interface MultiElementFieldsProps {
   elementsTagInfo: ElementTagItem[];
   actorKeys: string[];
   diagramType: DiagramType;
+  theme?: 'default' | 'dark';
   arrowStyle: ArrowStylePatch | null;
   arrowColors: string[];
   wrapChecks: { block: WrapCheck; region: WrapCheck } | null;
@@ -441,6 +446,7 @@ function MultiElementFields({
   elementsTagInfo,
   actorKeys,
   diagramType,
+  theme = 'dark',
   arrowStyle,
   arrowColors,
   wrapChecks,
@@ -772,7 +778,7 @@ function MultiElementFields({
             <input
               type="text"
               className={fieldInput}
-              placeholder="Color (e.g. #213b5e, #1e293b)"
+              placeholder={theme === 'default' ? 'Color (e.g. #cfe2f3, #e2e8f0)' : 'Color (e.g. #213b5e, #1e293b)'}
               value={boxColor}
               onChange={(e) => setBoxColor(e.target.value)}
               data-testid="group-box-color"
@@ -1157,8 +1163,8 @@ function ParticipantFields({
                 title={c}
                 className={`w-5 h-5 rounded border transition-all ${
                   isSelected
-                    ? 'ring-2 ring-blue-500 border-white scale-110 shadow-sm'
-                    : 'border-slate-700/80 hover:scale-105 hover:border-slate-500'
+                    ? 'ring-2 ring-blue-500 border-white dark:border-slate-900 scale-110 shadow-sm'
+                    : 'border-gray-300 dark:border-slate-700/80 hover:scale-105 hover:border-gray-400 dark:hover:border-slate-500'
                 }`}
               />
             );

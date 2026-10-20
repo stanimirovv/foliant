@@ -284,8 +284,8 @@ export default function AnimatedArrowSelector({
                     }}
                     className={`w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-115 ${
                       isSelected
-                        ? 'ring-2 ring-white scale-110 shadow-lg'
-                        : 'border border-white/20 hover:brightness-125'
+                        ? 'ring-2 ring-slate-900 dark:ring-white scale-110 shadow-lg'
+                        : 'border border-black/20 dark:border-white/20 hover:brightness-125'
                     }`}
                     title={`${c.name} (${c.hex}) - Happy Path`}
                   >
@@ -319,8 +319,8 @@ export default function AnimatedArrowSelector({
                     }}
                     className={`w-6 h-6 rounded-full flex items-center justify-center transition-all hover:scale-115 ${
                       isSelected
-                        ? 'ring-2 ring-white scale-110 shadow-lg'
-                        : 'border border-white/20 hover:brightness-125'
+                        ? 'ring-2 ring-slate-900 dark:ring-white scale-110 shadow-lg'
+                        : 'border border-black/20 dark:border-white/20 hover:brightness-125'
                     }`}
                     title={`${c.name} (${c.hex}) - Error / Failure`}
                   >

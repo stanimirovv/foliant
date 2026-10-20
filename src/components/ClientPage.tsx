@@ -3144,7 +3144,7 @@ export default function ClientPage() {
               <div className="flex-1 min-h-0 flex overflow-hidden">
                 {isSplitView ? (
                   <>
-                    <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-slate-800 overflow-y-auto">
+                    <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-y-auto">
                       <EditorPanel
                         element={selectedRawElement}
                         selectedElements={selectedRawElements}
@@ -3208,7 +3208,7 @@ export default function ClientPage() {
                     </div>
                   </>
                 ) : sidebarTab === 'properties' ? (
-                  <div className="w-full h-full overflow-y-auto">
+                  <div className="w-full h-full bg-white dark:bg-slate-900 overflow-y-auto">
                     <EditorPanel
                       element={selectedRawElement}
                       selectedElements={selectedRawElements}
