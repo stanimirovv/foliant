@@ -1,0 +1,26 @@
+%% CONFIG: {"version":1,"actors":{"Client":{"color":"#213b5e","keys":["frontend"]},"Gateway":{"color":"#1a5557","keys":["api"]},"Auth":{"color":"#3d1d62","keys":["security"]},"DB":{"color":"#194821","keys":["storage"]}},"arrows":[{"from":"Client","to":"Gateway","label":"POST /auth/login","color":"#00ff9d","animation":"pulse"},{"from":"Gateway","to":"Auth","label":"Validate Credentials","color":"#00ff9d","animation":"flow"},{"from":"Auth","to":"Gateway","label":"401 Unauthorized","color":"#ff2a85","animation":"broken-receiver"},{"from":"Auth","to":"DB","label":"Query user by email","color":"#00ff9d","animation":"flow"},{"from":"DB","to":"Auth","label":"User record & hash","color":"#00ff9d","animation":"flow"},{"from":"Auth","to":"Gateway","label":"Issue JWT Session","color":"#00ff9d","animation":"flow"},{"from":"Gateway","to":"Client","label":"200 OK (JWT)","color":"#00ff9d","animation":"pulse"}],"views":[{"name":"Happy Path Only","hiddenPaths":["flow=login/edge-case=invalid-credentials"]}]}
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Gateway as API Gateway
+    box Authentication Domain
+        participant Auth as Auth Service
+        participant DB as Users Database
+    end
+
+    %% @region-start: flow=login
+    rect rgb(20, 30, 48)
+        Client->>Gateway: POST /auth/login
+        Gateway->>Auth: Validate Credentials
+
+        %% @region-start: edge-case=invalid-credentials
+        Auth-->>Gateway: 401 Unauthorized
+        Gateway-->>Client: 401 Invalid Credentials
+        %% @region-end
+
+        Auth->>DB: Query user by email
+        DB-->>Auth: User record & hash
+        Auth-->>Gateway: Issue JWT Session
+        Gateway-->>Client: 200 OK (JWT)
+    end
+    %% @region-end
