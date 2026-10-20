@@ -21,6 +21,8 @@ import { DiagramConfig } from './views';
 export const WALKTHROUGH_MIN_ZOOM = 0.2;
 export const WALKTHROUGH_MAX_ZOOM = 8;
 export const WALKTHROUGH_DIM_OPACITY = 0.2;
+export const WALKTHROUGH_STEP_BOX_COLOR = '#10b981';
+export const WALKTHROUGH_STEP_BOX_PADDING = 10;
 
 export interface WalkthroughStep {
   index: number;
@@ -570,4 +572,172 @@ export function panTargetForStep(
   }
 
   return null;
+}
+
+export interface WalkthroughStepBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function getElementLocalBounds(
+  el: Element,
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  // Skip empty flowchart edge labels (Mermaid places empty foreignObjects at 0,0)
+  if (el.classList.contains('edgeLabel') || el.closest('g.edgeLabel')) {
+    if ((el.textContent ?? '').trim() === '') return null;
+  }
+
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'line') {
+    const x1 = parseFloat(el.getAttribute('x1') ?? '');
+    const y1 = parseFloat(el.getAttribute('y1') ?? '');
+    const x2 = parseFloat(el.getAttribute('x2') ?? '');
+    const y2 = parseFloat(el.getAttribute('y2') ?? '');
+    if (!Number.isNaN(x1) && !Number.isNaN(y1) && !Number.isNaN(x2) && !Number.isNaN(y2)) {
+      return {
+        minX: Math.min(x1, x2),
+        minY: Math.min(y1, y2),
+        maxX: Math.max(x1, x2),
+        maxY: Math.max(y1, y2),
+      };
+    }
+  }
+
+  if (tag === 'path') {
+    const d = el.getAttribute('d');
+    if (d) {
+      const pairs = Array.from(d.matchAll(/(-?\d+(?:\.\d+)?)[ ,]+(-?\d+(?:\.\d+)?)/g));
+      if (pairs.length > 0) {
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const p of pairs) {
+          const px = parseFloat(p[1]);
+          const py = parseFloat(p[2]);
+          if (px < minX) minX = px;
+          if (px > maxX) maxX = px;
+          if (py < minY) minY = py;
+          if (py > maxY) maxY = py;
+        }
+        return { minX, minY, maxX, maxY };
+      }
+    }
+  }
+
+  const gfx = el as unknown as { getBBox?: () => DOMRect };
+  if (typeof gfx.getBBox === 'function') {
+    try {
+      const b = gfx.getBBox();
+      const isJsdomStub = b.x === 0 && b.y === 0 && b.width === 100 && b.height === 20;
+      if (!isJsdomStub && (b.width > 0 || b.height > 0)) {
+        return {
+          minX: b.x,
+          minY: b.y,
+          maxX: b.x + b.width,
+          maxY: b.y + b.height,
+        };
+      }
+      if (el.hasAttribute('x') || el.hasAttribute('y')) {
+        const x = parseFloat(el.getAttribute('x') ?? '0') || 0;
+        const y = parseFloat(el.getAttribute('y') ?? '0') || 0;
+        const w = parseFloat(el.getAttribute('width') ?? '') || b.width || 40;
+        const h = parseFloat(el.getAttribute('height') ?? '') || b.height || 20;
+        return { minX: x, minY: y, maxX: x + w, maxY: y + h };
+      }
+      return {
+        minX: b.x,
+        minY: b.y,
+        maxX: b.x + b.width,
+        maxY: b.y + b.height,
+      };
+    } catch {
+      // ignore getBBox errors on non-rendered elements
+    }
+  }
+
+  return null;
+}
+
+export function computeActiveStepBounds(
+  svg: Element,
+  active: Element[],
+): WalkthroughStepBounds | null {
+  if (active.length === 0) return null;
+  const host = svg.querySelector('g.root') ?? svg;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const el of active) {
+    const local = getElementLocalBounds(el);
+    if (!local) continue;
+    let tx = 0;
+    let ty = 0;
+    let curr: Element | null = el;
+    while (curr && curr !== host && curr !== svg) {
+      const t = curr.getAttribute('transform');
+      if (t) {
+        const m = t.match(/translate\(\s*([-\d.]+)(?:[\s,]+([-\d.]+))?\s*\)/);
+        if (m) {
+          tx += parseFloat(m[1]) || 0;
+          ty += parseFloat(m[2] ?? '0') || 0;
+        }
+      }
+      curr = curr.parentElement;
+    }
+    if (local.minX + tx < minX) minX = local.minX + tx;
+    if (local.minY + ty < minY) minY = local.minY + ty;
+    if (local.maxX + tx > maxX) maxX = local.maxX + tx;
+    if (local.maxY + ty > maxY) maxY = local.maxY + ty;
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return null;
+  }
+
+  const pad = WALKTHROUGH_STEP_BOX_PADDING;
+  const rawW = maxX - minX;
+  const rawH = maxY - minY;
+  const width = Math.max(rawW + pad * 2, 24);
+  const height = Math.max(rawH + pad * 2, 24);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  return {
+    x: cx - width / 2,
+    y: cy - height / 2,
+    width,
+    height,
+  };
+}
+
+export function renderWalkthroughStepBox(
+  svg: Element,
+  active: Element[],
+): Element | null {
+  const bounds = computeActiveStepBounds(svg, active);
+  if (!bounds) return null;
+  const doc = svg.ownerDocument;
+  if (!doc) return null;
+  const host = svg.querySelector('g.root') ?? svg;
+  const rect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('class', 'walkthrough-step-box');
+  rect.setAttribute('data-testid', 'walkthrough-step-box');
+  rect.setAttribute('x', String(bounds.x));
+  rect.setAttribute('y', String(bounds.y));
+  rect.setAttribute('width', String(bounds.width));
+  rect.setAttribute('height', String(bounds.height));
+  rect.setAttribute('rx', '6');
+  rect.setAttribute('ry', '6');
+  rect.setAttribute('fill', 'rgba(16, 185, 129, 0.06)');
+  rect.setAttribute('stroke', WALKTHROUGH_STEP_BOX_COLOR);
+  rect.setAttribute('stroke-width', '2.5');
+  rect.setAttribute('stroke-dasharray', '8 6');
+  rect.setAttribute('vector-effect', 'non-scaling-stroke');
+  rect.setAttribute('pointer-events', 'none');
+  host.appendChild(rect);
+  return rect;
 }

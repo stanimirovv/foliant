@@ -6,6 +6,7 @@ import {
   buildWalkthroughPlan,
   dimTargetsForStep,
   panTargetForStep,
+  renderWalkthroughStepBox,
   WALKTHROUGH_MAX_ZOOM,
   WalkthroughPlan,
 } from './walkthrough';
@@ -113,11 +114,15 @@ export function useWalkthroughPlayback(opts: UseWalkthroughPlaybackOptions): Wal
     svg
       .querySelectorAll('.walkthrough-dimmed, .walkthrough-active')
       .forEach((el) => el.classList.remove('walkthrough-dimmed', 'walkthrough-active'));
+    svg
+      .querySelectorAll('.walkthrough-step-box')
+      .forEach((el) => el.remove());
     if (!enabled || !plan || plan.steps.length === 0) return;
     const model = parseModel(code);
     const { dimmed, active } = dimTargetsForStep(svg, model, plan, activeIndex);
     dimmed.forEach((el) => el.classList.add('walkthrough-dimmed'));
     active.forEach((el) => el.classList.add('walkthrough-active'));
+    renderWalkthroughStepBox(svg, active);
   }, [enabled, activeIndex, plan, code, containerId, svgVersion]);
 
   // Auto-pan effect (mirroring search auto-pan)

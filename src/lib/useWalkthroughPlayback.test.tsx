@@ -86,8 +86,12 @@ describe('useWalkthroughPlayback', () => {
     expect(screen.getByTestId('active-index').textContent).toBe('0');
     expect(screen.getByTestId('total-steps').textContent).toBe('4');
 
-    // Step 0: i1 is active; i2, i3 (note), i4, i5 are dimmed; participants never dimmed
+    // Step 0: i1 is active and surrounded by the dashed green step box; i2, i3 (note), i4, i5 are dimmed; participants never dimmed
     expect(host.querySelector('[data-id="i1"]')?.classList.contains('walkthrough-active')).toBe(true);
+    const stepBox0 = host.querySelector('rect.walkthrough-step-box');
+    expect(stepBox0).not.toBeNull();
+    expect(stepBox0?.getAttribute('stroke')).toBe('#10b981');
+    expect(stepBox0?.getAttribute('stroke-dasharray')).toBe('8 6');
     expect(host.querySelector('[data-id="i2"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
     expect(host.querySelector('[data-id="i3"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
     expect(host.querySelector('[data-id="i4"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
@@ -100,13 +104,15 @@ describe('useWalkthroughPlayback', () => {
     expect(host.querySelector('[data-id="i1"]')?.classList.contains('walkthrough-active')).toBe(false);
     expect(host.querySelector('[data-id="i1"]')?.classList.contains('walkthrough-dimmed')).toBe(false);
     expect(host.querySelector('[data-id="i2"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(host.querySelectorAll('rect.walkthrough-step-box')).toHaveLength(1);
     expect(host.querySelector('[data-id="i3"]')?.classList.contains('walkthrough-dimmed')).toBe(false);
     expect(host.querySelector('[data-id="i4"]')?.classList.contains('walkthrough-dimmed')).toBe(true);
 
-    // Disable presentation: all classes removed and index resets when re-enabled
+    // Disable presentation: all classes and step box removed and index resets when re-enabled
     rerender(<TestHost code={SEQ_CODE} svg={SEQ_SVG} enabled={false} />);
     expect(host.querySelectorAll('.walkthrough-dimmed')).toHaveLength(0);
     expect(host.querySelectorAll('.walkthrough-active')).toHaveLength(0);
+    expect(host.querySelectorAll('rect.walkthrough-step-box')).toHaveLength(0);
   });
 
   it('handles keyboard shortcuts (ArrowRight, ArrowLeft, Space, Escape) and ignores input elements and defaultPrevented events', () => {

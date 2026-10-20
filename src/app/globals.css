@@ -528,8 +528,8 @@ path[data-et="edge"].edge-hover {
 }
 
 /* Walkthrough player (WALKTHROUGH_PLAYER.plan.md): dim future steps,
-   highlight the active one. Applied by the useWalkthroughPlayback hook as
-   post-render DOM classes (same mechanism as the search highlight). */
+   highlight the active one with a dashed animated green rectangle. Applied by
+   the useWalkthroughPlayback hook as post-render DOM classes / SVG overlay. */
 .walkthrough-dimmed {
   opacity: 0.2;
   transition: opacity 0.25s ease;
@@ -538,11 +538,31 @@ path[data-et="edge"].edge-hover {
   opacity: 1;
 }
 .walkthrough-active {
-  filter: drop-shadow(0 0 6px #3b82f6);
+  filter: none;
+}
+@keyframes walkthrough-step-dash {
+  from {
+    stroke-dashoffset: 28;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.walkthrough-step-box {
+  fill: rgba(16, 185, 129, 0.06);
+  stroke: #10b981;
+  stroke-width: 2.5px;
+  stroke-dasharray: 8 6;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  animation: walkthrough-step-dash 1s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .walkthrough-dimmed {
     transition: none;
+  }
+  .walkthrough-step-box {
+    animation: none !important;
   }
 }
 

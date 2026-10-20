@@ -1,12 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildWalkthroughPlan,
+  computeActiveStepBounds,
   computeFlowchartLevels,
   dimTargetsForStep,
   panTargetForStep,
+  renderWalkthroughStepBox,
   WALKTHROUGH_DIM_OPACITY,
   WALKTHROUGH_MAX_ZOOM,
   WALKTHROUGH_MIN_ZOOM,
+  WALKTHROUGH_STEP_BOX_COLOR,
 } from './walkthrough';
 import { parseModel } from './model';
 import { DiagramConfig, parseViewsData } from './views';
@@ -489,5 +492,32 @@ ${SEQ_CODE}`;
     const flowTargets0 = dimTargetsForStep(flowSvg, flowRes.model, flowPlan, 0);
     expect(flowTargets0.dimmed.some((el) => el.classList.contains('cluster'))).toBe(false);
     expect(panTargetForStep(flowSvg, flowRes.model, flowPlan, 0)).not.toBeNull();
+  });
+
+  it('computes and renders a dashed green highlight rectangle around the active step elements', () => {
+    const svg = parseSvgRoot(SEQ_AUTONUMBER_SVG);
+    const model = parseModel(SEQ_AUTONUMBER_CODE);
+    const plan = buildWalkthroughPlan(SEQ_AUTONUMBER_CODE, null)!;
+
+    const step0 = dimTargetsForStep(svg, model, plan, 0);
+    const bounds0 = computeActiveStepBounds(svg, step0.active);
+    expect(bounds0).not.toBeNull();
+
+    const step1 = dimTargetsForStep(svg, model, plan, 1);
+    const bounds1 = computeActiveStepBounds(svg, step1.active);
+    expect(bounds1).not.toBeNull();
+    // Step 1 is further down vertically than Step 0
+    expect(bounds1!.y).toBeGreaterThan(bounds0!.y);
+
+    const rect = renderWalkthroughStepBox(svg, step0.active);
+    expect(rect).not.toBeNull();
+    expect(rect?.getAttribute('class')).toBe('walkthrough-step-box');
+    expect(rect?.getAttribute('stroke')).toBe(WALKTHROUGH_STEP_BOX_COLOR);
+    expect(rect?.getAttribute('stroke-dasharray')).toBe('8 6');
+    expect(rect?.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    expect(svg.querySelector('.walkthrough-step-box')).toBe(rect);
+
+    expect(computeActiveStepBounds(svg, [])).toBeNull();
+    expect(renderWalkthroughStepBox(svg, [])).toBeNull();
   });
 });

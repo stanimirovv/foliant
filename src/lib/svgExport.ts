@@ -209,9 +209,12 @@ export function prepareSvgForExport(svg: SVGElement, options: SvgExportOptions =
     clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
   }
 
-  // 2. Remove editor artifacts
-  clone.querySelectorAll('.editor-selected').forEach((el) => {
-    el.classList.remove('editor-selected');
+  // 2. Remove editor and walkthrough artifacts
+  clone.querySelectorAll('.editor-selected, .walkthrough-active, .walkthrough-dimmed').forEach((el) => {
+    el.classList.remove('editor-selected', 'walkthrough-active', 'walkthrough-dimmed');
+  });
+  clone.querySelectorAll('.walkthrough-step-box').forEach((el) => {
+    el.remove();
   });
   // The invisible per-edge hit paths are edit-mode selection targets, not
   // diagram content.
