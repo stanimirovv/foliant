@@ -506,6 +506,122 @@ function MultiElementFields({
         </p>
       </div>
 
+      <div
+        className="space-y-2 border border-blue-100 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 rounded p-2.5"
+        data-testid="multi-add-tag-section"
+      >
+        <span className={fieldLabel}>Add tag to all elements</span>
+        {actorKeys.length > 0 && (
+          <div className="flex space-x-1">
+            <select
+              className={fieldInput}
+              value={existingTagSelect}
+              onChange={(e) => setExistingTagSelect(e.target.value)}
+              data-testid="multi-select-existing-tag"
+              aria-label="Select existing tag"
+            >
+              <option value="">Select existing tag...</option>
+              {actorKeys.map(k => (
+                <option key={k} value={k}>#{k}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              data-testid="multi-add-existing-tag"
+              disabled={!existingTagSelect}
+              onClick={submitExistingTag}
+              className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+        )}
+        <div className="flex space-x-1">
+          <input
+            type="text"
+            className={fieldInput}
+            placeholder="Add tag to all..."
+            list="editor-multi-tag-list"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitTag();
+              }
+            }}
+            data-testid="multi-add-tag-input"
+          />
+          <button
+            type="button"
+            title="Add tag"
+            data-testid="multi-add-tag"
+            onClick={submitTag}
+            className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700"
+          >
+            Add
+          </button>
+        </div>
+        <datalist id="editor-multi-tag-list">
+          {actorKeys.map(k => <option key={k} value={k} />)}
+        </datalist>
+      </div>
+
+      <div className="space-y-2" data-testid="multi-tags-by-element-section">
+        <span className={fieldLabel}>Tags by Element</span>
+        <div className="space-y-2 max-h-80 overflow-y-auto pr-0.5">
+          {elementsTagInfo.map(item => (
+            <div
+              key={item.element.key}
+              className="p-2 rounded border border-gray-200 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/40 space-y-1.5"
+              data-testid={`multi-element-${item.element.key}`}
+            >
+              <div className="flex items-center justify-between text-xs font-medium text-gray-700 dark:text-slate-200">
+                <span className="truncate mr-1" title={describeElement(item.element)}>
+                  {describeElement(item.element)}
+                </span>
+                <span className="text-[10px] text-gray-400 dark:text-slate-500 font-mono flex-shrink-0">
+                  {item.element.key}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {(item.ownTags ?? []).length === 0 && (!item.inheritedTags || item.inheritedTags.length === 0) && (
+                  <span className="text-[11px] text-gray-400 dark:text-slate-500 italic">No tags</span>
+                )}
+                {(item.ownTags ?? []).map(tag => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs"
+                  >
+                    {tag}
+                    <button
+                      type="button"
+                      aria-label={`Remove tag ${tag} from ${describeElement(item.element)}`}
+                      data-testid={`remove-tag-${item.element.key}-${tag}`}
+                      onClick={() => onRemoveTag(tag, item.element.key)}
+                      className="ml-1 hover:text-blue-900 dark:hover:text-blue-100"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+                {item.inheritedTags?.map(tag => (
+                  <span
+                    key={tag}
+                    title="Inherited"
+                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 text-xs"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <DeleteButton onRequestDelete={onRequestDelete} />
+
       {arrows.length > 0 && (
         <div
           className="space-y-3 border border-gray-200 dark:border-slate-800 bg-gray-50/40 dark:bg-slate-800/30 rounded p-2.5"
@@ -790,119 +906,6 @@ function MultiElementFields({
           </div>
         </div>
       )}
-
-      <div className="space-y-2 border border-blue-100 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 rounded p-2.5">
-        <span className={fieldLabel}>Add tag to all elements</span>
-        {actorKeys.length > 0 && (
-          <div className="flex space-x-1">
-            <select
-              className={fieldInput}
-              value={existingTagSelect}
-              onChange={(e) => setExistingTagSelect(e.target.value)}
-              data-testid="multi-select-existing-tag"
-              aria-label="Select existing tag"
-            >
-              <option value="">Select existing tag...</option>
-              {actorKeys.map(k => (
-                <option key={k} value={k}>#{k}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              data-testid="multi-add-existing-tag"
-              disabled={!existingTagSelect}
-              onClick={submitExistingTag}
-              className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40"
-            >
-              Add
-            </button>
-          </div>
-        )}
-        <div className="flex space-x-1">
-          <input
-            type="text"
-            className={fieldInput}
-            placeholder="Add tag to all..."
-            list="editor-multi-tag-list"
-            value={tagInput}
-            onChange={(e) => setTagInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitTag();
-              }
-            }}
-            data-testid="multi-add-tag-input"
-          />
-          <button
-            type="button"
-            title="Add tag"
-            data-testid="multi-add-tag"
-            onClick={submitTag}
-            className="px-2 text-xs rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700"
-          >
-            Add
-          </button>
-        </div>
-        <datalist id="editor-multi-tag-list">
-          {actorKeys.map(k => <option key={k} value={k} />)}
-        </datalist>
-      </div>
-
-      <div className="space-y-2">
-        <span className={fieldLabel}>Tags by Element</span>
-        <div className="space-y-2 max-h-80 overflow-y-auto pr-0.5">
-          {elementsTagInfo.map(item => (
-            <div
-              key={item.element.key}
-              className="p-2 rounded border border-gray-200 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/40 space-y-1.5"
-              data-testid={`multi-element-${item.element.key}`}
-            >
-              <div className="flex items-center justify-between text-xs font-medium text-gray-700 dark:text-slate-200">
-                <span className="truncate mr-1" title={describeElement(item.element)}>
-                  {describeElement(item.element)}
-                </span>
-                <span className="text-[10px] text-gray-400 dark:text-slate-500 font-mono flex-shrink-0">
-                  {item.element.key}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {(item.ownTags ?? []).length === 0 && (!item.inheritedTags || item.inheritedTags.length === 0) && (
-                  <span className="text-[11px] text-gray-400 dark:text-slate-500 italic">No tags</span>
-                )}
-                {(item.ownTags ?? []).map(tag => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs"
-                  >
-                    {tag}
-                    <button
-                      type="button"
-                      aria-label={`Remove tag ${tag} from ${describeElement(item.element)}`}
-                      data-testid={`remove-tag-${item.element.key}-${tag}`}
-                      onClick={() => onRemoveTag(tag, item.element.key)}
-                      className="ml-1 hover:text-blue-900 dark:hover:text-blue-100"
-                    >
-                      <X size={10} />
-                    </button>
-                  </span>
-                ))}
-                {item.inheritedTags?.map(tag => (
-                  <span
-                    key={tag}
-                    title="Inherited"
-                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 text-xs"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <DeleteButton onRequestDelete={onRequestDelete} />
     </div>
   );
 }

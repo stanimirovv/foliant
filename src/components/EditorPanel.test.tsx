@@ -1047,6 +1047,30 @@ describe('EditorPanel', () => {
       fireEvent.click(screen.getByTestId('panel-delete'));
       expect(onRequestDelete).toHaveBeenCalledTimes(1);
     });
+
+    it('renders adding tags and deletion at the top of MultiElementFields before arrow, group, and wrap sections', () => {
+      render(<EditorPanel {...makeProps({
+        selectedElements: [participantA, participantB, message0, message1],
+        wrapChecks: { block: { ok: true }, region: { ok: true } },
+        onGroupParticipants: vi.fn(),
+        onWrapInBlock: vi.fn(),
+        onWrapInRegion: vi.fn(),
+      })} />);
+
+      const addTagSection = screen.getByTestId('multi-add-tag-section');
+      const tagsByElementSection = screen.getByTestId('multi-tags-by-element-section');
+      const deleteBtn = screen.getByTestId('panel-delete');
+      const arrowFields = screen.getByTestId('multi-arrow-fields');
+      const groupBoxBtn = screen.getByTestId('group-box-button');
+      const wrapBlockBtn = screen.getByTestId('wrap-block-button');
+
+      // Verify DOM order: addTagSection -> tagsByElementSection -> deleteBtn -> arrowFields -> groupBoxBtn -> wrapBlockBtn
+      expect(addTagSection.compareDocumentPosition(tagsByElementSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(tagsByElementSection.compareDocumentPosition(deleteBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(deleteBtn.compareDocumentPosition(arrowFields) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(arrowFields.compareDocumentPosition(groupBoxBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(groupBoxBtn.compareDocumentPosition(wrapBlockBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
   });
 });
 
