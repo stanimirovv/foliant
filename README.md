@@ -1,5 +1,7 @@
 # Mermaid Sequence & Flowchart Viewer
 
+> **Turn on the project and go through the tutorial.** Run `npm install && npm run dev`, open [http://localhost:3000](http://localhost:3000), and the app automatically loads `diagrams/tutorial.md` — a comprehensive, interactive, one-stop tutorial that walks you through every feature with live, hands-on diagrams. Work through it top to bottom, and by the end you will know how to use the software properly.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
 [![Mermaid.js](https://img.shields.io/badge/Mermaid-v12-ff3670.svg)](https://mermaid.js.org/)
@@ -12,6 +14,7 @@
 
 ## Table of Contents
 
+- [Interactive Tutorial](#interactive-tutorial)
 - [The Gap: Why This Project Exists](#-the-gap-why-this-project-exists)
 - [Quick Start & Build](#-quick-start--build)
 - [Solving The Diagram Maintainability Gap](#-solving-the-diagram-maintainability-gap)
@@ -43,6 +46,40 @@
 - [Architecture & Tech Stack](#-architecture--tech-stack)
 - [Storage Backends (Pluggable Persistence)](#storage-backends-pluggable-persistence)
 - [Testing & Quality Assurance](#-testing--quality-assurance)
+
+---
+
+## Interactive Tutorial
+
+The project ships with a single, comprehensive tutorial file:
+[`diagrams/tutorial.md`](./diagrams/tutorial.md). When you start the app with
+no `?file=` parameter, the tutorial loads automatically.
+
+The tutorial is a Markdown document with **16 parts** and **11 live, embedded
+diagrams**, covering every feature hands-on:
+
+| Part | Topic | What you learn |
+|---|---|---|
+| 0 | The Big Picture | File types, the bidirectional editing model |
+| 1 | Viewing & Navigating | Pan, zoom, search, dark/light theme |
+| 2 | Markdown Documents | WYSIWYG reading, inline prose editing, per-block tag toggles |
+| 3 | Sequence Diagrams | Regions, tags, boxes, saved views, arrow styling & animations |
+| 4 | Flowcharts | Node shapes, edge types, subgraphs, regions |
+| 5 | Filtering & Layers | By Key (On/Merged/Clean/Off), By Color, By Region |
+| 6 | Visual Editing | Create, move, retarget, delete elements; drag-to-connect |
+| 7 | Presenter Mode | Walkthrough/step-through for sequence diagrams and flowcharts |
+| 8 | Animated Arrows | 9 motion presets, sequential animation, color palette |
+| 9 | Sticky Notes | Draggable/resizable notes with markdown & checklists |
+| 10 | Saved Views & Sharing | Named views, URL state, teammate collaboration |
+| 11 | Shift-Select & Deletion | Multi-select, wrap in block/region, cascade delete |
+| 12 | Split View & Source Editing | Monaco editor, live line diffing, code mode |
+| 13 | Creating New Diagrams | New file dialog, starter content for all types |
+| 14 | Export & Productivity | SVG export, copy code, auto-save, live reload |
+| 15 | Full Architecture Diagram | E-commerce platform combining all features |
+| 16 | Quick Reference Card | Keyboard shortcuts, canvas interactions, filter cheat sheet |
+
+Each part has prose explanations and **"Try it"** instructions you can follow
+on the live diagram right next to the text.
 
 ---
 

@@ -35,6 +35,7 @@ import type { MdDiagramMeta } from '@/lib/markdownTypes';
 import { createSerialQueue } from '@/lib/serialQueue';
 import { extractMermaidBlocks } from '@/lib/markdown';
 import { MERMAID_DIAGRAM_TEMPLATES, scaffoldMermaidBlock } from '@/lib/markdownBlocks';
+import { isReadOnlyFile } from '@/lib/readOnlyFiles';
 
 // Undo/redo history depth: capped so both stacks stay small (10-15 steps).
 const HISTORY_LIMIT = 15;
@@ -351,6 +352,11 @@ export default function ClientPage() {
   const isMarkdownFile = Boolean(currentFile && /\.(md|markdown)$/i.test(currentFile));
   const isEmbeddedDiagram = Boolean(isMarkdownFile && diagramIndex !== null);
   const isMarkdownDoc = Boolean(isMarkdownFile && diagramIndex === null);
+
+  // Read-only files (e.g. the shipped tutorial): the UI stays fully explorable
+  // — users can edit on the canvas, in Monaco, or in the WYSIWYG preview — but
+  // changes are never written to disk. The server also rejects writes (403).
+  const isReadOnly = Boolean(currentFile && isReadOnlyFile(currentFile));
   
   const [customDirInput, setCustomDirInput] = useState(dirParam);
   const [recentDirs, setRecentDirs] = useState<string[]>([]);
@@ -571,16 +577,21 @@ export default function ClientPage() {
         setStorageBackend(typeof data.backend === 'string' ? data.backend : null);
         setFiles(data.files || []);
         setMarkdownFiles(data.markdownFiles || []);
-        if (!currentFile && data.files && data.files.length > 0) {
-          const params = new URLSearchParams(searchParams.toString());
-          params.set('file', data.files[0]);
-          params.delete('diagram');
-          router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-        } else if (!currentFile && data.markdownFiles && data.markdownFiles.length > 0) {
-          const params = new URLSearchParams(searchParams.toString());
-          params.set('file', data.markdownFiles[0]);
-          params.delete('diagram');
-          router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+        if (!currentFile) {
+          // Prefer markdown documents (especially tutorial.md) over standalone
+          // .mmd files, so a fresh checkout lands on the interactive tutorial.
+          const mdFiles: string[] = data.markdownFiles || [];
+          const mmdFiles: string[] = data.files || [];
+          const defaultFile =
+            mdFiles.find((f: string) => f === 'tutorial.md') ??
+            mdFiles[0] ??
+            mmdFiles[0];
+          if (defaultFile) {
+            const params = new URLSearchParams(searchParams.toString());
+            params.set('file', defaultFile);
+            params.delete('diagram');
+            router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+          }
         }
       } catch {
         if (ignore) return;
@@ -651,6 +662,11 @@ export default function ClientPage() {
   }, [fetchEmbeddedDiagram, fetchFileContent]);
 
   const postFile = useCallback(async (filename: string, content: string): Promise<{ ok: boolean; code?: string; message?: string }> => {
+    // Defense-in-depth: never POST a write for a read-only file. The server
+    // also rejects it (403), but short-circuiting here avoids a wasted round-trip.
+    if (isReadOnlyFile(filename)) {
+      return { ok: false, code: 'forbidden', message: 'This file is read-only and cannot be modified.' };
+    }
     try {
       const r = await fetch(`/api/file/${filename}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`, {
         method: 'POST',
@@ -692,6 +708,10 @@ export default function ClientPage() {
     content: string,
     expectedContent: string,
   ): Promise<{ ok: boolean; code?: string; message?: string }> => {
+    // Defense-in-depth: never enqueue a save job for a read-only file.
+    if (isReadOnlyFile(filename)) {
+      return { ok: false, code: 'forbidden', message: 'This file is read-only and cannot be modified.' };
+    }
     try {
       const qs = dirParam ? `?dir=${encodeURIComponent(dirParam)}` : '';
       const r = await fetch(`/api/markdown/save${qs}`, {
@@ -732,6 +752,13 @@ export default function ClientPage() {
   // serialized through saveQueueRef to ensure writes never run in parallel.
   const persistActiveDiagram = useCallback(async (contentToPersist: string): Promise<{ ok: boolean; message?: string }> => {
     if (!currentFile) return { ok: false, message: 'No file selected' };
+    // Read-only files: apply the change in-memory so the user can explore,
+    // but never write to disk.
+    if (isReadOnly) {
+      lastWrittenRef.current = contentToPersist;
+      setRawCode(contentToPersist);
+      return { ok: true };
+    }
     return saveQueueRef.current.run(async () => {
       setSaveStatus('saving');
       setSaveConflict(null);
@@ -776,7 +803,7 @@ export default function ClientPage() {
         }
       }
     });
-  }, [currentFile, isEmbeddedDiagram, diagramIndex, saveEmbeddedDiagram, postFile, fetchCurrentContent]);
+  }, [currentFile, isEmbeddedDiagram, diagramIndex, saveEmbeddedDiagram, postFile, fetchCurrentContent, isReadOnly]);
 
   const loadFile = useCallback(async (filename: string, index: number | null): Promise<boolean> => {
     const seq = ++loadSeqRef.current;
@@ -826,7 +853,8 @@ export default function ClientPage() {
       const pendingDocEdit = diagramIndex !== null
         && rawCodeFileRef.current === currentFile
         && rawCodeDiagramRef.current === null
-        && rawCodeRef.current !== lastWrittenRef.current;
+        && rawCodeRef.current !== lastWrittenRef.current
+        && !isReadOnly;
       // Capture the pending document eagerly: the content clear above
       // re-renders (and with it rawCodeRef) before the queued save task runs.
       const docEditToFlush = pendingDocEdit ? { content: rawCodeRef.current, diagramIndex } : null;
@@ -870,7 +898,7 @@ export default function ClientPage() {
     }
     setChangedLines([]);
     setSourceValidationError(null);
-  }, [currentFile, diagramIndex, loadFile, postFile]);
+  }, [currentFile, diagramIndex, loadFile, postFile, isReadOnly]);
 
   useEffect(() => {
     const evtSource = new EventSource(`/api/events${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
@@ -943,6 +971,13 @@ export default function ClientPage() {
       setSaveStatus(prev => (prev === 'saving' ? 'saved' : prev));
       return;
     }
+    // Read-only files: edits are reflected in-memory so the UI stays fully
+    // explorable, but nothing is ever written to disk.
+    if (isReadOnly) {
+      lastWrittenRef.current = rawCode;
+      setSaveStatus('idle');
+      return;
+    }
     setSaveStatus('saving');
     setSaveConflict(null);
     setSaveErrorMessage(null);
@@ -994,7 +1029,7 @@ export default function ClientPage() {
       });
     }, 800);
     return () => clearTimeout(timer);
-  }, [rawCode, currentFile, postFile, isEmbeddedDiagram, diagramIndex, saveEmbeddedDiagram, fetchCurrentContent]);
+  }, [rawCode, currentFile, postFile, isEmbeddedDiagram, diagramIndex, saveEmbeddedDiagram, fetchCurrentContent, isReadOnly]);
 
   const regionRoots = useMemo(() => extractRegions(debouncedCode), [debouncedCode]);
 
@@ -3017,7 +3052,19 @@ export default function ClientPage() {
                 <span>{currentFile} · Diagram {diagramIndex + 1}</span>
               </span>
             )}
-            {saveStatus !== 'idle' && (
+            {isReadOnly && (
+              <span
+                data-testid="read-only-badge"
+                className={`text-xs flex items-center space-x-1 px-2 py-0.5 rounded border font-medium ${
+                  isDark ? 'border-amber-600/50 text-amber-400 bg-amber-900/20' : 'border-amber-400 text-amber-700 bg-amber-50'
+                }`}
+                title="This file is read-only — you can explore and edit on screen, but changes are not saved to disk"
+              >
+                <AlertTriangle size={11} />
+                <span>Read-only</span>
+              </span>
+            )}
+            {saveStatus !== 'idle' && !isReadOnly && (
               <span
                 data-testid="save-indicator"
                 className={`text-xs ${
@@ -3032,7 +3079,7 @@ export default function ClientPage() {
                 {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : 'Save failed'}
               </span>
             )}
-            {saveStatus === 'error' && (
+            {saveStatus === 'error' && !isReadOnly && (
               <span data-testid="save-error" className="text-xs text-red-500 font-medium" title={saveErrorMessage || "Contents aren't saved"}>
                 {saveErrorMessage && saveErrorMessage.toLowerCase().includes("aren't saved")
                   ? saveErrorMessage

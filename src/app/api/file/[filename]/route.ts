@@ -7,6 +7,7 @@ import {
   validateDiagramFileName,
 } from '@/lib/storage';
 import { verifyMarkdownFileAndDiagrams } from '@/lib/markdownSave';
+import { isReadOnlyFile } from '@/lib/readOnlyFiles';
 
 export async function GET(request: Request, { params }: { params: { filename: string } }) {
   try {
@@ -29,6 +30,14 @@ export async function POST(request: Request, { params }: { params: { filename: s
     validateDiagramFileName(params.filename);
   } catch (err) {
     return storageErrorToResponse(err);
+  }
+
+  // Read-only files (e.g. the shipped tutorial) must never be overwritten.
+  if (isReadOnlyFile(params.filename)) {
+    return NextResponse.json(
+      { error: 'This file is read-only and cannot be modified.' },
+      { status: 403 },
+    );
   }
 
   let body: unknown;

@@ -9,6 +9,7 @@ import {
 import { resolveDiagramFilePath } from '@/lib/config';
 import { defaultJobQueue } from '@/lib/jobQueue';
 import { runMarkdownSaveJob } from '@/lib/markdownSave';
+import { isReadOnlyFile } from '@/lib/readOnlyFiles';
 
 // POST /api/markdown/save[&dir=...]
 // Body: { file, index, content, expectedContent }
@@ -59,6 +60,14 @@ export async function POST(request: Request) {
     validateDiagramFileName(file);
   } catch (err) {
     return storageErrorToResponse(err);
+  }
+
+  // Read-only files (e.g. the shipped tutorial) must never be overwritten.
+  if (isReadOnlyFile(file)) {
+    return NextResponse.json(
+      { error: 'This file is read-only and cannot be modified.' },
+      { status: 403 },
+    );
   }
 
   // filePath is only used in job error messages; the job's storage operations

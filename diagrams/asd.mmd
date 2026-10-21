@@ -1,9 +1,0 @@
-%% CONFIG: {"version":1,"actors":{"New1":{"color":"#213b5e","keys":["A","asd"]},"New2":{"color":"#621d26","keys":["asd"]},"New3":{"color":"#194821","keys":["asd"]}},"arrows":[{"from":"New1","to":"New2","label":"Get","color":"#00ff9d","animation":"pulse"},{"from":"New2","to":"New3","label":"Get","color":"#00ff9d","animation":"pulse"},{"from":"New3","to":"New2","label":"Return","color":"#00ff9d","animation":"pulse"},{"from":"New2","to":"New1","label":"Return","color":"#00ff9d","animation":"pulse"}],"notes":[{"id":"note_1792046768697_67bhu","x":-235,"y":-22,"text":"","color":"green","keys":["asd"]}]}
-sequenceDiagram
-    participant New1 as Client
-    participant New2 as Server
-    participant New3 as DB
-    New1->>New2: Get
-    New2->>New3: Get
-    New3->>New2: Return
-    New2->>New1: Return
