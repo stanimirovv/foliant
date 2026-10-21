@@ -327,6 +327,79 @@ describe('WYSIWYGBlock', () => {
     });
   });
 
+  describe('link clicks', () => {
+    it('opens external links in a new tab', () => {
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      renderBlock(makeBlock({ source: '[Google](https://google.com)' }));
+      const link = screen.getByText('Google');
+      fireEvent.click(link);
+      expect(openSpy).toHaveBeenCalledWith('https://google.com', '_blank', 'noopener,noreferrer');
+      openSpy.mockRestore();
+    });
+
+    it('opens relative-path links in a new tab', () => {
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      renderBlock(makeBlock({ source: '[Other](./other.md)' }));
+      const link = screen.getByText('Other');
+      fireEvent.click(link);
+      expect(openSpy).toHaveBeenCalledWith('./other.md', '_blank', 'noopener,noreferrer');
+      openSpy.mockRestore();
+    });
+
+    it('scrolls to the target heading for internal fragment links', () => {
+      const scrollSpy = vi.fn();
+      // Render a block with an internal link; the target heading is a sibling
+      // inside the same preview container.
+      const { container } = render(
+        <div data-testid="markdown-preview">
+          <WYSIWYGBlock
+            block={makeBlock({ nodeType: 'heading', headingDepth: 1, source: '# Target Section' })}
+            blockIndex={0}
+            theme="default"
+            onSave={vi.fn()}
+            onDelete={vi.fn()}
+          />
+          <WYSIWYGBlock
+            block={makeBlock({ source: '[Go to target](#target-section)' })}
+            blockIndex={1}
+            theme="default"
+            onSave={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </div>
+      );
+      // jsdom doesn't implement scrollIntoView — stub it on the target element.
+      const heading = container.querySelector('h1');
+      expect(heading).toBeTruthy();
+      heading!.scrollIntoView = scrollSpy;
+      const link = screen.getByText('Go to target');
+      fireEvent.click(link);
+      expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    });
+
+    it('does not enter edit mode when a link is clicked', () => {
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      renderBlock(makeBlock({ source: '[Google](https://google.com)' }));
+      const link = screen.getByText('Google');
+      fireEvent.click(link);
+      // Still in read mode — no textarea appeared.
+      expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
+      openSpy.mockRestore();
+    });
+
+    it('clicking non-link content still enters edit mode', () => {
+      renderBlock(makeBlock({ source: 'Plain text' }));
+      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      expect(screen.getByTestId('wysiwyg-block-editor-0')).toBeTruthy();
+    });
+
+    it('renders headings with id attributes for anchor targeting', () => {
+      renderBlock(makeBlock({ nodeType: 'heading', headingDepth: 2, source: '## My Section' }));
+      const heading = screen.getByTestId('wysiwyg-block-0').querySelector('h2');
+      expect(heading?.getAttribute('id')).toBe('my-section');
+    });
+  });
+
   describe('block type labels', () => {
     it.each([
       ['heading', 1, 'H1'],

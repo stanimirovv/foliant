@@ -11,6 +11,35 @@
 import { marked } from 'marked';
 import { extractMermaidBlocks } from './markdown';
 
+// Slugify a heading's plain text into a GitHub-style anchor id so that
+// in-document links (`[Section](#section)`) can scroll to the heading.
+export function slugifyHeading(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/<[^>]*>/g, '')   // strip inline HTML tags
+    .replace(/[^\w\s-]/g, '')  // remove punctuation (keep word chars, spaces, hyphens)
+    .trim()
+    .replace(/\s+/g, '-');     // spaces → hyphens
+}
+
+// True when an href is an in-document fragment (`#section`) — the link
+// target lives inside the same rendered document. Everything else
+// (absolute URLs, relative paths, mailto:, etc.) is external.
+export function isInternalLink(href: string): boolean {
+  return href.startsWith('#');
+}
+
+// Custom heading renderer that adds a slug `id` so fragment links work.
+marked.use({
+  renderer: {
+    heading({ tokens, depth }) {
+      const text = this.parser.parseInline(tokens);
+      const id = slugifyHeading(text);
+      return `<h${depth}${id ? ` id="${id}"` : ''}>${text}</h${depth}>\n`;
+    },
+  },
+});
+
 export type MarkdownSegment =
   | { type: 'markdown'; text: string }
   | {

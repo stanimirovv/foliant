@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Check, Trash2, X } from 'lucide-react';
-import { renderMarkdownSegment } from '@/lib/markdownRender';
+import { renderMarkdownSegment, isInternalLink } from '@/lib/markdownRender';
 import { convertBlockType, type TextBlock, type BlockType } from '@/lib/markdownBlocks';
 
 export interface WYSIWYGBlockProps {
@@ -186,6 +186,30 @@ export default function WYSIWYGBlock({
     });
   };
 
+  // Intercept clicks on rendered links: in-document fragment links scroll to
+  // the target heading (no page navigation); everything else opens in a new
+  // tab. stopPropagation keeps the block from entering edit mode on link click.
+  const handleContentClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as HTMLElement).closest('a');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href');
+    if (!href) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (isInternalLink(href)) {
+      const id = href.slice(1);
+      // Search within the markdown preview so we don't jump to an element
+      // outside the document surface.
+      const preview = blockRef.current?.closest('[data-testid="markdown-preview"]');
+      const target = preview
+        ? preview.querySelector(`[id="${CSS.escape(id)}"]`)
+        : document.getElementById(id);
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      window.open(href, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   const renderedHtml = renderMarkdownSegment(block.source);
 
   return (
@@ -289,6 +313,7 @@ export default function WYSIWYGBlock({
         <div
           className="markdown-body"
           dangerouslySetInnerHTML={{ __html: renderedHtml }}
+          onClick={handleContentClick}
         />
       )}
     </div>

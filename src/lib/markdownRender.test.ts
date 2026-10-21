@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitMarkdownSegments, renderMarkdownSegment } from './markdownRender';
+import { splitMarkdownSegments, renderMarkdownSegment, slugifyHeading, isInternalLink } from './markdownRender';
 
 const MD = `# Notes
 
@@ -95,10 +95,22 @@ describe('splitMarkdownSegments', () => {
 describe('renderMarkdownSegment', () => {
   it('renders headings, emphasis and lists', () => {
     const html = renderMarkdownSegment('# Title\n\nSome **bold** and *italic*.\n\n- one\n- two\n');
-    expect(html).toContain('<h1>Title</h1>');
+    expect(html).toContain('<h1 id="title">Title</h1>');
     expect(html).toContain('<strong>bold</strong>');
     expect(html).toContain('<em>italic</em>');
     expect(html).toContain('<li>one</li>');
+  });
+
+  it('adds slug ids to headings so fragment links can target them', () => {
+    const html = renderMarkdownSegment('# Hello World\n\n## Section Two!\n');
+    expect(html).toContain('<h1 id="hello-world">Hello World</h1>');
+    expect(html).toContain('<h2 id="section-two">Section Two!</h2>');
+  });
+
+  it('renders links with their href intact', () => {
+    const html = renderMarkdownSegment('[internal](#section)\n\n[external](https://example.com)\n');
+    expect(html).toContain('<a href="#section">internal</a>');
+    expect(html).toContain('<a href="https://example.com">external</a>');
   });
 
   it('renders fenced code blocks with the language class', () => {
@@ -115,5 +127,47 @@ describe('renderMarkdownSegment', () => {
 
   it('returns an empty string for whitespace-only text', () => {
     expect(renderMarkdownSegment('   \n\n  ')).toBe('');
+  });
+});
+
+describe('slugifyHeading', () => {
+  it('lowercases and replaces spaces with hyphens', () => {
+    expect(slugifyHeading('Hello World')).toBe('hello-world');
+  });
+
+  it('strips punctuation', () => {
+    expect(slugifyHeading('Section Two!')).toBe('section-two');
+    expect(slugifyHeading('What is this?')).toBe('what-is-this');
+  });
+
+  it('strips inline HTML tags', () => {
+    expect(slugifyHeading('<code>API</code> Reference')).toBe('api-reference');
+  });
+
+  it('collapses multiple spaces into single hyphens', () => {
+    expect(slugifyHeading('a   b')).toBe('a-b');
+  });
+});
+
+describe('isInternalLink', () => {
+  it('returns true for fragment-only links', () => {
+    expect(isInternalLink('#section')).toBe(true);
+    expect(isInternalLink('#')).toBe(true);
+  });
+
+  it('returns false for absolute URLs', () => {
+    expect(isInternalLink('https://example.com')).toBe(false);
+    expect(isInternalLink('http://example.com')).toBe(false);
+  });
+
+  it('returns false for relative paths', () => {
+    expect(isInternalLink('./other.md')).toBe(false);
+    expect(isInternalLink('../up.md')).toBe(false);
+    expect(isInternalLink('page.html')).toBe(false);
+  });
+
+  it('returns false for other protocols', () => {
+    expect(isInternalLink('mailto:test@example.com')).toBe(false);
+    expect(isInternalLink('tel:+1234')).toBe(false);
   });
 });
