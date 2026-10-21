@@ -12,12 +12,14 @@ if (dirArg) {
   process.env.DIAGRAMS_DIR = path.resolve(dirArg)
 }
 
+const port = parseInt(process.env.PORT, 10) || 3000
+
 app.prepare().then(() => {
   createServer((req, res) => {
     const parsedUrl = parse(req.url, true)
     handle(req, res, parsedUrl)
-  }).listen(3000, (err) => {
+  }).listen(port, (err) => {
     if (err) throw err
-    console.log('> Ready on http://localhost:3000')
+    console.log(`> Ready on http://localhost:${port}`)
   })
 })
