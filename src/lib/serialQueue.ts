@@ -1,6 +1,6 @@
 // A FIFO executor that runs async tasks strictly one at a time. Used on the
-// server as the process-wide disk write lock (see fileStore.ts) and on the
-// client to send saves in order, never overlapping (see ClientPage).
+// server as the process-wide storage write lock (see storage/index.ts) and on
+// the client to send saves in order, never overlapping (see ClientPage).
 
 export interface SerialQueue {
   // Runs `task` after every previously queued task has settled; resolves or

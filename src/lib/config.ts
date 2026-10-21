@@ -1,20 +1,7 @@
 import path from 'path';
-import os from 'os';
+import { validateDiagramFileName, expandTilde } from './storage/validate';
 
-function expandTilde(filepath: string) {
-  if (filepath.charCodeAt(0) === 126 /* ~ */) {
-    if (filepath.length === 1 || filepath.charCodeAt(1) === 47 /* / */ || filepath.charCodeAt(1) === 92 /* \ */) {
-      return os.homedir() + filepath.slice(1);
-    }
-  }
-  return filepath;
-}
-
-// Resolve a user-supplied directory path (tilde-expanded, made absolute)
-// without any fallback or side effects.
-export function resolveDirPath(dirParam: string): string {
-  return path.resolve(expandTilde(dirParam));
-}
+export { resolveDirPath } from './storage/validate';
 
 export function getDiagramsDir(req?: Request) {
   let dirParam = null;
@@ -23,7 +10,7 @@ export function getDiagramsDir(req?: Request) {
     dirParam = url.searchParams.get('dir');
   }
   if (dirParam) {
-    return resolveDirPath(dirParam);
+    return path.resolve(expandTilde(dirParam));
   }
   if (process.env.DIAGRAMS_DIR) {
     return expandTilde(process.env.DIAGRAMS_DIR);
@@ -33,16 +20,8 @@ export function getDiagramsDir(req?: Request) {
 
 // Resolve a file name to a path inside the diagrams directory, rejecting
 // anything that could escape it (path separators, '..', absolute paths).
+// Throws StorageError('invalid-name'); see storage/validate.ts.
 export function resolveDiagramFilePath(diagramsDir: string, filename: string): string {
-  if (
-    !filename ||
-    filename.includes('/') ||
-    filename.includes('\\') ||
-    filename === '.' ||
-    filename === '..' ||
-    path.isAbsolute(filename)
-  ) {
-    throw new Error('Invalid file name');
-  }
+  validateDiagramFileName(filename);
   return path.join(diagramsDir, filename);
 }

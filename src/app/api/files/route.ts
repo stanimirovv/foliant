@@ -1,19 +1,16 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import { getDiagramsDir } from '@/lib/config';
+import { getStorageBackend, resolveStorageDir, storageErrorToResponse } from '@/lib/storage';
 
 export async function GET(request: Request) {
-  const diagramsDir = getDiagramsDir(request);
   try {
-    await fs.mkdir(diagramsDir, { recursive: true });
-    const files = await fs.readdir(diagramsDir);
-    const mmdFiles = files.filter(f => f.endsWith('.mmd'));
-    const markdownFiles = files
-      .filter(f => f.endsWith('.md') || f.endsWith('.markdown'))
-      .sort();
-    return NextResponse.json({ files: mmdFiles, markdownFiles });
-  } catch {
-    return NextResponse.json({ error: 'Failed to read directory' }, { status: 500 });
+    const backend = getStorageBackend();
+    const dir = resolveStorageDir(request);
+    const { files, markdownFiles } = await backend.listFiles(dir);
+    // `backend` is additive: the client uses it to surface the in-memory
+    // volatility banner.
+    return NextResponse.json({ files, markdownFiles, backend: backend.name });
+  } catch (err) {
+    return storageErrorToResponse(err);
   }
 }
 

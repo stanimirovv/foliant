@@ -1,21 +1,36 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import { getDiagramsDir, resolveDiagramFilePath } from '@/lib/config';
+import {
+  getStorageBackend,
+  resolveStorageDir,
+  storageWriteQueue,
+  storageErrorToResponse,
+  validateDiagramFileName,
+} from '@/lib/storage';
+import { resolveDiagramFilePath } from '@/lib/config';
 import { defaultJobQueue } from '@/lib/jobQueue';
 import { runMarkdownSaveJob } from '@/lib/markdownSave';
-import { diskWriteQueue, writeFileAtomic } from '@/lib/fileStore';
 
 // POST /api/markdown/save[&dir=...]
 // Body: { file, index, content, expectedContent }
 //
 // Enqueues a background save job and returns its id immediately (202), so the
 // caller (the editor's auto-save) never waits for the file write. The job
-// re-reads the markdown file, verifies the target block still matches
-// `expectedContent` (compare-and-swap), splices the new diagram in by AST
-// offsets, verifies that nothing else changed, and writes the file atomically.
-// Poll GET /api/jobs/[id] for the outcome.
+// re-reads the markdown file through the active storage backend, verifies the
+// target block still matches `expectedContent` (compare-and-swap), splices the
+// new diagram in by AST offsets, verifies that nothing else changed, and
+// writes the file through the backend with true version-based CAS (an
+// external write landing between the job's read and write fails the job with
+// code 'conflict' instead of being lost). Poll GET /api/jobs/[id] for the
+// outcome.
 export async function POST(request: Request) {
-  const diagramsDir = getDiagramsDir(request);
+  let backend: ReturnType<typeof getStorageBackend>;
+  let dir: string;
+  try {
+    backend = getStorageBackend();
+    dir = resolveStorageDir(request);
+  } catch (err) {
+    return storageErrorToResponse(err);
+  }
 
   let body: unknown;
   try {
@@ -40,20 +55,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid save request' }, { status: 400 });
   }
 
-  let filePath: string;
   try {
-    filePath = resolveDiagramFilePath(diagramsDir, file);
-  } catch {
-    return NextResponse.json({ error: 'Invalid file name' }, { status: 400 });
+    validateDiagramFileName(file);
+  } catch (err) {
+    return storageErrorToResponse(err);
   }
 
+  // filePath is only used in job error messages; the job's storage operations
+  // go through the active backend, keyed by (dir, file).
+  const filePath = resolveDiagramFilePath(dir, file);
+
   const jobId = defaultJobQueue.enqueue(() =>
-    diskWriteQueue.run(() =>
+    storageWriteQueue.run(() =>
       runMarkdownSaveJob(
         { filePath, index, content, expectedContent },
         {
-          readFile: p => fs.readFile(p, 'utf-8'),
-          writeFileAtomic: (p, c) => writeFileAtomic(p, c),
+          readFileVersion: () => backend.readFileVersion(dir, file),
+          writeFile: (_p, c, opts) => backend.writeFile(dir, file, c, opts),
         },
       ),
     ),

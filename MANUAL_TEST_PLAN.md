@@ -305,3 +305,69 @@ exists to check the parts that need human eyes (visuals, timing, feel).
 - [ ] `npx tsc --noEmit` — green.
 - [ ] `npx next lint` — green.
 - [ ] `npx cypress run` — all green (requires `npm run dev` running).
+
+---
+
+# Addendum — Storage Backends (per-backend manual checks)
+
+This addendum verifies the pluggable storage layer (STORAGE_BACKENDS.plan.md) by hand,
+once per backend. The automated storage suite covers the same behaviors headlessly:
+`npm run test:e2e:storage:fs`, `:memory`, `:s3` (the s3 leg needs a local S3 endpoint —
+LocalStack via Docker when available, else a local `moto_server` process; see A3). See
+the README's [Storage Backends](../README.md#storage-backends-pluggable-persistence)
+section for the env-var table, the `dir` mapping, and the error-code table.
+
+## A0 — Boot & backend identity (all backends)
+
+> Stop here: the server boots with the selected backend and reports it.
+
+- [ ] Boot with the backend's env (below); `curl -s localhost:3000/api/files` answers with the fixtures and the right `"backend"` field: `fs`, `memory`, or `s3`.
+- [ ] `STORAGE_BACKEND=bogus npm run dev` fails at boot with `Unknown STORAGE_BACKEND` (misconfiguration is a boot error, not a per-request 503).
+- [ ] `STORAGE_BACKEND=s3 npm run dev` without `S3_BUCKET` fails at boot with `S3_BUCKET is required`.
+
+## A1 — fs (default, unchanged behavior)
+
+> Stop here: with no env set, everything works exactly as before — nothing is lost in translation.
+
+- [ ] Boot plain (`npm run dev`); the committed `diagrams/` fixtures load; `curl -s localhost:3000/api/files` reports `"backend":"fs"`.
+- [ ] Edit a diagram in the UI → auto-save writes the file to `diagrams/` on disk (watch the file's mtime / `git status`).
+- [ ] Edit the same file on disk externally → the open page adopts it ("Reloaded from disk" notice, canvas updates) — chokidar live reload.
+- [ ] `?dir=` switches to another on-disk directory (create one with a diagram first); the Files list follows.
+
+## A2 — memory (volatile by design)
+
+> Stop here: the memory backend serves the seeded fixtures, warns about volatility, and never touches disk.
+
+- [ ] Boot with `STORAGE_BACKEND=memory MEMORY_STORAGE_SEED_DIR=./diagrams npm run dev`; the seeded fixtures appear in the Files list under the default dir.
+- [ ] The amber banner (`data-testid="memory-storage-banner"`) reads "In-memory storage — diagrams are not saved to disk and will be lost when the server restarts."
+- [ ] Edit a diagram → auto-save succeeds (indicator "Saved"); `git status` shows no change under `diagrams/` — nothing is written to disk.
+- [ ] Open a second browser tab on the same file; edit in tab 1 → tab 2 adopts the change via live reload (changes made through the API are pushed to open pages; there is no external disk writer).
+- [ ] `?dir=some-namespace` isolates namespaces: files created under one `dir` do not appear under another.
+- [ ] Restart the server → all diagrams created in this session are gone (only the seeded fixtures remain). This is the documented volatility.
+
+## A3 — s3 (LocalStack or a local moto_server process)
+
+> Stop here: the s3 backend lists, saves, live-reloads, and fails cleanly against an S3-compatible endpoint.
+
+The checks below use LocalStack in Docker; every step works the same against a local
+`moto_server` process (no Docker — `scripts/s3-test-server.mjs start` boots one on
+port 4566, or run `.venv-s3/bin/moto_server -p 4566` after the automated suite has
+provisioned the venv). The automated s3 leg (`npm run test:e2e:storage:s3`) picks
+LocalStack when a Docker daemon answers and moto otherwise.
+
+- [ ] Boot LocalStack (`docker run -d --name localstack -p 4566:4566 localstack/localstack`), create bucket `manual-check`, then boot with `STORAGE_BACKEND=s3 S3_BUCKET=manual-check S3_ENDPOINT=http://localhost:4566 S3_POLL_INTERVAL_MS=1000 npm run dev`.
+- [ ] Put a diagram at the bucket root (e.g. `aws --endpoint-url=http://localhost:4566 s3 cp demo.mmd s3://manual-check/`) → it appears in the Files list; `curl -s localhost:3000/api/files` reports `"backend":"s3"`.
+- [ ] Edit in the UI → auto-save succeeds; `aws --endpoint-url=http://localhost:4566 s3 cp s3://manual-check/demo.mmd -` shows the saved content (persisted in the bucket, not on disk).
+- [ ] `?dir=` maps to a key prefix: create `demo.mmd` under the prefix `team/` (PutObject key `team/demo.mmd`) → open `?dir=team` → the file lists; the root listing does not show it.
+- [ ] Live reload: with `S3_POLL_INTERVAL_MS=1000`, overwrite the object externally (PutObject) → the open page adopts it within a couple of seconds ("Reloaded from disk"). With the variable unset, the page does not adopt external writes (polling off by default).
+- [ ] Save conflict: open a markdown file with a diagram, externally rewrite that diagram block (PutObject with changed content), then edit the block in the UI → the save job fails with code `conflict` ("The file changed on disk; reload it before saving"); the bucket object is untouched.
+- [ ] Backend down: `docker stop localstack` → edit in the UI → the save indicator shows "Save failed" and the error reads "Storage unavailable: …"; the app stays usable. `docker start localstack` → the next edit saves again.
+- [ ] Documented divergence: `/api/dir-check?dir=team` answers `exists: false` while the prefix holds no objects, even though writes to it succeed; with no `?dir=` at all it answers `exists: false` without probing.
+
+## A4 — Both automated suites
+
+> Stop here: both suites are green from a clean checkout.
+
+- [ ] `npm run test:e2e` — main suite green (fs backend, unchanged).
+- [ ] `npm run test:e2e:storage` — all three legs green. The s3 leg uses LocalStack via Docker when a daemon is available, else a local `moto_server` process (auto-provisioned into `.venv-s3/`); afterwards no test-server process or `mermaid-viewer-e2e-localstack` container is left behind.
+- [ ] `npx vitest run src/lib/storage` — green; with `STORAGE_TEST_S3_ENDPOINT` pointing at a running S3-compatible endpoint (LocalStack or moto), the s3 conformance leg also runs.

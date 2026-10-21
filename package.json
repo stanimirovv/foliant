@@ -8,9 +8,14 @@
     "start": "NODE_ENV=production node server.js",
     "lint": "next lint",
     "test": "vitest run",
-    "test:e2e": "cypress run"
+    "test:e2e": "cypress run",
+    "test:e2e:storage": "node scripts/e2e-storage.mjs all",
+    "test:e2e:storage:fs": "node scripts/e2e-storage.mjs fs",
+    "test:e2e:storage:memory": "node scripts/e2e-storage.mjs memory",
+    "test:e2e:storage:s3": "node scripts/e2e-storage.mjs s3"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1153.0",
     "@monaco-editor/react": "^4.7.0",
     "chokidar": "^5.0.0",
     "lucide-react": "^1.51.0",
@@ -24,6 +29,7 @@
     "remark-parse": "^11.0.0"
   },
   "devDependencies": {
+    "@testcontainers/localstack": "^12.2.1",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

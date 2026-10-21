@@ -8,6 +8,7 @@
 
 # testing
 /coverage
+/.venv-s3/
 
 # next.js
 /.next/

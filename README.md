@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
 [![Mermaid.js](https://img.shields.io/badge/Mermaid-v12-ff3670.svg)](https://mermaid.js.org/)
-[![Tests](https://img.shields.io/badge/Tests-1100%2B%20Passing-brightgreen.svg)](https://vitest.dev/)
+[![Tests](https://img.shields.io/badge/Tests-1500%2B%20Passing-brightgreen.svg)](https://vitest.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue.svg)](https://www.typescriptlang.org/)
 
 > **A local-first, bidirectional WYSIWYG editor and architectural viewer for massive Mermaid diagrams and Markdown documents with embedded diagrams (2,000+ lines, 50+ flows) with hierarchical layers, dynamic domain merging, zero syntax breakage, and interactive delighters.**
@@ -41,6 +41,7 @@
   - [LLM Context Guidelines](#4-llm-context-guidelines-diagram-guidelinesmd)
 - [Saved Views & URL State Persistence](#-saved-views--url-state-persistence)
 - [Architecture & Tech Stack](#-architecture--tech-stack)
+- [Storage Backends (Pluggable Persistence)](#storage-backends-pluggable-persistence)
 - [Testing & Quality Assurance](#-testing--quality-assurance)
 
 ---
@@ -61,6 +62,7 @@ This project fills the gap between **raw text diagrams** and **visual whiteboard
 2. **True WYSIWYG Manipulation**: Click, drag, reorder, connect lifelines, recolor, and retarget arrow endpoints directly on the rendered SVG canvas.
 3. **Architectural Maintainability at Enterprise Scale**: Hierarchical layers (`%% @region-start`), zero-config structural subgraphs and boxes, dynamic microservice merging (collapsing 10 microservices into a single domain block on the fly), and non-destructive saved views.
 4. **Interactive Delighters**: Draggable and resizable Markdown sticky notes with live task checklists, 9 animated arrow motion styles with chronological sequencing, bi-directional Monaco editor split-view with live line-diff highlighting, WYSIWYG markdown document editing with live diagram previews, and standalone SVG export.
+5. **Pluggable Persistence**: One storage layer behind every read and write, with three swappable backends selected by environment variables — the local filesystem (default, zero-config), an in-memory store for scratchpads and testing, and Amazon S3 (or any S3-compatible endpoint) with true cross-process compare-and-swap. See [Storage Backends](#storage-backends-pluggable-persistence).
 
 ---
 
@@ -92,6 +94,16 @@ npm run dev -- /absolute/path/to/your/system/diagrams
 ```
 > **Tip:** You can also pass the directory path directly: `node server.js /path/to/diagrams`. Once launched, open [http://localhost:3000](http://localhost:3000) in your browser. You can switch directories dynamically anytime in the UI sidebar!
 
+By default, diagrams are stored on the local filesystem. Two more storage backends are available behind the same interface — see [Storage Backends](#storage-backends-pluggable-persistence) for the full configuration:
+
+```bash
+# In-memory storage (volatile; an amber banner warns about it)
+STORAGE_BACKEND=memory MEMORY_STORAGE_SEED_DIR=./diagrams npm run dev
+
+# Amazon S3 or an S3-compatible endpoint (e.g. LocalStack)
+STORAGE_BACKEND=s3 S3_BUCKET=my-diagrams S3_ENDPOINT=http://localhost:4566 npm run dev
+```
+
 ### 3. Production Build & Run
 To compile and run an optimized production build:
 ```bash
@@ -105,7 +117,7 @@ npm run start
 ### 4. Running Verification & Test Suites
 The project enforces high code quality with full automated testing suites:
 ```bash
-# Run unit and integration tests (Vitest) - 1,100+ tests across 36 suites
+# Run unit and integration tests (Vitest) - 1,500+ tests across 48 suites
 npx vitest run
 
 # Run linter
@@ -114,8 +126,14 @@ npm run lint
 # Run type checker
 npx tsc --noEmit
 
-# Run headless end-to-end test suite (11 Cypress specs covering canvas interactions, persistence, sticky notes, and WYSIWYG markdown)
+# Run headless end-to-end test suite (18 Cypress specs covering canvas interactions, persistence, sticky notes, and WYSIWYG markdown)
 npx cypress run
+
+# Run the storage e2e suite (a second Cypress suite that verifies the fs,
+# memory, and s3 backends; the s3 leg uses LocalStack via Docker when available,
+# else a local moto_server process — needs python3)
+npm run test:e2e:storage        # all legs: fs, memory, s3
+npm run test:e2e:storage:fs     # a single leg
 ```
 
 ---
@@ -498,7 +516,7 @@ mermaid-sequence-viewer/
 ├── server.js                     # Custom Node.js HTTP server + CLI directory argument resolver
 ├── src/
 │   ├── app/                      # Next.js App Router (pages & SSE event streams)
-│   │   ├── api/events/route.ts   # Chokidar file watcher & Server-Sent Events (SSE)
+│   │   ├── api/events/route.ts   # Server-Sent Events (SSE) live-reload stream
 │   │   ├── api/file/[filename]/  # Read & debounced write-through auto-save endpoint
 │   │   ├── api/files/route.ts    # Directory indexer & file listing (.mmd and .md)
 │   │   └── api/markdown/save/    # Targeted markdown block saving & verification
@@ -524,11 +542,108 @@ mermaid-sequence-viewer/
 │       ├── markdownBlocks.ts     # Markdown AST block parser & surgical text splices
 │       ├── markdownSave.ts       # Markdown embedded diagram block updater & verifier
 │       ├── diagramView.ts        # Diagram view state resolution & URL encoding helpers
-│       ├── serialQueue.ts        # Serialized disk write queue preventing write races
-│       ├── fileStore.ts          # Atomic file read, write, and directory utilities
+│       ├── serialQueue.ts        # FIFO queue primitive behind the storage write queue
+│       ├── storage/              # Pluggable storage layer (fs / memory / s3 backends)
+│       │   ├── types.ts          # StorageBackend interface & StorageError taxonomy
+│       │   ├── fileSystemBackend.ts  # Default backend: atomic verified writes, chokidar watch
+│       │   ├── memoryBackend.ts  # Volatile in-memory namespaces (scratchpads/testing)
+│       │   ├── s3Backend.ts      # S3 backend: ETag compare-and-swap, polling watch
+│       │   └── index.ts          # Backend selection (globalThis singleton) & write queue
 │       └── views.ts              # %% CONFIG: parser, serializer & sticky note state
 ├── diagrams/                     # Bundled example diagrams & fixtures
 └── diagram-guidelines.md         # Context file for LLM diagram generation
+```
+
+---
+
+## Storage Backends (Pluggable Persistence)
+
+Everything the app persists — `.mmd` diagrams, `.md` documents, and the `%% CONFIG:` headers inside them — goes through one storage layer (`src/lib/storage/`) behind a common `StorageBackend` interface. Three interchangeable backends implement it, selected by environment variables. **Zero-config compatibility:** with no variables set, the app uses the **fs** backend against the local `./diagrams` directory, exactly as it always has.
+
+### Configuration
+
+| Variable | Values | Default | Description |
+|---|---|---|---|
+| `STORAGE_BACKEND` | `fs` \| `memory` \| `s3` | `fs` | Selects the backend. An unknown value fails the boot, not a request. |
+| `DIAGRAMS_DIR` | path | `./diagrams` | (fs) Diagrams directory; also set by the CLI argument (`node server.js /path/to/dir`). |
+| `MEMORY_STORAGE_SEED_DIR` | path | unset | (memory) Directory whose `.mmd`/`.md` files seed the `default` namespace at boot. |
+| `S3_BUCKET` | bucket name | — | (s3) Required; a missing bucket fails the boot. |
+| `S3_ENDPOINT` | URL | unset | (s3) Custom endpoint, e.g. LocalStack at `http://localhost:4566`. Implies path-style addressing and `test`/`test` credentials. |
+| `S3_REGION` | region | `us-east-1` | (s3) Region for the S3 client. |
+| `S3_FORCE_PATH_STYLE` | `true` \| `false` | path-style when `S3_ENDPOINT` is set | (s3) Force path-style URLs (needed by most S3-compatible endpoints). |
+| `S3_POLL_INTERVAL_MS` | milliseconds | `0` (off) | (s3) Enables the polling change-watcher that powers live reload for external writes. |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | credentials | `test` / `test` when `S3_ENDPOINT` is set | (s3) Credentials. Without an endpoint, the default AWS provider chain is used. |
+| `PORT` | port | `3000` | Server port. |
+
+```bash
+# In-memory storage (nothing is persisted; an amber banner warns about it)
+STORAGE_BACKEND=memory MEMORY_STORAGE_SEED_DIR=./diagrams npm run dev
+
+# Amazon S3 (or an S3-compatible endpoint such as LocalStack)
+STORAGE_BACKEND=s3 S3_BUCKET=my-diagrams \
+  S3_ENDPOINT=http://localhost:4566 S3_POLL_INTERVAL_MS=1000 \
+  npm run dev
+```
+
+### What `dir` means per backend
+
+The UI's directory concept (`?dir=` on the API and in the page URL) maps onto each backend's native hierarchy:
+
+| Backend | `?dir=` maps to | No `?dir=` | Volatility |
+|---|---|---|---|
+| `fs` | A filesystem path (tilde-expanded, absolute) | The diagrams directory (`DIAGRAMS_DIR` / CLI argument) | Persistent on disk |
+| `memory` | A namespace key (no control characters) | `default` | Lost on server restart — an amber banner warns about this |
+| `s3` | An object-key prefix (leading/trailing slashes stripped, no `..` segments) | `''` — the bucket root | Persistent in the bucket |
+
+File-name validation is identical on every backend (a single safe path component, at most 255 bytes), so a diagram that saves on one backend saves on all of them.
+
+### Writes, compare-and-swap, and live reload
+
+- **Atomic, verified writes.** Every write is atomic and verified by a byte-identical read-back; a mismatch fails with `verify-failed` and leaves nothing half-written. All writes run through one process-wide serial queue, so a read-modify-write can never interleave with another write.
+- **Compare-and-swap.** Markdown embedded-diagram saves re-read the file and refuse to write when its version changed since it was read (sha256 on fs/memory, the object ETag on s3 — a pre-write `GetObject` fast-fail plus `IfMatch` on `PutObject`). A mismatch fails with `conflict` and writes nothing. Whole-file saves are last-writer-wins.
+- **Live reload.** `fs` watches each directory with chokidar (instant). `s3` polls `ListObjectsV2` and diffs ETag/LastModified — only when `S3_POLL_INTERVAL_MS` > 0 (S3 event notifications are not used). `memory` has no watcher by design: there is no external writer into a process-local map, and changes made through the app's own API are pushed to open pages through the shared in-process event emitter.
+- **Documented divergences.** An empty S3 prefix cannot "exist": `/api/dir-check` reports `exists: false` for a prefix holding no objects (and answers `exists: false` without probing when no `?dir=` is given at all; it never creates a directory). The memory backend cannot fail — the save-error paths are unreachable there by construction.
+
+### Error codes
+
+Route handlers map storage failures to stable machine-readable codes (`src/lib/storage/types.ts`):
+
+| `code` | HTTP | Meaning | Client save indicator |
+|---|---|---|---|
+| `invalid-name` | 400 | File name or dir failed validation | "Contents aren't saved: …" |
+| `not-found` | 404 | File (or dir) does not exist | "Contents aren't saved: …" |
+| `conflict` | 409 | Compare-and-swap version mismatch (markdown save jobs report it as job code `conflict`) | "The file changed on disk; reload it before saving" + conflict notice |
+| `forbidden` | 403 | Permission denied | "Contents aren't saved: …" |
+| `too-large` | 413 | Payload/key over the backend's limit | "Contents aren't saved: …" |
+| `unavailable` | 503 | Backend unreachable or misconfigured | "Storage unavailable: …" |
+| `verify-failed` | 500 | Read-back after write is not byte-identical | "Contents aren't saved: …" |
+| `unknown` | 500 | Anything else | "Contents aren't saved: …" |
+
+### Running the test suites
+
+Two Cypress suites run against different servers; the main suite is unchanged (fs backend, `http://localhost:3000`):
+
+```bash
+# Main e2e suite (fs backend, port 3000)
+npm run test:e2e          # or: npx cypress run
+
+# Storage e2e suite (port 3100; one leg per backend — the runner boots the
+# server and, for s3, a local S3 test server; see below)
+npm run test:e2e:storage        # all legs: fs, memory, s3
+npm run test:e2e:storage:fs     # a single leg
+npm run test:e2e:storage:memory
+npm run test:e2e:storage:s3
+```
+
+The storage suite (`cypress.storage.config.ts`) runs the main-suite specs that round-trip data through storage plus the backend-specific specs in `cypress/storage-e2e/` (scenario matrix E1–E13: surface, dirs, save conflict, live reload, error modes). On the memory leg the save-error scenario (E11) is reported as pending — an in-memory backend cannot fail by construction. `markdown-persistence` stays in the main suite only: it seeds by writing straight to disk, which only the fs backend can observe.
+
+The s3 leg needs a local S3 endpoint, provided by `scripts/s3-test-server.mjs` in one of two modes: **LocalStack in Docker** via `@testcontainers/localstack` (the default when a Docker daemon answers — this is what CI uses), or — with no Docker — a **local `moto_server` process** (`pip install 'moto[server]'`, auto-provisioned into `.venv-s3/` on first use; needs python3). Both modes bind the same fixed port (`S3_E2E_PORT`, default 4566) so the endpoint survives the error-mode test's down/up cycle; both are in-memory, so the suite re-creates the bucket and re-seeds fixtures after a restart. Force a mode with `S3_E2E_SERVER=testcontainers|moto`; the unit/conformance s3 leg accepts either endpoint via `STORAGE_TEST_S3_ENDPOINT`.
+
+The unit/conformance suite covers the storage layer itself; its s3 leg is enabled by pointing it at an endpoint:
+
+```bash
+npx vitest run src/lib/storage                                              # fs + memory legs
+STORAGE_TEST_S3_ENDPOINT=http://localhost:4566 npx vitest run src/lib/storage  # + s3 conformance leg
 ```
 
 ---
@@ -542,16 +657,28 @@ The codebase is built with strict Test-Driven Development (TDD) principles to en
 npx vitest run
 ```
 
-### Verified Test Coverage Highlights (1,100+ Tests across 36 Suites)
+End-to-end (Cypress) — two suites, see [Storage Backends](#storage-backends-pluggable-persistence) for details and the per-backend legs:
+
+```bash
+# Main suite (fs backend, port 3000)
+npm run test:e2e
+
+# Storage suite (port 3100; fs/memory/s3 legs — the s3 leg uses LocalStack via
+# Docker when available, else a local moto_server process; needs python3)
+npm run test:e2e:storage
+```
+
+### Verified Test Coverage Highlights (1,500+ Tests across 48 Suites)
 - **Agnostic Pre-processor**: Validates nested regions, unclosed tags, dangling `alt`/`end` blocks, and multi-tier region paths.
 - **Zero-Config Subgraph & Box Tagging**: Tests automatic title slugification, 3-tier merging (On, Merged, Clean, Off), and empty container cleanup across sequence and flowchart diagrams.
 - **WYSIWYG Transformations & Chained Edges**: Tests participant renames, lifeline creations, self-pointing loops, endpoint retargeting, arrow style injections, multi-hop flowchart chained edges (`A --> B --> C`), and cascade deletions.
 - **Actor & Service Merging**: Tests collapsing participants by tag/color, rewriting external arrows, and stripping internal self-calls in Clean mode.
 - **Sticky Notes & Animations**: Tests drag and corner-resize coordinate math, responsive font scaling, markdown parsing, CONFIG serialization, and chronological sequential animation timing.
 - **Interactive Markdown WYSIWYG**: Tests block-level AST parsing, scoped inline textarea editing, targeted block replacement, and per-diagram view/tag overlay controls.
-- **Persistence & Serialization**: Verifies serialized disk write queue (`serialQueue`), post-write verification, debounced write-throughs, SSE echo cancellation, and external disk change adoption.
+- **Persistence & Serialization**: Verifies the serialized storage write queue (`serialQueue` behind `storageWriteQueue`), post-write verification, debounced write-throughs, SSE echo cancellation, and external disk change adoption.
+- **Storage Backends**: A shared conformance suite runs against every backend (fs, memory, s3) — byte-identical round-trips (CRLF/unicode/emoji), atomic verified writes, compare-and-swap conflicts, S3 pagination beyond 1000 keys, and the full error taxonomy — plus a separate Cypress suite (11 specs per leg) covering the E1–E13 scenario matrix on each backend.
 - **Undo / Redo History**: Confirms strict 15-entry bounded history and disk state synchronization.
-- **11 Cypress End-to-End Suites**: Comprehensive browser-level tests covering canvas interaction, lifeline drag handles, flowchart hit targets, sticky note drag/resize/selection, pan/zoom, and markdown persistence.
+- **18 Cypress End-to-End Suites (main) + 11 per storage leg**: Comprehensive browser-level tests covering canvas interaction, lifeline drag handles, flowchart hit targets, sticky note drag/resize/selection, pan/zoom, and markdown persistence.
 
 ---
 

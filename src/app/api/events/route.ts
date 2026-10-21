@@ -1,42 +1,62 @@
 import { NextResponse } from 'next/server';
-import chokidar from 'chokidar';
-import { getDiagramsDir } from '@/lib/config';
+import {
+  getStorageBackend,
+  resolveStorageDir,
+  subscribeStorageChanges,
+  StorageBackend,
+  StorageChangeEvent,
+} from '@/lib/storage';
+
+// SSE live reload. Two feeds converge per directory:
+//  - API-mediated writes: every backend's writeFile pulses the shared
+//    storageEvents emitter (cached on globalThis), which this route subscribes
+//    to — this is what makes live reload work on the memory backend.
+//  - External changes: the active backend's watch() (fs: chokidar; s3:
+//    optional polling) feeds the same client set.
+// The event shape ({ event, file }) and the .mmd/.md/.markdown filter are
+// unchanged; SSE client-cancel cleanup is preserved.
 
 interface DirState {
-  watcher: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   clients: Set<ReadableStreamDefaultController>;
+  unsubscribeEmitter: () => void;
+  unwatch?: () => void;
 }
 
+// Module-level in this one route bundle: every SSE request to /api/events
+// shares it, and the per-dir watcher/subscription is created exactly once.
 const dirs = new Map<string, DirState>();
 
-function getOrCreateDirState(dir: string): DirState {
-  if (!dirs.has(dir)) {
-    const clients = new Set<ReadableStreamDefaultController>();
-    // chokidar v4+ removed glob support: watching ['*.mmd', '*.md', ...] would
-    // watch literal files with those names and never fire. Watch the
-    // directory's top level instead and filter by extension here.
-    const watcher = chokidar.watch('.', { cwd: dir, ignoreInitial: true, depth: 0 });
+function getOrCreateDirState(dir: string, backend: StorageBackend): DirState {
+  const existing = dirs.get(dir);
+  if (existing) return existing;
 
-    watcher.on('all', (event: string, file: string) => {
-      if (!/\.(mmd|md|markdown)$/i.test(file)) return;
-      const data = `data: ${JSON.stringify({ event, file })}\n\n`;
-      clients.forEach(client => {
-        try {
-          client.enqueue(new TextEncoder().encode(data));
-        } catch {
-          clients.delete(client);
-        }
-      });
+  const clients = new Set<ReadableStreamDefaultController>();
+  const state: DirState = {
+    clients,
+    unsubscribeEmitter: () => undefined,
+  };
+
+  const broadcast = (e: StorageChangeEvent) => {
+    const data = `data: ${JSON.stringify(e)}\n\n`;
+    clients.forEach(client => {
+      try {
+        client.enqueue(new TextEncoder().encode(data));
+      } catch {
+        clients.delete(client);
+      }
     });
+  };
 
-    dirs.set(dir, { watcher, clients });
-  }
-  return dirs.get(dir)!;
+  state.unsubscribeEmitter = subscribeStorageChanges(backend.name, dir, broadcast);
+  state.unwatch = backend.watch?.(dir, broadcast);
+  dirs.set(dir, state);
+  return state;
 }
 
 export async function GET(request: Request) {
-  const diagramsDir = getDiagramsDir(request);
-  const state = getOrCreateDirState(diagramsDir);
+  const backend = getStorageBackend();
+  const dir = resolveStorageDir(request);
+  const state = getOrCreateDirState(dir, backend);
 
   const stream = new ReadableStream({
     start(controller) {
@@ -44,6 +64,17 @@ export async function GET(request: Request) {
     },
     cancel(controller) {
       state.clients.delete(controller);
+      // Last client for this directory gone: tear down the per-dir state so
+      // the shared emitter subscription and the backend watcher do not leak
+      // for directories nobody is looking at anymore (the fs backend closes
+      // its watcher the same way when the last subscriber leaves). Without
+      // this, a long-lived dev/test server accumulates one chokidar watcher
+      // per directory ever opened, until the process stops responding.
+      if (state.clients.size === 0) {
+        dirs.delete(dir);
+        state.unsubscribeEmitter();
+        state.unwatch?.();
+      }
     }
   });
 

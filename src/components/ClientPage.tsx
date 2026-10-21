@@ -8,7 +8,7 @@ import MarkdownEditor from './MarkdownEditor';
 import SourceCodePanel from './SourceCodePanel';
 import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen, AlertTriangle } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
 import { parseModel, ModelElement, MessageElement, EdgeElement, NodeShape, ParticipantType, StickyNoteElement, NotePlacement, BlockType } from '@/lib/model';
@@ -106,6 +106,10 @@ export default function ClientPage() {
 
   const [files, setFiles] = useState<string[]>([]);
   const [filesError, setFilesError] = useState<string | null>(null);
+  // Active storage backend ('fs' | 'memory' | 's3'), reported by /api/files.
+  // The memory backend is volatile: surface a banner so it is never mistaken
+  // for durable storage.
+  const [storageBackend, setStorageBackend] = useState<string | null>(null);
   // Markdown files in the directory and the mermaid diagrams embedded in them.
   // The Files menu lists each .md file as a parent row with its detected
   // diagrams as nested children; selecting a child opens that diagram in the
@@ -554,6 +558,7 @@ export default function ClientPage() {
           return;
         }
         setFilesError(null);
+        setStorageBackend(typeof data.backend === 'string' ? data.backend : null);
         setFiles(data.files || []);
         setMarkdownFiles(data.markdownFiles || []);
         if (!currentFile && data.files && data.files.length > 0) {
@@ -635,7 +640,7 @@ export default function ClientPage() {
     return fetchFileContent(filename);
   }, [fetchEmbeddedDiagram, fetchFileContent]);
 
-  const postFile = useCallback(async (filename: string, content: string): Promise<{ ok: boolean; message?: string }> => {
+  const postFile = useCallback(async (filename: string, content: string): Promise<{ ok: boolean; code?: string; message?: string }> => {
     try {
       const r = await fetch(`/api/file/${filename}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`, {
         method: 'POST',
@@ -644,11 +649,21 @@ export default function ClientPage() {
       });
       if (!r.ok) {
         let message = "Contents aren't saved";
+        let code: string | undefined;
         try {
           const data = await r.json();
           if (typeof data?.error === 'string') message = data.error;
+          if (typeof data?.code === 'string') code = data.code;
         } catch {}
-        return { ok: false, message };
+        // Surface storage error codes distinctly (STORAGE_BACKENDS plan §5.2):
+        // verify-failed/unknown keep today's "Contents aren't saved" message,
+        // unavailable says so, conflict asks for a reload.
+        if (code === 'unavailable') {
+          message = `Storage unavailable${message ? `: ${message}` : ''}`;
+        } else if (code === 'conflict') {
+          message = 'The file changed on disk; reload it before saving';
+        }
+        return { ok: false, code, message };
       }
       return { ok: true };
     } catch (e) {
@@ -684,11 +699,14 @@ export default function ClientPage() {
         const job = await jr.json();
         if (job.status === 'done') return { ok: true };
         if (job.status === 'failed') {
-          return {
-            ok: false,
-            code: typeof job.code === 'string' ? job.code : undefined,
-            message: typeof job.error === 'string' ? job.error : "Contents aren't saved",
-          };
+          const jobCode = typeof job.code === 'string' ? job.code : undefined;
+          let message = typeof job.error === 'string' ? job.error : "Contents aren't saved";
+          // Surface a dead backend distinctly (STORAGE_BACKENDS plan §5.2);
+          // verify-failed/unknown keep the "Contents aren't saved" message.
+          if (jobCode === 'unavailable') {
+            message = `Storage unavailable${message ? `: ${message}` : ''}`;
+          }
+          return { ok: false, code: jobCode, message };
         }
         if (Date.now() > deadline) return { ok: false, message: "Contents aren't saved: save timed out" };
         await new Promise(resolve => setTimeout(resolve, 400));
@@ -741,6 +759,9 @@ export default function ClientPage() {
         } else {
           setSaveStatus('error');
           setSaveErrorMessage(res.message || "Contents aren't saved");
+          if (res.code === 'conflict') {
+            setSaveConflict(res.message || 'The file changed on disk; it was reloaded.');
+          }
           return { ok: false, message: res.message || "Contents aren't saved" };
         }
       }
@@ -2681,6 +2702,16 @@ export default function ClientPage() {
       </div>
 
       <div className="flex-1 flex flex-col min-w-0">
+        {storageBackend === 'memory' && (
+          <div
+            data-testid="memory-storage-banner"
+            className={`px-4 py-2 text-xs font-medium flex items-center space-x-2 border-b ${isDark ? 'border-amber-700/50 bg-amber-900/30 text-amber-200' : 'border-amber-300 bg-amber-50 text-amber-800'}`}
+            title="The server is running with in-memory storage: nothing is persisted and all diagrams are lost when the server restarts."
+          >
+            <AlertTriangle size={14} className="shrink-0" />
+            <span>In-memory storage — diagrams are not saved to disk and will be lost when the server restarts.</span>
+          </div>
+        )}
         <div data-testid="top-menu-bar" className={`px-4 py-2.5 border-b flex flex-wrap items-center justify-between gap-y-2 gap-x-3 transition-colors ${
           isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
         }`}>

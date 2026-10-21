@@ -3839,7 +3839,7 @@ sequenceDiagram
     ].join('\n');
 
     const mockMarkdownDisk = (initial: string, opts?: { failSaveJob?: string }) => {
-      const disk = { content: initial };
+      const disk = { content: initial, version: 0 };
       const jobs = new Map<string, { status: string; code?: string; error?: string }>();
       const mockFetch = global.fetch as import('vitest').Mock;
       mockFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
@@ -3857,7 +3857,16 @@ sequenceDiagram
             try {
               await runMarkdownSaveJob(
                 { filePath: 'notes.md', index: body.index, content: body.content, expectedContent: body.expectedContent },
-                { readFile: async () => disk.content, writeFileAtomic: async (_p, c) => { disk.content = c; } },
+                {
+                  readFileVersion: async () => ({ content: disk.content, version: `v${disk.version}` }),
+                  writeFile: async (_p, c, writeOpts) => {
+                    if (writeOpts?.ifMatchVersion !== undefined && writeOpts.ifMatchVersion !== `v${disk.version}`) {
+                      throw new Error('conflict: version mismatch');
+                    }
+                    disk.content = c;
+                    disk.version += 1;
+                  },
+                },
               );
               jobs.set(id, { status: 'done' });
             } catch (err) {
