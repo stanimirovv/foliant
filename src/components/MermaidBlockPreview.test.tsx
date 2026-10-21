@@ -263,6 +263,30 @@ describe('MermaidBlockPreview — presentation mode (walkthrough player)', () =>
     expect(container.querySelectorAll('.walkthrough-active')).toHaveLength(0);
   });
 
+  it('keeps the diagram at its fit-to-width size when entering presenter mode (zoom is not reset)', async () => {
+    const { SEQ_SVG, SEQ_CODE } = await import('@/lib/svgTestFixtures');
+    renderMock.mockImplementation((id: string) => ({
+      svg: SEQ_SVG.replaceAll('fx-seq', id),
+    }));
+
+    const { container } = renderBlock({ content: SEQ_CODE });
+    await waitFor(() => expect(container.querySelector('[data-testid="md-mermaid-svg-0"] svg')).toBeTruthy());
+
+    // The preview renders the SVG fit-to-width inside .md-mermaid-svg
+    // (padding 0.75em). The presenter host must inset it identically and the
+    // SVG wrapper must have a definite full width, so the SVG's width="100%"
+    // resolves the same way and the fresh TransformWrapper's scale 1 shows
+    // the diagram at the same size as the preview.
+    const previewHost = container.querySelector('[data-testid="md-mermaid-svg-0"]') as HTMLElement;
+    expect(previewHost.className).toContain('md-mermaid-svg');
+
+    fireEvent.click(screen.getByTestId('md-mermaid-present-0'));
+    const presenterHost = container.querySelector('[data-testid="md-mermaid-svg-0"]') as HTMLElement;
+    expect(presenterHost.className).toContain('p-[0.75em]');
+    const svgWrapper = presenterHost.querySelector('.react-transform-component > div');
+    expect(svgWrapper?.className).toContain('w-full');
+  });
+
   it('steps flowchart block by depth level (1/N where N = depth levels)', async () => {
     const { FLOW_SVG, FLOW_CODE } = await import('@/lib/svgTestFixtures');
     renderMock.mockImplementation((id: string) => ({

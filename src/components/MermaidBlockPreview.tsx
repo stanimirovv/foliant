@@ -386,7 +386,10 @@ export default function MermaidBlockPreview({
           <div
             id={`md-mermaid-svg-host-${index}`}
             data-testid={`md-mermaid-svg-${index}`}
-            className={`relative h-[70vh] overflow-hidden rounded border ${
+            // p-[0.75em] mirrors the preview's .md-mermaid-svg padding so the
+            // fit-to-width diagram keeps the exact same size when presenter
+            // mode opens (the zoom must not change on entry).
+            className={`relative h-[70vh] overflow-hidden rounded border p-[0.75em] ${
               isDark ? 'border-slate-700' : 'border-gray-200'
             }`}
           >
@@ -400,7 +403,13 @@ export default function MermaidBlockPreview({
                 wrapperClass="!w-full !h-full"
                 contentClass="!w-full !h-full flex items-center justify-center p-4"
               >
-                <div dangerouslySetInnerHTML={svgInnerHtml} />
+                {/* w-full gives the SVG a definite containing width so its
+                    width="100%" resolves exactly like the markdown preview's
+                    fit-to-width render. Without it the SVG collapses to its
+                    ~300px intrinsic default inside the shrink-to-fit flex
+                    item, and entering presenter mode visibly resets the zoom
+                    (the fresh TransformWrapper starts at scale 1). */}
+                <div className="w-full" dangerouslySetInnerHTML={svgInnerHtml} />
               </TransformComponent>
             </TransformWrapper>
             {walkthrough.plan && (

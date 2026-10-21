@@ -523,6 +523,47 @@ describe('D. Markdown viewer editor walkthrough', () => {
     });
   });
 
+  it('D10: entering presenter mode from a markdown file keeps the diagram zoom (fit-to-width size unchanged)', () => {
+    createMarkdown('walk-md-d10', MD).then(({ dir, name }) => {
+      cy.visit(appUrl(name, dir));
+      cy.get('[data-testid="md-mermaid-svg-0"] svg', { timeout: 10000 }).should('exist');
+
+      // The preview renders the SVG fit-to-width; remember its displayed size.
+      let widthBefore = 0;
+      cy.get('[data-testid="md-mermaid-svg-0"] svg').then(($svg) => {
+        widthBefore = ($svg[0] as SVGElement).getBoundingClientRect().width;
+        expect(widthBefore).to.be.greaterThan(0);
+      });
+
+      // Enter presenter mode: the fresh TransformWrapper must start at scale 1
+      // with the diagram at the same fit-to-width size (not the ~300px
+      // intrinsic default, and not a zoomed crop).
+      cy.get('[data-testid="md-mermaid-present-0"]').click();
+      cy.get('[data-testid="md-mermaid-svg-0"] [data-testid="walkthrough-step-count"]')
+        .should('have.text', 'Step 1/3');
+      cy.wait(300); // let the entry auto-pan settle
+
+      cy.get('[data-testid="md-mermaid-svg-0"] svg').then(($svg) => {
+        const after = ($svg[0] as SVGElement).getBoundingClientRect();
+        expect(after.width).to.be.closeTo(widthBefore, 6);
+      });
+      cy.get('[data-testid="md-mermaid-svg-0"] .react-transform-component').then(($comp) => {
+        expect(($comp[0] as HTMLElement).style.transform).to.contain('scale(1)');
+      });
+
+      // Stepping to the next message pans but keeps the same size/zoom.
+      cy.get('[data-testid="walkthrough-next"]').click();
+      cy.wait(300);
+      cy.get('[data-testid="md-mermaid-svg-0"] svg').then(($svg) => {
+        const after = ($svg[0] as SVGElement).getBoundingClientRect();
+        expect(after.width).to.be.closeTo(widthBefore, 6);
+      });
+      cy.get('[data-testid="md-mermaid-svg-0"] .react-transform-component').then(($comp) => {
+        expect(($comp[0] as HTMLElement).style.transform).to.contain('scale(1)');
+      });
+    });
+  });
+
   it('D6: hides Present button on empty or non-diagram markdown blocks', () => {
     createMarkdown('walk-md-bad', MD_BAD).then(({ dir, name }) => {
       cy.visit(appUrl(name, dir));
