@@ -14,9 +14,10 @@ import {
   sequenceConnectHandlePos, sequenceBottomConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
   getFlowchartClusterInfo, innermostClusterAtPoint, nodeCenterInCluster, nodeInAnyCluster,
+  computeScopeChangeAid,
   CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo, EdgeEndpointScreenInfo,
-  ClusterScreenInfo,
+  ScopeChangeAid,
 } from '@/lib/svgmap';
 import { DiagramConfig, StickyNote as StickyNoteType, parseViewsData } from '@/lib/views';
 import { MessageInsertPosition } from '@/lib/editor';
@@ -159,6 +160,11 @@ interface DragOverlay {
   hasTarget: boolean;
   // Endpoint: dashed highlight rect around the participant the drop would land on.
   targetRect: { left: number; top: number; width: number; height: number } | null;
+  // Node move (flowchart): subgraph scope-change aid — present only when
+  // releasing the drag would move the node into a different subgraph (or out
+  // to top level). Highlights the destination cluster and shows a badge near
+  // the cursor naming the destination scope.
+  scopeAid?: ScopeChangeAid | null;
 }
 
 // The layout axis of a flowchart: TD/BT stack nodes vertically (same-rank
@@ -1337,6 +1343,7 @@ export default function DiagramViewer({
       // Determine the cursor's subgraph scope from the rendered clusters.
       let scopeNodes = cache.participants;
       drag.targetBlockKey = null;
+      let scopeAid: ScopeChangeAid | null = null;
       const ctx = getSvgAndModel();
       if (ctx && ctx.model.type === 'flowchart') {
         const clusters = getFlowchartClusterInfo(ctx.svgRoot, ctx.model, cache.participants);
@@ -1354,6 +1361,17 @@ export default function DiagramViewer({
             // Top-level scope: exclude nodes inside any cluster.
             scopeNodes = cache.participants.filter(n => !nodeInAnyCluster(n, clusters));
           }
+          // Scope-change aid: when the cursor's scope differs from the
+          // dragged node's current scope, releasing the drag moves the node
+          // into/out of a subgraph — an in-scope reorder indicator alone
+          // does not reveal that. Highlight the destination and badge it.
+          scopeAid = computeScopeChangeAid(
+            clusters, source, drag.currentX, drag.currentY,
+            (blockKey) => {
+              const el = ctx.model.elements.find(e => e.key === blockKey);
+              return el && el.kind === 'block' ? (el.title ?? null) : null;
+            },
+          );
         }
       }
 
@@ -1378,6 +1396,7 @@ export default function DiagramViewer({
           insertY: null, insertX1: 0, insertX2: 0,
           hasTarget: true,
           targetRect: null,
+          scopeAid,
         };
       }
       // Horizontal extent: from left of the node boxes to right of the SVG.
@@ -1395,6 +1414,7 @@ export default function DiagramViewer({
         insertY: null, insertX1: 0, insertX2: 0,
         hasTarget: true,
         targetRect: null,
+        scopeAid,
       };
     }
 
@@ -2129,6 +2149,60 @@ export default function DiagramViewer({
                   strokeWidth={3}
                 />
               )}
+            </>
+          )}
+          {dragOverlay.scopeAid && (
+            <>
+              {dragOverlay.scopeAid.leaveRect && (
+                <rect
+                  data-testid="scope-leave-rect"
+                  x={dragOverlay.scopeAid.leaveRect.left}
+                  y={dragOverlay.scopeAid.leaveRect.top}
+                  width={dragOverlay.scopeAid.leaveRect.width}
+                  height={dragOverlay.scopeAid.leaveRect.height}
+                  fill="none"
+                  stroke="#9ca3af"
+                  strokeWidth={2}
+                  strokeDasharray="4 3"
+                  rx={8}
+                />
+              )}
+              {dragOverlay.scopeAid.enterRect && (
+                <rect
+                  data-testid="scope-enter-rect"
+                  x={dragOverlay.scopeAid.enterRect.left}
+                  y={dragOverlay.scopeAid.enterRect.top}
+                  width={dragOverlay.scopeAid.enterRect.width}
+                  height={dragOverlay.scopeAid.enterRect.height}
+                  fill="rgba(245, 159, 11, 0.10)"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                  rx={8}
+                />
+              )}
+              <g
+                data-testid="scope-change-badge"
+                transform={`translate(${dragOverlay.scopeAid.badgeX}, ${dragOverlay.scopeAid.badgeY})`}
+              >
+                <rect
+                  width={dragOverlay.scopeAid.badgeWidth}
+                  height={22}
+                  rx={11}
+                  fill="#f59e0b"
+                  className="drop-shadow-md"
+                />
+                <text
+                  x={dragOverlay.scopeAid.badgeWidth / 2}
+                  y={15}
+                  textAnchor="middle"
+                  fontSize={12}
+                  fontWeight={600}
+                  fill="#111827"
+                >
+                  {dragOverlay.scopeAid.badgeText}
+                </text>
+              </g>
             </>
           )}
         </svg>

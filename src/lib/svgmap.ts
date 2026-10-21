@@ -1189,6 +1189,74 @@ export function nodeInAnyCluster(
   return clusters.some(c => nodeCenterInCluster(node, c));
 }
 
+// --- Subgraph scope-change drag aid ------------------------------------------
+// While a flowchart node is dragged, the drop's scope (which subgraph, or top
+// level) is the scope under the cursor — the node-drag interaction restricts
+// drop targets to the cursor's scope. When that scope differs from the dragged
+// node's current scope, releasing the drag moves the node into/out of a
+// subgraph: a relocation the dashed insertion indicator alone does not reveal
+// (it looks identical to an in-scope reorder). This helper compares the two
+// scopes and returns the visual aid data for the drag overlay: a dashed
+// outline on the cluster being left, a highlight on the cluster being
+// entered, and a cursor badge naming the destination. Null when the drop
+// keeps the node in its current scope (no aid needed).
+
+export interface ScopeChangeAid {
+  // Rect of the subgraph cluster the node is leaving (null when the node is
+  // currently at top level).
+  leaveRect: { left: number; top: number; width: number; height: number } | null;
+  // Rect of the subgraph cluster the node would enter (null when the drop
+  // targets top level).
+  enterRect: { left: number; top: number; width: number; height: number } | null;
+  // Badge text naming the destination scope.
+  badgeText: string;
+  // Badge pill geometry: estimated width and screen position (the badge
+  // follows the cursor with a small offset, clamped to the viewport).
+  badgeWidth: number;
+  badgeX: number;
+  badgeY: number;
+}
+
+const SCOPE_BADGE_OFFSET_X = 16;
+const SCOPE_BADGE_OFFSET_Y = 22;
+const SCOPE_BADGE_CHAR_WIDTH = 7;   // ~12px semibold sans, mixed case
+const SCOPE_BADGE_PAD_X = 20;
+const SCOPE_BADGE_HEIGHT = 22;
+
+export function computeScopeChangeAid(
+  clusters: ClusterScreenInfo[],
+  source: ParticipantScreenInfo,
+  cursorX: number,
+  cursorY: number,
+  blockTitle: (blockKey: string) => string | null,
+): ScopeChangeAid | null {
+  if (clusters.length === 0) return null;
+  const sourceCluster = innermostClusterAtPoint(clusters, source.centerX, source.centerY);
+  const targetCluster = innermostClusterAtPoint(clusters, cursorX, cursorY);
+  if ((sourceCluster?.blockKey ?? null) === (targetCluster?.blockKey ?? null)) return null;
+
+  const toRect = (c: ClusterScreenInfo) => ({
+    left: c.left, top: c.top, width: c.right - c.left, height: c.bottom - c.top,
+  });
+  const enterTitle = targetCluster ? blockTitle(targetCluster.blockKey) : null;
+  const badgeText = targetCluster
+    ? `Move into subgraph${enterTitle ? ` "${enterTitle}"` : ''}`
+    : 'Move to top level';
+  const badgeWidth = badgeText.length * SCOPE_BADGE_CHAR_WIDTH + SCOPE_BADGE_PAD_X;
+  const maxX = typeof window !== 'undefined' ? window.innerWidth : Infinity;
+  const maxY = typeof window !== 'undefined' ? window.innerHeight : Infinity;
+  const badgeX = Math.min(Math.max(cursorX + SCOPE_BADGE_OFFSET_X, 4), Math.max(4, maxX - badgeWidth - 8));
+  const badgeY = Math.min(Math.max(cursorY + SCOPE_BADGE_OFFSET_Y, 4), Math.max(4, maxY - SCOPE_BADGE_HEIGHT - 8));
+  return {
+    leaveRect: sourceCluster ? toRect(sourceCluster) : null,
+    enterRect: targetCluster ? toRect(targetCluster) : null,
+    badgeText,
+    badgeWidth,
+    badgeX,
+    badgeY,
+  };
+}
+
 // Selection map (processed -> raw), plan 4.7: parses both models, rewrites
 // the raw model's ids through buildActorRewriteMap, and joins on
 // (kind, from, to, label, occurrence). Elements stripped by the transform

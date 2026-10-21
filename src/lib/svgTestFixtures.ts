@@ -110,6 +110,27 @@ export const FLOW_CODE = `flowchart TD
     A[Alice] --> B[Bob]
     B -->|Reply| C[Charlie]`;
 
+// Flowchart with one subgraph: nodes A and B are declared inside the "Auth"
+// subgraph (one g.cluster), node C is top level. Matches FLOW_SUBGRAPH_CODE.
+export const FLOW_SUBGRAPH_SVG = `<svg id="fx-flow" class="flowchart" aria-roledescription="flowchart-v2" viewBox="-8 -8 400 200">
+<g class="root">
+<g class="clusters"><g class="cluster" id="fx-flow-SG"><rect></rect></g></g>
+<g class="edges edgePaths"></g>
+<g class="nodes">
+<g class="node default" id="fx-flow-flowchart-A-0"><rect class="basic label-container"></rect><g class="label"><foreignObject width="120" height="0"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"><p>A</p></span></div></foreignObject></g></g>
+<g class="node default" id="fx-flow-flowchart-B-1"><rect class="basic label-container"></rect><g class="label"><foreignObject width="120" height="0"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"><p>B</p></span></div></foreignObject></g></g>
+<g class="node default" id="fx-flow-flowchart-C-2"><rect class="basic label-container"></rect><g class="label"><foreignObject width="120" height="0"><div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"><p>C</p></span></div></foreignObject></g></g>
+</g>
+</g>
+</svg>`;
+
+export const FLOW_SUBGRAPH_CODE = `flowchart TD
+    subgraph Auth
+        A
+        B
+    end
+    C`;
+
 export function parseSvgRoot(svg: string): Element {
   const doc = new DOMParser().parseFromString(svg, 'text/html');
   const root = doc.querySelector('svg');

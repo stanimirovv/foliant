@@ -329,4 +329,121 @@ describe('Connect handles (e2e)', () => {
       });
     });
   });
+
+  // A subgraph with two nodes, plus one top-level node. Dragging the
+  // top-level node into the subgraph (or a subgraph node out to top level)
+  // crosses a scope boundary: the drag overlay must say so — a highlight on
+  // the destination cluster and a cursor badge naming the destination —
+  // while an in-scope reorder shows no scope aid at all.
+  const FLOW_SUBGRAPH_CONTENT = `flowchart TD
+    subgraph Auth
+        A[Login]
+        B[Logout]
+    end
+    C[Dashboard]`;
+
+  it('flowchart: dragging a top-level node into a subgraph highlights the destination and badges the move', () => {
+    createAndVisit(FLOW_SUBGRAPH_CONTENT, 'cypress-ch-flow-scope-in').then(({ dir, name }) => {
+      cy.get('#diagram-container g.cluster').should('have.length', 1);
+      nodeWithLabel('Dashboard').then(($c) => {
+        const c = rectOf($c);
+        const from = { x: c.left + c.width / 2, y: c.top + c.height / 2 };
+        cy.get('#diagram-container g.cluster').then(($cluster) => {
+          const cluster = rectOf($cluster);
+          // A point inside the cluster, below its nodes (past them along the
+          // TD layout axis): the drop pins to the subgraph block.
+          const to = { x: cluster.left + cluster.width / 2, y: cluster.bottom - 15 };
+
+          nodeWithLabel('Dashboard').trigger('mousedown', {
+            button: 0, clientX: from.x, clientY: from.y,
+          });
+          cy.get('body').trigger('mousemove', { clientX: to.x, clientY: to.y });
+          // The scope-change aid: destination cluster highlighted + a cursor
+          // badge naming the subgraph (the node is top-level, so no "leave"
+          // outline), alongside the usual reorder indicator.
+          cy.get('[data-testid="reorder-indicator"]').should('exist');
+          cy.get('[data-testid="scope-enter-rect"]').should('exist');
+          cy.get('[data-testid="scope-leave-rect"]').should('not.exist');
+          cy.get('[data-testid="scope-change-badge"]')
+            .should('exist')
+            .and('contain.text', 'Move into subgraph')
+            .and('contain.text', 'Auth');
+          cy.get('body').trigger('mouseup', { clientX: to.x, clientY: to.y });
+          cy.get('[data-testid="scope-change-badge"]').should('not.exist');
+
+          saved();
+          getFileContent(name, dir).then((content) => {
+            // C's declaration moved inside the subgraph (before its `end`).
+            const firstC = content.indexOf('C[Dashboard]');
+            expect(firstC).to.be.greaterThan(content.indexOf('subgraph Auth'));
+            expect(firstC).to.be.lessThan(content.indexOf('end'));
+          });
+        });
+      });
+    });
+  });
+
+  it('flowchart: dragging a node out of a subgraph outlines the source and badges "Move to top level"', () => {
+    createAndVisit(FLOW_SUBGRAPH_CONTENT, 'cypress-ch-flow-scope-out').then(({ dir, name }) => {
+      nodeWithLabel('Login').then(($a) => {
+        const a = rectOf($a);
+        const from = { x: a.left + a.width / 2, y: a.top + a.height / 2 };
+        nodeWithLabel('Dashboard').then(($c) => {
+          const c = rectOf($c);
+          // Top-level empty space, below and right of the only top-level node:
+          // outside every cluster.
+          const to = { x: c.right + 40, y: c.bottom + 60 };
+
+          nodeWithLabel('Login').trigger('mousedown', {
+            button: 0, clientX: from.x, clientY: from.y,
+          });
+          cy.get('body').trigger('mousemove', { clientX: to.x, clientY: to.y });
+          // The scope-change aid: the source cluster gets a "leaving" outline,
+          // no destination highlight (top level has no cluster), and the
+          // badge names the destination scope.
+          cy.get('[data-testid="scope-leave-rect"]').should('exist');
+          cy.get('[data-testid="scope-enter-rect"]').should('not.exist');
+          cy.get('[data-testid="scope-change-badge"]')
+            .should('exist')
+            .and('contain.text', 'Move to top level');
+          cy.get('body').trigger('mouseup', { clientX: to.x, clientY: to.y });
+
+          saved();
+          getFileContent(name, dir).then((content) => {
+            // A's declaration moved out of the subgraph (after its `end`).
+            expect(content.indexOf('A[Login]')).to.be.greaterThan(content.indexOf('end'));
+          });
+        });
+      });
+    });
+  });
+
+  it('flowchart: reordering within the same subgraph shows no scope-change aid', () => {
+    createAndVisit(FLOW_SUBGRAPH_CONTENT, 'cypress-ch-flow-scope-same').then(() => {
+      nodeWithLabel('Login').then(($a) => {
+        const a = rectOf($a);
+        const from = { x: a.left + a.width / 2, y: a.top + a.height / 2 };
+        cy.get('#diagram-container g.cluster').then(($cluster) => {
+          const cluster = rectOf($cluster);
+          // Inside the same cluster: an in-scope reorder, whatever the exact
+          // insertion point along the layout axis turns out to be.
+          const to = { x: cluster.left + cluster.width / 2, y: cluster.bottom - 15 };
+
+          nodeWithLabel('Login').trigger('mousedown', {
+            button: 0, clientX: from.x, clientY: from.y,
+          });
+          cy.get('body').trigger('mousemove', { clientX: to.x, clientY: to.y });
+          // The reorder indicator shows, but no scope aid: the release keeps
+          // the node in its current subgraph.
+          cy.get('[data-testid="reorder-indicator"]').should('exist');
+          cy.get('[data-testid="scope-change-badge"]').should('not.exist');
+          cy.get('[data-testid="scope-enter-rect"]').should('not.exist');
+          cy.get('[data-testid="scope-leave-rect"]').should('not.exist');
+          cy.get('body').trigger('mouseup', { clientX: to.x, clientY: to.y });
+          // The overlay clears on release.
+          cy.get('[data-testid="drag-overlay"]').should('not.exist');
+        });
+      });
+    });
+  });
 });

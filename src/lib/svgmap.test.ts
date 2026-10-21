@@ -591,6 +591,7 @@ import {
   sequenceConnectHandlePos, sequenceBottomConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
   getFlowchartClusterInfo, innermostClusterAtPoint, nodeCenterInCluster, nodeInAnyCluster,
+  computeScopeChangeAid,
   SEQ_CONNECT_HANDLE_OFFSET, CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo, ClusterScreenInfo,
 } from './svgmap';
@@ -1404,5 +1405,92 @@ describe('nodeCenterInCluster / nodeInAnyCluster', () => {
     expect(nodeInAnyCluster(node, [cluster])).toBe(true);
     expect(nodeInAnyCluster(node, [{ left: 200, top: 200, right: 300, bottom: 300 }])).toBe(false);
     expect(nodeInAnyCluster(node, [])).toBe(false);
+  });
+});
+
+describe('computeScopeChangeAid', () => {
+  // Two sibling subgraphs: SG1 spans (0,0)-(150,100), SG2 spans (200,0)-(350,100).
+  const clusters: ClusterScreenInfo[] = [
+    { blockKey: 'b:0', left: 0, top: 0, right: 150, bottom: 100, area: 15000 },
+    { blockKey: 'b:1', left: 200, top: 0, right: 350, bottom: 100, area: 15000 },
+  ];
+  const titles: Record<string, string> = { 'b:0': 'Auth', 'b:1': 'Billing' };
+  const blockTitle = (key: string) => titles[key] ?? null;
+  const topLevelNode: ParticipantScreenInfo = {
+    key: 'n:0', id: 'D', left: 300, right: 380, top: 120, bottom: 160,
+    centerX: 340, centerY: 140, bottomTop: null, bottomBottom: null,
+  };
+  const insideSg1Node: ParticipantScreenInfo = {
+    key: 'n:1', id: 'A', left: 10, right: 90, top: 10, bottom: 50,
+    centerX: 50, centerY: 30, bottomTop: null, bottomBottom: null,
+  };
+
+  it('returns null when there are no clusters (no subgraphs)', () => {
+    expect(computeScopeChangeAid([], topLevelNode, 50, 30, blockTitle)).toBeNull();
+  });
+
+  it('returns null when the drop keeps the node in its current scope', () => {
+    // Top-level node, cursor at top level.
+    expect(computeScopeChangeAid(clusters, topLevelNode, 340, 300, blockTitle)).toBeNull();
+    // In-subgraph node, cursor inside the same subgraph.
+    expect(computeScopeChangeAid(clusters, insideSg1Node, 75, 50, blockTitle)).toBeNull();
+  });
+
+  it('moving a top-level node into a subgraph highlights the destination cluster and badges the subgraph title', () => {
+    const aid = computeScopeChangeAid(clusters, topLevelNode, 75, 50, blockTitle);
+    expect(aid).not.toBeNull();
+    expect(aid!.leaveRect).toBeNull();
+    expect(aid!.enterRect).toEqual({ left: 0, top: 0, width: 150, height: 100 });
+    expect(aid!.badgeText).toBe('Move into subgraph "Auth"');
+  });
+
+  it('moving a node out of a subgraph to top level outlines the source cluster and badges the move', () => {
+    const aid = computeScopeChangeAid(clusters, insideSg1Node, 340, 300, blockTitle);
+    expect(aid).not.toBeNull();
+    expect(aid!.leaveRect).toEqual({ left: 0, top: 0, width: 150, height: 100 });
+    expect(aid!.enterRect).toBeNull();
+    expect(aid!.badgeText).toBe('Move to top level');
+  });
+
+  it('moving between two subgraphs outlines both clusters and names the destination', () => {
+    const aid = computeScopeChangeAid(clusters, insideSg1Node, 275, 50, blockTitle);
+    expect(aid).not.toBeNull();
+    expect(aid!.leaveRect).toEqual({ left: 0, top: 0, width: 150, height: 100 });
+    expect(aid!.enterRect).toEqual({ left: 200, top: 0, width: 150, height: 100 });
+    expect(aid!.badgeText).toBe('Move into subgraph "Billing"');
+  });
+
+  it('names the destination subgraph by its title, or plainly when untitled', () => {
+    const aid = computeScopeChangeAid(clusters, topLevelNode, 75, 50, () => null);
+    expect(aid!.badgeText).toBe('Move into subgraph');
+  });
+
+  it('uses the innermost cluster for nested subgraphs', () => {
+    const nested: ClusterScreenInfo[] = [
+      { blockKey: 'b:0', left: 0, top: 0, right: 200, bottom: 200, area: 40000 },
+      { blockKey: 'b:1', left: 50, top: 50, right: 100, bottom: 100, area: 2500 },
+    ];
+    const outerNode: ParticipantScreenInfo = {
+      key: 'n:2', id: 'X', left: 10, right: 40, top: 10, bottom: 40,
+      centerX: 25, centerY: 25, bottomTop: null, bottomBottom: null,
+    };
+    // Node in the outer subgraph, cursor in the nested one: leave outer, enter inner.
+    const aid = computeScopeChangeAid(nested, outerNode, 75, 75, blockTitle);
+    expect(aid!.leaveRect).toEqual({ left: 0, top: 0, width: 200, height: 200 });
+    expect(aid!.enterRect).toEqual({ left: 50, top: 50, width: 50, height: 50 });
+  });
+
+  it('positions the badge next to the cursor, clamped to the viewport', () => {
+    const aid = computeScopeChangeAid(clusters, topLevelNode, 75, 50, blockTitle)!;
+    expect(aid.badgeX).toBe(75 + 16);
+    expect(aid.badgeY).toBe(50 + 22);
+    expect(aid.badgeWidth).toBeGreaterThan(aid.badgeText.length * 6);
+    // Cursor at the viewport's bottom-right corner (top-level scope, dragging
+    // an in-subgraph node): the badge stays on screen.
+    const clamped = computeScopeChangeAid(
+      clusters, insideSg1Node, window.innerWidth - 5, window.innerHeight - 5, blockTitle
+    )!;
+    expect(clamped.badgeX + clamped.badgeWidth).toBeLessThanOrEqual(window.innerWidth);
+    expect(clamped.badgeY + 22).toBeLessThanOrEqual(window.innerHeight);
   });
 });

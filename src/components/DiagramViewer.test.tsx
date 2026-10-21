@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import mermaid from 'mermaid';
 import DiagramViewer, { DIAGRAM_PAN_EXCLUSIONS, STICKY_PAN_EXCLUSIONS } from './DiagramViewer';
-import { SEQ_SVG, SEQ_CODE, FLOW_SVG, FLOW_CODE } from '@/lib/svgTestFixtures';
+import { SEQ_SVG, SEQ_CODE, FLOW_SVG, FLOW_CODE, FLOW_SUBGRAPH_SVG, FLOW_SUBGRAPH_CODE } from '@/lib/svgTestFixtures';
 import { PAN_EXCLUDE_CLASS } from '@/lib/styling';
 import { DiagramConfig } from '@/lib/views';
 
@@ -11,7 +11,9 @@ import { DiagramConfig } from '@/lib/views';
 // confirmed Mermaid 12.1 structure and match SEQ_CODE / FLOW_CODE.
 const renderMock = vi.fn(async (id: string, code: string) => {
   const isFlow = /^\s*(flowchart|graph)\b/m.test(code);
-  const fixture = isFlow ? FLOW_SVG : SEQ_SVG;
+  const fixture = isFlow
+    ? (/^\s*subgraph\b/m.test(code) ? FLOW_SUBGRAPH_SVG : FLOW_SVG)
+    : SEQ_SVG;
   return { svg: fixture.replaceAll('fx-seq', id).replaceAll('fx-flow', id) };
 });
 
@@ -1332,6 +1334,26 @@ function mockFlowScreenRects(container: HTMLElement) {
 const flowNodeOf = (container: HTMLElement, suffix: string) =>
   container.querySelector(`g.node[id$="${suffix}"]`) as Element;
 
+// Screen rects for FLOW_SUBGRAPH_CODE: the "Auth" subgraph cluster wraps A and
+// B, C sits at top level.
+function mockFlowSubgraphScreenRects(container: HTMLElement) {
+  const svg = container.querySelector('#diagram-container svg');
+  if (!svg) return;
+  mockRect(svg.querySelector('g.cluster')!, 0, 0, 150, 100);
+  const byId = new Map<string, Element>();
+  svg.querySelectorAll('g.node[id]').forEach(g => {
+    const id = g.getAttribute('id') ?? '';
+    const m = id.match(/-flowchart-(.+)-\d+$/);
+    if (m) byId.set(m[1], g);
+  });
+  mockRect(byId.get('A')!, 10, 10, 80, 40);    // center (50, 30) — inside the cluster
+  mockRect(byId.get('B')!, 20, 60, 80, 40);    // center (60, 80) — inside the cluster
+  mockRect(byId.get('C')!, 300, 120, 80, 40);  // center (340, 140) — top level
+  // container rect for the reorder indicator extent
+  const diagramContainer = container.querySelector('#diagram-container') as HTMLElement;
+  if (diagramContainer) mockRect(diagramContainer, 0, 0, 500, 400);
+}
+
 describe('DiagramViewer flowchart node drag', () => {
   beforeEach(() => {
     renderMock.mockClear();
@@ -1612,6 +1634,91 @@ describe('DiagramViewer flowchart node drag', () => {
     fireEvent.mouseMove(diagramContainer, { clientX: 250, clientY: 300 });
     expect(container.querySelector('[data-testid="node-connect-handle"]')).toBeNull();
     expect(diagramContainer.style.cursor).toBe('');
+  });
+});
+
+describe('DiagramViewer flowchart subgraph scope-change aid', () => {
+  beforeEach(() => {
+    renderMock.mockClear();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('dragging a top-level node into a subgraph highlights the destination cluster and badges the move', async () => {
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_SUBGRAPH_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowSubgraphScreenRects(container);
+
+    // Press top-level node C's body and drag into the "Auth" subgraph cluster.
+    fireEvent.mouseDown(flowNodeOf(container, '-C-2'), { button: 0, clientX: 340, clientY: 140 });
+    fireEvent.mouseMove(window, { clientX: 75, clientY: 50 }); // inside the cluster, past B
+    await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
+    // The scope-change aid: destination cluster highlighted, cursor badge
+    // naming the subgraph, no "leaving" outline (the node is top-level).
+    expect(container.querySelector('[data-testid="scope-enter-rect"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="scope-leave-rect"]')).toBeNull();
+    const badge = container.querySelector('[data-testid="scope-change-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toContain('Move into subgraph "Auth"');
+
+    fireEvent.mouseUp(window, { clientX: 75, clientY: 50 });
+    // Past every in-subgraph node: the drop pins to the subgraph block.
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:2', null, 'b:0');
+  });
+
+  it('dragging a node out of a subgraph outlines the source cluster and badges "Move to top level"', async () => {
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_SUBGRAPH_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowSubgraphScreenRects(container);
+
+    // Press A (inside the subgraph) and drag to top-level empty space.
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 340, clientY: 300 }); // outside the cluster
+    await waitFor(() => expect(container.querySelector('[data-testid="scope-leave-rect"]')).toBeTruthy());
+    expect(container.querySelector('[data-testid="scope-enter-rect"]')).toBeNull();
+    const badge = container.querySelector('[data-testid="scope-change-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toContain('Move to top level');
+
+    fireEvent.mouseUp(window, { clientX: 340, clientY: 300 });
+    // Top-level drop past the only top-level node: move to the end.
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', null, null);
+  });
+
+  it('shows no scope aid when the drop stays in the node\'s current scope', async () => {
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_SUBGRAPH_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={() => {}} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+    mockFlowSubgraphScreenRects(container);
+
+    // Press A and drag within the same subgraph (before B): an in-scope
+    // reorder — the insertion indicator shows, but no scope-change aid.
+    fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
+    fireEvent.mouseMove(window, { clientX: 55, clientY: 70 }); // still inside the cluster
+    await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
+    expect(container.querySelector('[data-testid="scope-change-badge"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scope-enter-rect"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scope-leave-rect"]')).toBeNull();
+    fireEvent.mouseUp(window, { clientX: 55, clientY: 70 });
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:1', null); // A before B, same scope
   });
 });
 
