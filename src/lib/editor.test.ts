@@ -1319,12 +1319,65 @@ flowchart TD
     expect(res.code).toBe(`flowchart TD\n    A --> B\n    C\n`);
   });
 
-  it('refuses to move a node across a subgraph boundary', () => {
+  it('moves a node out of a subgraph to a top-level position (cross-boundary)', () => {
     const code = `flowchart TD\n    A --> B\n    subgraph S\n        C\n    end`;
-    // C (n:2, inside S) before A (top level)
+    // C (n:2, inside S) before A (n:0, top level): insert a standalone C
+    // declaration at top level; the old one inside S is removed.
     const res = moveNode(code, null, 'n:2', 'n:0');
-    expect(res.warning).toBeTruthy();
-    expect(res.code).toBe(code);
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    C\n    A --> B\n    subgraph S\n    end`);
+  });
+
+  it('moves a top-level node into a subgraph (cross-boundary)', () => {
+    const code = `flowchart TD\n    A --> B\n    subgraph S\n        C\n    end`;
+    // A (n:0, top level) before C (n:2, inside S): insert a standalone A
+    // declaration inside the subgraph with the subgraph's indentation.
+    const res = moveNode(code, null, 'n:0', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A --> B\n    subgraph S\n        A\n        C\n    end`);
+  });
+
+  it('moves a node from one subgraph to another (cross-boundary)', () => {
+    const code = `flowchart TD\n    subgraph S1\n        A\n    end\n    subgraph S2\n        B\n    end`;
+    // A (n:0, inside S1) before B (n:1, inside S2)
+    const res = moveNode(code, null, 'n:0', 'n:1');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S1\n    end\n    subgraph S2\n        A\n        B\n    end`);
+  });
+
+  it('moves a node out of a subgraph to the end (cross-boundary, move-to-end)', () => {
+    const code = `flowchart TD\n    A --> B\n    subgraph S\n        C\n    end`;
+    // C (n:2, inside S) to end (top level after the subgraph)
+    const res = moveNode(code, null, 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    A --> B\n    subgraph S\n    end\n    C`);
+  });
+
+  it('moves an edge-declared node out of a subgraph (keeps edge lines in place)', () => {
+    const code = `flowchart TD\n    subgraph S\n        A --> B\n    end\n    C`;
+    // A (n:0, declared on edge line inside S) before C (n:2, top level).
+    // A standalone declaration is inserted at top level before C; the edge
+    // line stays inside S (edges must not cross subgraph boundaries).
+    const res = moveNode(code, null, 'n:0', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S\n        A --> B\n    end\n    A\n    C`);
+  });
+
+  it('moves a node into a subgraph when the target is the first node inside it', () => {
+    const code = `flowchart TD\n    X\n    subgraph S\n        A\n        B\n    end`;
+    // X (n:0, top level) before A (n:1, first node inside S)
+    const res = moveNode(code, null, 'n:0', 'n:1');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S\n        X\n        A\n        B\n    end`);
+  });
+
+  it('moves a labeled node out of a subgraph (preserves the label)', () => {
+    const code = `flowchart TD\n    subgraph S\n        A[Alice]\n        B\n    end\n    C`;
+    // A (n:0, labeled inside S) before C (n:2, top level). The standalone
+    // declaration carries the label, so it moves with the label intact.
+    const res = moveNode(code, null, 'n:0', 'n:2');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S\n        B\n    end\n    A[Alice]\n    C`);
   });
 
   it('moves a top-level node to the end of a diagram with a subgraph', () => {

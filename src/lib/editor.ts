@@ -1340,8 +1340,13 @@ export function moveParticipant(
 //     edges connecting the same endpoints and keeps the last shaped
 //     declaration (what Mermaid shows as the label) last.
 // beforeKey === undefined moves the node to the end (after every other node's
-// first declaration). Nodes inside a subgraph cannot be moved out of it (or
-// vice versa): that would silently change the cluster, so it soft-fails.
+// first declaration).
+//
+// Crossing a subgraph boundary is allowed: the node's first declaration moves
+// to the target scope (inside the subgraph, or at top level), which changes
+// the cluster Mermaid draws. Edge lines stay where they are — moving them
+// across a boundary would silently change which cluster they belong to. The
+// inserted declaration uses the target scope's indentation.
 export function moveNode(
   code: string,
   config: DiagramConfig | null,
@@ -1365,12 +1370,6 @@ export function moveNode(
   // Nodes in first-declaration order (parseModel emits them in source order).
   const nodes = model.elements.filter(e => e.kind === 'node');
   const idx = nodes.findIndex(n => n.key === key);
-  if (beforeKey !== undefined) {
-    // Already immediately before the target: nothing to change.
-    if (nodes[idx + 1]?.key === beforeKey) return { code, config };
-  } else if (nodes[nodes.length - 1].key === key) {
-    return { code, config }; // already last
-  }
 
   const lines = code.split('\n');
   // Insert position, in original line indices: the moved line lands
@@ -1380,8 +1379,7 @@ export function moveNode(
     ? targetEl!.lineStart
     : (lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length);
 
-  // A node cannot cross a subgraph boundary: the inserted/relocated line would
-  // silently join or leave the cluster.
+  // The innermost block (subgraph) containing a line, if any.
   const blockAt = (line: number): ModelElement | undefined => {
     let inner: ModelElement | undefined;
     for (const e of model.elements) {
@@ -1389,14 +1387,22 @@ export function moveNode(
     }
     return inner;
   };
-  if (blockAt(el.lineStart)?.key !== blockAt(insertAt)?.key) {
-    return fail(code, config, 'Cannot move a node into or out of a subgraph');
+  const sourceBlock = blockAt(el.lineStart);
+  const targetBlock = blockAt(insertAt);
+  const crossingSubgraph = sourceBlock?.key !== targetBlock?.key;
+
+  if (beforeKey !== undefined) {
+    // Already immediately before the target AND in the same subgraph scope:
+    // nothing to change. (Crossing a subgraph boundary is never a no-op,
+    // even when the nodes are adjacent in model order.)
+    if (nodes[idx + 1]?.key === beforeKey && !crossingSubgraph) return { code, config };
+  } else if (nodes[nodes.length - 1].key === key && !crossingSubgraph) {
+    return { code, config }; // already last, same scope
   }
 
-  if (insertAt === el.lineStart) return { code, config }; // same position
+  if (insertAt === el.lineStart && !crossingSubgraph) return { code, config }; // same position
 
-  // The node's declaration text + indent at its first appearance (used only
-  // when moving earlier, where a standalone declaration is inserted).
+  // The node's declaration text + indent at its first appearance.
   const firstLine = lines[el.lineStart];
   let declText: string;
   let indent: string;
@@ -1412,8 +1418,46 @@ export function moveNode(
     indent = '    ';
   }
 
+  // When crossing a subgraph boundary, the inserted declaration must use the
+  // TARGET scope's indentation (the subgraph's content indent, or the base
+  // indent for top level). Detect it from the target line, or from the first
+  // top-level flowchart line for move-to-end.
+  let targetIndent = indent;
+  if (crossingSubgraph) {
+    if (insertAt < lines.length) {
+      const parsedTarget = parseFlowchartLine(lines[insertAt]);
+      if (parsedTarget?.indent) targetIndent = parsedTarget.indent;
+    }
+    if (targetIndent === indent) {
+      // insertAt line is not a flowchart line (e.g. move-to-end past a
+      // subgraph's `end`): detect the base indent from the first top-level
+      // flowchart line.
+      for (let i = 0; i < lines.length; i++) {
+        if (blockAt(i)) continue; // skip lines inside subgraphs
+        const parsed = parseFlowchartLine(lines[i]);
+        if (parsed?.indent) { targetIndent = parsed.indent; break; }
+      }
+    }
+  }
+
   let newLines: string[];
-  if (insertAt < el.lineStart) {
+  if (crossingSubgraph) {
+    // Cross-subgraph move: insert a standalone declaration at the target scope
+    // (with the target's indentation) so the node's first declaration — and
+    // thus its cluster membership — changes. Edge lines stay untouched;
+    // moving them across a boundary would silently change their cluster.
+    // If the source's first declaration is a standalone line, remove it from
+    // the old scope (it becomes a no-op re-declaration otherwise).
+    if (isStandalone) {
+      lines.splice(el.lineStart, 1);
+      // Adjust insertAt if the removed line was before it.
+      const adjustedInsertAt = insertAt > el.lineStart ? insertAt - 1 : insertAt;
+      lines.splice(adjustedInsertAt, 0, `${targetIndent}${declText}`);
+    } else {
+      lines.splice(insertAt, 0, `${targetIndent}${declText}`);
+    }
+    newLines = lines;
+  } else if (insertAt < el.lineStart) {
     // Move earlier: the inserted standalone declaration becomes the node's
     // first appearance. A standalone declaration is relocated (no duplicate);
     // an edge line stays untouched.
