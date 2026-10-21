@@ -11,7 +11,7 @@ import {
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
   getEdgeEndpointScreenInfo,
   nearestParticipantAtX, nearestMessageKeyAt,
-  sequenceConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
+  sequenceConnectHandlePos, sequenceBottomConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
   CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo, EdgeEndpointScreenInfo,
@@ -855,16 +855,27 @@ export default function DiagramViewer({
         const overTopBox =
           e.clientX >= nearest.left && e.clientX <= nearest.right &&
           e.clientY >= nearest.top && e.clientY <= nearest.bottom;
+        const overBottomBox = nearest.bottomTop != null && nearest.bottomBottom != null &&
+          e.clientX >= nearest.left && e.clientX <= nearest.right &&
+          e.clientY >= nearest.bottomTop && e.clientY <= nearest.bottomBottom;
         const nearLifeline =
           Math.abs(nearest.centerX - e.clientX) < LIFELINE_HIT_THRESHOLD &&
           e.clientY > nearest.bottom &&
           e.clientY < svgRect.bottom;
-        if (overTopBox || nearLifeline) {
+        if (overTopBox || overBottomBox || nearLifeline) {
           const pEl = ctx.model.elements.find(
             e2 => e2.kind === 'participant' && (e2 as ParticipantElement).id === nearest.id
           );
           if (pEl) {
-            const handle = sequenceConnectHandlePos(nearest);
+            // Show the handle (top or bottom) nearest to the cursor.
+            const topHandle = sequenceConnectHandlePos(nearest);
+            const bottomHandle = sequenceBottomConnectHandlePos(nearest);
+            let handle = topHandle;
+            if (bottomHandle) {
+              const topD = Math.hypot(topHandle.x - e.clientX, topHandle.y - e.clientY);
+              const botD = Math.hypot(bottomHandle.x - e.clientX, bottomHandle.y - e.clientY);
+              handle = botD < topD ? bottomHandle : topHandle;
+            }
             setHoverConnectHandle({
               x: handle.x,
               y: handle.y,

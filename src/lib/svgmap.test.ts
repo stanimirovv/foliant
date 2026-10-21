@@ -5,7 +5,7 @@ import { addEdgeHitPaths } from './styling';
 import { transformActors, processMermaid } from './preprocessor';
 import { DiagramConfig } from './views';
 import { createSequenceDiagram, createFlowchartDiagram, renderPipeline } from './editorTestHarness';
-import { SEQ_SVG, SEQ_CODE, FLOW_SVG, FLOW_CODE, parseSvgRoot } from './svgTestFixtures';
+import { SEQ_SVG, SEQ_CODE, SEQ_AUTONUMBER_SVG, SEQ_AUTONUMBER_CODE, FLOW_SVG, FLOW_CODE, parseSvgRoot } from './svgTestFixtures';
 
 function parseSvg(svg: string): Element {
   return parseSvgRoot(svg);
@@ -588,7 +588,7 @@ import {
   getParticipantScreenInfo, getNodeScreenInfo, getMessageScreenInfo, getMessageEndpointScreenInfo,
   getEdgeEndpointScreenInfo,
   nearestParticipantAtX,
-  sequenceConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
+  sequenceConnectHandlePos, sequenceBottomConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
   SEQ_CONNECT_HANDLE_OFFSET, CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo,
@@ -639,6 +639,41 @@ describe('getParticipantScreenInfo', () => {
     const info = getParticipantScreenInfo(svg, model);
     expect(info).toHaveLength(3); // D has no SVG element, skipped
     expect(info.map(p => p.id)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('captures bottom actor box rects (rect.actor-bottom and g.actor-man)', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    const groups = svg.querySelectorAll('g[data-et="participant"]');
+    const byId = new Map<string, Element>();
+    groups.forEach(g => { const id = g.getAttribute('data-id'); if (id) byId.set(id, g); });
+    mockRect(byId.get('A')!, 0, 10, 100, 40);
+    mockRect(byId.get('B')!, 150, 10, 100, 40);
+    mockRect(byId.get('C')!, 300, 10, 100, 40);
+    // Mock bottom actor rects: A and C are rect.actor-bottom, B is g.actor-man.
+    mockRect(svg.querySelector('rect.actor-bottom[name="A"]')!, 0, 326, 100, 50);
+    mockRect(svg.querySelector('g.actor-man[name="B"]')!, 150, 320, 100, 56);
+    mockRect(svg.querySelector('rect.actor-bottom[name="C"]')!, 300, 326, 100, 50);
+
+    const info = getParticipantScreenInfo(svg, model);
+    expect(info[0]).toMatchObject({ id: 'A', bottomTop: 326, bottomBottom: 376 });
+    expect(info[1]).toMatchObject({ id: 'B', bottomTop: 320, bottomBottom: 376 });
+    expect(info[2]).toMatchObject({ id: 'C', bottomTop: 326, bottomBottom: 376 });
+  });
+
+  it('sets bottomTop/bottomBottom to null when no bottom actor exists', () => {
+    const svg = parseSvg(SEQ_AUTONUMBER_SVG); // no bottom actors in this fixture
+    const model = parseModel(SEQ_AUTONUMBER_CODE);
+    const groups = svg.querySelectorAll('g[data-et="participant"]');
+    const byId = new Map<string, Element>();
+    groups.forEach(g => { const id = g.getAttribute('data-id'); if (id) byId.set(id, g); });
+    mockRect(byId.get('A')!, 0, 10, 100, 40);
+    mockRect(byId.get('B')!, 150, 10, 100, 40);
+    mockRect(byId.get('C')!, 300, 10, 100, 40);
+
+    const info = getParticipantScreenInfo(svg, model);
+    expect(info[0].bottomTop).toBeNull();
+    expect(info[0].bottomBottom).toBeNull();
   });
 });
 
@@ -801,9 +836,9 @@ describe('getEdgeEndpointScreenInfo', () => {
 
 describe('nearestParticipantAtX', () => {
   const participants: ParticipantScreenInfo[] = [
-    { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
-    { key: 'p:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30 },
-    { key: 'p:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30 },
+    { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30, bottomTop: null, bottomBottom: null },
+    { key: 'p:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30, bottomTop: null, bottomBottom: null },
+    { key: 'p:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30, bottomTop: null, bottomBottom: null },
   ];
 
   it('returns the participant whose center is nearest to the given X', () => {
@@ -827,20 +862,31 @@ describe('connect-handle helpers ("handles connect, body moves")', () => {
   // Same geometry as the sequence fixture mocks: boxes at Y=10..50, so the
   // connect handle sits at Y=64 on each lifeline.
   const participants: ParticipantScreenInfo[] = [
-    { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
-    { key: 'p:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30 },
-    { key: 'p:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30 },
+    { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30, bottomTop: null, bottomBottom: null },
+    { key: 'p:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30, bottomTop: null, bottomBottom: null },
+    { key: 'p:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30, bottomTop: null, bottomBottom: null },
   ];
   const nodes: ParticipantScreenInfo[] = [
-    { key: 'n:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
-    { key: 'n:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30 },
-    { key: 'n:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30 },
+    { key: 'n:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30, bottomTop: null, bottomBottom: null },
+    { key: 'n:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30, bottomTop: null, bottomBottom: null },
+    { key: 'n:2', id: 'C', left: 300, right: 400, top: 10, bottom: 50, centerX: 350, centerY: 30, bottomTop: null, bottomBottom: null },
   ];
 
   describe('sequenceConnectHandlePos', () => {
     it('sits on the lifeline just below the top actor box', () => {
       expect(sequenceConnectHandlePos(participants[0])).toEqual({ x: 50, y: 50 + SEQ_CONNECT_HANDLE_OFFSET });
       expect(sequenceConnectHandlePos(participants[2])).toEqual({ x: 350, y: 50 + SEQ_CONNECT_HANDLE_OFFSET });
+    });
+  });
+
+  describe('sequenceBottomConnectHandlePos', () => {
+    it('sits on the lifeline just above the bottom actor box', () => {
+      const p: ParticipantScreenInfo = { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30, bottomTop: 326, bottomBottom: 376 };
+      expect(sequenceBottomConnectHandlePos(p)).toEqual({ x: 50, y: 326 - SEQ_CONNECT_HANDLE_OFFSET });
+    });
+
+    it('returns null when the participant has no bottom actor box', () => {
+      expect(sequenceBottomConnectHandlePos(participants[0])).toBeNull();
     });
   });
 
@@ -876,8 +922,8 @@ describe('connect-handle helpers ("handles connect, body moves")', () => {
       // Columns only 15px apart: both handles are within the grab radius of
       // X=57 (7px from A's, 8px from B's).
       const close: ParticipantScreenInfo[] = [
-        { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
-        { key: 'p:1', id: 'B', left: 15, right: 115, top: 10, bottom: 50, centerX: 65, centerY: 30 },
+        { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30, bottomTop: null, bottomBottom: null },
+        { key: 'p:1', id: 'B', left: 15, right: 115, top: 10, bottom: 50, centerX: 65, centerY: 30, bottomTop: null, bottomBottom: null },
       ];
       expect(nearestConnectHandleAt(close, 57, 64)?.participant.key).toBe('p:0');
       expect(nearestConnectHandleAt(close, 58, 64)?.participant.key).toBe('p:1');
@@ -885,6 +931,51 @@ describe('connect-handle helpers ("handles connect, body moves")', () => {
 
     it('returns null for an empty list', () => {
       expect(nearestConnectHandleAt([], 50, 64)).toBeNull();
+    });
+
+    describe('with bottom actor handles', () => {
+      // Participants with bottom actor boxes at Y=326..376.
+      const withBottom: ParticipantScreenInfo[] = [
+        { key: 'p:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30, bottomTop: 326, bottomBottom: 376 },
+        { key: 'p:1', id: 'B', left: 150, right: 250, top: 10, bottom: 50, centerX: 200, centerY: 30, bottomTop: 326, bottomBottom: 376 },
+      ];
+      const bottomHandleY = 326 - SEQ_CONNECT_HANDLE_OFFSET; // 312
+
+      it('finds the bottom handle within the grab radius', () => {
+        const hit = nearestConnectHandleAt(withBottom, 50, bottomHandleY);
+        expect(hit?.participant.key).toBe('p:0');
+        expect(hit?.handle).toEqual({ x: 50, y: bottomHandleY });
+        expect(hit?.handleType).toBe('bottom');
+      });
+
+      it('reports handleType "top" for the top handle', () => {
+        const hit = nearestConnectHandleAt(withBottom, 50, 50 + SEQ_CONNECT_HANDLE_OFFSET);
+        expect(hit?.handleType).toBe('top');
+      });
+
+      it('picks the bottom handle when it is closer than the top handle', () => {
+        // Y=300 is 14px from the bottom handle (312) and 236px from the top (64).
+        const hit = nearestConnectHandleAt(withBottom, 50, 300);
+        expect(hit?.handleType).toBe('bottom');
+        expect(hit?.handle).toEqual({ x: 50, y: bottomHandleY });
+      });
+
+      it('picks the top handle when it is closer than the bottom handle', () => {
+        // Y=70 is 6px from the top handle (64) and 242px from the bottom (312).
+        const hit = nearestConnectHandleAt(withBottom, 50, 70);
+        expect(hit?.handleType).toBe('top');
+      });
+
+      it('returns null on the lifeline between the two handles', () => {
+        // Y=188 is equidistant (124px) from both handles — beyond the grab radius.
+        expect(nearestConnectHandleAt(withBottom, 50, 188)).toBeNull();
+      });
+
+      it('finds the bottom handle of the correct participant', () => {
+        const hit = nearestConnectHandleAt(withBottom, 200, bottomHandleY);
+        expect(hit?.participant.key).toBe('p:1');
+        expect(hit?.handleType).toBe('bottom');
+      });
     });
   });
 
@@ -901,8 +992,8 @@ describe('connect-handle helpers ("handles connect, body moves")', () => {
       // B: 90..230). X=110 is inside both; B's center (160) is nearer than
       // A's (50).
       const overlapping: ParticipantScreenInfo[] = [
-        { key: 'n:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30 },
-        { key: 'n:1', id: 'B', left: 110, right: 210, top: 10, bottom: 50, centerX: 160, centerY: 30 },
+        { key: 'n:0', id: 'A', left: 0, right: 100, top: 10, bottom: 50, centerX: 50, centerY: 30, bottomTop: null, bottomBottom: null },
+        { key: 'n:1', id: 'B', left: 110, right: 210, top: 10, bottom: 50, centerX: 160, centerY: 30, bottomTop: null, bottomBottom: null },
       ];
       expect(nearestNodeAtPoint(overlapping, 110, 30, null, NODE_DROP_PAD)?.key).toBe('n:1');
       // ...and the reverse: X=100 is nearer A's center.
@@ -939,7 +1030,7 @@ describe('connect-handle helpers ("handles connect, body moves")', () => {
       // the center — exactly the fixed grab radius. The radius shrinks to fit
       // the box, so the center is still a body press (move), never a connect.
       const small: ParticipantScreenInfo = {
-        key: 'n:0', id: 'A', left: 0, right: 30, top: 10, bottom: 30, centerX: 15, centerY: 20,
+        key: 'n:0', id: 'A', left: 0, right: 30, top: 10, bottom: 30, centerX: 15, centerY: 20, bottomTop: null, bottomBottom: null,
       };
       expect(nearestNodeHandleAt(small, 15, 20)).toBeNull(); // center: 10px from the top/bottom handles
       expect(nearestNodeHandleAt(small, 15, 12))?.toEqual({ x: 15, y: 10 }); // 2px from the top handle

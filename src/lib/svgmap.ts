@@ -643,18 +643,32 @@ export interface ParticipantScreenInfo {
   bottom: number;
   centerX: number;
   centerY: number;
+  // Bottom actor box vertical extent (sequence diagrams only; null for
+  // flowchart nodes and participants without a bottom actor box).
+  bottomTop: number | null;
+  bottomBottom: number | null;
 }
 
 // Screen rects of all participants, in model (source) order. The rendered
-// left-to-right order matches source order for sequence diagrams.
+// left-to-right order matches source order for sequence diagrams. Also
+// captures the bottom actor box (rect.actor-bottom / g.actor-man) so the
+// connect handle can appear just above it.
 export function getParticipantScreenInfo(svg: Element, model: DiagramModel): ParticipantScreenInfo[] {
   const zip = zipModelToSvg(svg, model);
   const participants = ofKind<ParticipantElement>(model, 'participant');
+  // Bottom actors are matched by the `name` attribute (= participant id).
+  const bottomById = new Map<string, Element>();
+  svg.querySelectorAll('rect.actor-bottom[name], g.actor-man[name]').forEach(el => {
+    const name = el.getAttribute('name');
+    if (name && !bottomById.has(name)) bottomById.set(name, el);
+  });
   const result: ParticipantScreenInfo[] = [];
   participants.forEach((p, i) => {
     const el = zip.participants[i];
     if (!el) return;
     const rect = el.getBoundingClientRect();
+    const bottomEl = bottomById.get(p.id);
+    const bottomRect = bottomEl?.getBoundingClientRect();
     result.push({
       key: p.key,
       id: p.id,
@@ -664,6 +678,8 @@ export function getParticipantScreenInfo(svg: Element, model: DiagramModel): Par
       bottom: rect.bottom,
       centerX: rect.left + rect.width / 2,
       centerY: rect.top + rect.height / 2,
+      bottomTop: bottomRect ? bottomRect.top : null,
+      bottomBottom: bottomRect ? bottomRect.bottom : null,
     });
   });
   return result;
@@ -688,6 +704,8 @@ export function getNodeScreenInfo(svg: Element, model: DiagramModel): Participan
       bottom: rect.bottom,
       centerX: rect.left + rect.width / 2,
       centerY: rect.top + rect.height / 2,
+      bottomTop: null,
+      bottomBottom: null,
     });
   });
   return result;
@@ -938,6 +956,15 @@ export function sequenceConnectHandlePos(p: ParticipantScreenInfo): { x: number;
   return { x: p.centerX, y: p.bottom + SEQ_CONNECT_HANDLE_OFFSET };
 }
 
+// The bottom connect handle of a participant: a fixed point on the lifeline,
+// just above the bottom actor box. Allows creating a message by dragging from
+// the bottom of the diagram (the top handle is the original affordance).
+// Returns null when the participant has no bottom actor box.
+export function sequenceBottomConnectHandlePos(p: ParticipantScreenInfo): { x: number; y: number } | null {
+  if (p.bottomTop == null) return null;
+  return { x: p.centerX, y: p.bottomTop - SEQ_CONNECT_HANDLE_OFFSET };
+}
+
 // The four connect handles of a flowchart node: the midpoints of the node
 // box's edges (draw.io/Figma style). Edge creation drags start only from here.
 export function nodeConnectHandlePositions(n: ParticipantScreenInfo): { x: number; y: number }[] {
@@ -950,21 +977,30 @@ export function nodeConnectHandlePositions(n: ParticipantScreenInfo): { x: numbe
 }
 
 // The participant whose connect handle is nearest to (x, y) within the grab
-// radius (null when the cursor is not on any handle).
+// radius (null when the cursor is not on any handle). Checks both the top
+// handle (below the top actor box) and the bottom handle (above the bottom
+// actor box); `handleType` tells the caller which one was hit.
 export function nearestConnectHandleAt(
   participants: ParticipantScreenInfo[],
   x: number,
   y: number,
-): { participant: ParticipantScreenInfo; handle: { x: number; y: number } } | null {
-  let best: { participant: ParticipantScreenInfo; handle: { x: number; y: number }; d: number } | null = null;
+): { participant: ParticipantScreenInfo; handle: { x: number; y: number }; handleType: 'top' | 'bottom' } | null {
+  let best: { participant: ParticipantScreenInfo; handle: { x: number; y: number }; handleType: 'top' | 'bottom'; d: number } | null = null;
   for (const p of participants) {
-    const handle = sequenceConnectHandlePos(p);
-    const d = Math.hypot(handle.x - x, handle.y - y);
-    if (d <= CONNECT_HANDLE_GRAB_RADIUS && (!best || d < best.d)) {
-      best = { participant: p, handle, d };
+    const topHandle = sequenceConnectHandlePos(p);
+    const topD = Math.hypot(topHandle.x - x, topHandle.y - y);
+    if (topD <= CONNECT_HANDLE_GRAB_RADIUS && (!best || topD < best.d)) {
+      best = { participant: p, handle: topHandle, handleType: 'top', d: topD };
+    }
+    const bottomHandle = sequenceBottomConnectHandlePos(p);
+    if (bottomHandle) {
+      const botD = Math.hypot(bottomHandle.x - x, bottomHandle.y - y);
+      if (botD <= CONNECT_HANDLE_GRAB_RADIUS && (!best || botD < best.d)) {
+        best = { participant: p, handle: bottomHandle, handleType: 'bottom', d: botD };
+      }
     }
   }
-  return best ? { participant: best.participant, handle: best.handle } : null;
+  return best ? { participant: best.participant, handle: best.handle, handleType: best.handleType } : null;
 }
 
 // The node whose padded box contains (x, y), nearest by center distance
