@@ -6,6 +6,7 @@ import {
   dimTargetsForStep,
   panTargetForStep,
   renderWalkthroughStepBox,
+  renderWalkthroughStepBoxes,
   WALKTHROUGH_DIM_OPACITY,
   WALKTHROUGH_MAX_ZOOM,
   WALKTHROUGH_MIN_ZOOM,
@@ -564,5 +565,100 @@ ${SEQ_CODE}`;
 
     expect(computeActiveStepBounds(svg, [])).toBeNull();
     expect(renderWalkthroughStepBox(svg, [])).toBeNull();
+  });
+});
+
+describe('per-element personal highlight boxes (activeGroups & renderWalkthroughStepBoxes)', () => {
+  it('groups a sequence message with ALL its wrapped label lines into ONE box group (unchanged single-box behavior)', () => {
+    const svg = parseSvgRoot(SEQ_WRAPPED_SVG);
+    const model = parseModel(SEQ_WRAPPED_CODE);
+    const plan = buildWalkthroughPlan(SEQ_WRAPPED_CODE, null)!;
+
+    // Step 1: m:1 active — one group holding the arrow + BOTH wrapped lines
+    const step1 = dimTargetsForStep(svg, model, plan, 1);
+    expect(step1.activeGroups).toHaveLength(1);
+    const group = step1.activeGroups[0];
+    expect(group).toHaveLength(3);
+    expect(group[0].getAttribute('data-id')).toBe('i2'); // the message line
+    expect(group.filter((el) => el.classList.contains('messageText')).map((el) => el.textContent))
+      .toEqual(['a very long message', 'that wraps onto two lines']);
+    // The flat active list is unchanged (the group's elements, in order)
+    expect(step1.active).toEqual(group);
+
+    // One box for the one group — same bounds as the flat active set
+    const rects = renderWalkthroughStepBoxes(svg, step1.activeGroups);
+    expect(rects).toHaveLength(1);
+    expect(rects[0].getAttribute('class')).toBe('walkthrough-step-box');
+    const groupBounds = computeActiveStepBounds(svg, group);
+    expect(rects[0].getAttribute('x')).toBe(String(groupBounds!.x));
+    expect(rects[0].getAttribute('y')).toBe(String(groupBounds!.y));
+  });
+
+  it('gives each flowchart node its own group and each edge (with its label) its own group on FLOW_SVG', () => {
+    const withHits = addEdgeHitPaths(FLOW_SVG);
+    const svg = parseSvgRoot(withHits);
+    const model = parseModel(FLOW_CODE);
+    const plan = buildWalkthroughPlan(FLOW_CODE, null)!;
+
+    // Step 1 (depth 1): node B + edge A->B (unlabeled) -> 2 groups
+    const step1 = dimTargetsForStep(svg, model, plan, 1);
+    expect(step1.activeGroups).toHaveLength(2);
+    expect(step1.activeGroups[0][0].getAttribute('id')).toBe('fx-flow-flowchart-B-1');
+    expect(step1.activeGroups[0]).toHaveLength(1);
+    expect(step1.activeGroups[1][0].getAttribute('data-id')).toBe('L_A_B_0');
+    expect(step1.activeGroups[1]).toHaveLength(1); // no edge label on A->B
+    // Flat active list is the concatenation of the groups
+    expect(step1.active).toEqual(step1.activeGroups.flat());
+
+    // Step 2 (depth 2): node C + labeled edge B->C -> edge group carries the
+    // label elements too (outer g.edgeLabel + inner g.label)
+    const step2 = dimTargetsForStep(svg, model, plan, 2);
+    expect(step2.activeGroups).toHaveLength(2);
+    expect(step2.activeGroups[0][0].getAttribute('id')).toBe('fx-flow-flowchart-C-7');
+    const edgeGroup = step2.activeGroups[1];
+    expect(edgeGroup[0].getAttribute('data-id')).toBe('L_B_C_0');
+    expect(edgeGroup.some((el) => el.classList.contains('edgeLabel'))).toBe(true);
+    expect(edgeGroup.some((el) => el.classList.contains('label') && el.getAttribute('data-id') === 'L_B_C_0')).toBe(true);
+  });
+
+  it('renders one personal box per element of a spread-out flowchart level (diamond: 2 nodes + 2 edges = 4 boxes, not 1 union rect)', async () => {
+    const res = await renderPipeline(`flowchart TD
+      A --> B
+      A --> C
+      B --> D
+      C --> D`);
+    const styled = applyStyles(res.svg, res.processedCode, res.config);
+    const svg = parseSvgRoot(styled);
+    const plan = buildWalkthroughPlan(res.processedCode, res.config)!;
+    expect(plan.steps).toHaveLength(3);
+
+    // Step 1 reveals BOTH B and C and BOTH edges A->B, A->C in a single step
+    const step1 = dimTargetsForStep(svg, res.model, plan, 1);
+    expect(step1.activeGroups).toHaveLength(4);
+
+    const rects = renderWalkthroughStepBoxes(svg, step1.activeGroups);
+    expect(rects).toHaveLength(4);
+    expect(svg.querySelectorAll('.walkthrough-step-box')).toHaveLength(4);
+    for (const rect of rects) {
+      expect(rect.getAttribute('class')).toBe('walkthrough-step-box');
+      expect(rect.getAttribute('stroke')).toBe(WALKTHROUGH_STEP_BOX_COLOR);
+    }
+    // The boxes are personal: they do not all coincide at one union rect.
+    const xs = new Set(rects.map((r) => r.getAttribute('x')));
+    const ys = new Set(rects.map((r) => r.getAttribute('y')));
+    expect(xs.size + ys.size).toBeGreaterThan(2);
+    // Each box matches its OWN group's bounds (not the union over all active).
+    step1.activeGroups.forEach((group, i) => {
+      const b = computeActiveStepBounds(svg, group);
+      expect(b).not.toBeNull();
+      expect(rects[i].getAttribute('x')).toBe(String(b!.x));
+      expect(rects[i].getAttribute('y')).toBe(String(b!.y));
+      expect(rects[i].getAttribute('width')).toBe(String(b!.width));
+      expect(rects[i].getAttribute('height')).toBe(String(b!.height));
+    });
+
+    // Empty groups render nothing
+    expect(renderWalkthroughStepBoxes(svg, [])).toEqual([]);
+    expect(renderWalkthroughStepBoxes(svg, [[]])).toEqual([]);
   });
 });

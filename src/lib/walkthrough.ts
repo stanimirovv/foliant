@@ -439,10 +439,16 @@ export function dimTargetsForStep(
   model: DiagramModel,
   plan: WalkthroughPlan,
   stepIndex: number,
-): { dimmed: Element[]; active: Element[] } {
+): { dimmed: Element[]; active: Element[]; activeGroups: Element[][] } {
   const dimmed: Element[] = [];
   const active: Element[] = [];
-  if (plan.steps.length === 0) return { dimmed, active };
+  // Elements that share one personal highlight box: a sequence message with
+  // its wrapped label lines is ONE group; each flowchart node is its own
+  // group and each edge (path + its label) is its own group, so a level whose
+  // elements are spread out (e.g. across subgraphs) gets one box per element
+  // instead of a single big rectangle over all of them.
+  const activeGroups: Element[][] = [];
+  if (plan.steps.length === 0) return { dimmed, active, activeGroups };
   const clampedIdx = Math.max(0, Math.min(stepIndex, plan.steps.length - 1));
   const step = plan.steps[clampedIdx];
   const zip = zipModelToSvg(svg, model);
@@ -482,13 +488,18 @@ export function dimTargetsForStep(
         pushUnique(active, el);
         // Include ALL wrapped label lines so the green step box encompasses
         // the full multi-line label, not just the line nearest the arrow.
+        // The arrow and its label lines form the message's ONE personal box.
+        const group: Element[] = [];
+        pushUnique(group, el);
         for (const t of allMessageLabelElements(svg, model, key)) {
+          pushUnique(group, t);
           pushUnique(active, t);
         }
+        if (group.length > 0) activeGroups.push(group);
       }
     }
 
-    return { dimmed, active };
+    return { dimmed, active, activeGroups };
   }
 
   if (plan.type === 'flowchart') {
@@ -539,23 +550,30 @@ export function dimTargetsForStep(
     for (const key of step.keys) {
       if (nodeIdxByKey.has(key)) {
         const idx = nodeIdxByKey.get(key)!;
-        pushUnique(active, zip.nodes[idx]);
+        const el = zip.nodes[idx];
+        pushUnique(active, el);
+        // Each node of the level gets its own personal highlight box.
+        if (el) activeGroups.push([el]);
       } else if (edgeIdxByKey.has(key)) {
         const idx = edgeIdxByKey.get(key)!;
         const path = zip.edges[idx];
         if (!path) continue;
         pushUnique(active, path);
         const dataId = path.getAttribute('data-id');
+        // The edge path and its label form the edge's ONE personal box.
+        const group: Element[] = [path];
         for (const lab of findEdgeLabelElements(dataId)) {
+          pushUnique(group, lab);
           pushUnique(active, lab);
         }
+        activeGroups.push(group);
       }
     }
 
-    return { dimmed, active };
+    return { dimmed, active, activeGroups };
   }
 
-  return { dimmed, active };
+  return { dimmed, active, activeGroups };
 }
 
 export function panTargetForStep(
@@ -749,4 +767,22 @@ export function renderWalkthroughStepBox(
   rect.setAttribute('pointer-events', 'none');
   host.appendChild(rect);
   return rect;
+}
+
+// Render ONE personal highlight box per active element group (see
+// dimTargetsForStep): a sequence message's arrow + wrapped label lines share
+// one box, while each flowchart node and each edge (with its label) gets its
+// own box — never a single union rectangle over a whole level's spread-out
+// elements. Returns the rendered rects (groups with no measurable bounds are
+// skipped).
+export function renderWalkthroughStepBoxes(
+  svg: Element,
+  activeGroups: Element[][],
+): Element[] {
+  const rects: Element[] = [];
+  for (const group of activeGroups) {
+    const rect = renderWalkthroughStepBox(svg, group);
+    if (rect) rects.push(rect);
+  }
+  return rects;
 }

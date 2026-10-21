@@ -394,6 +394,27 @@ describe('B. Diagram editor — flowchart walkthrough (1 level of depth per step
     });
   });
 
+  it('B8: renders one personal highlight box per active element of a level (not one union rect)', () => {
+    createDiagram('walk-flow-b8', FLOW).then(({ dir, name }) => {
+      cy.visit(appUrl(name, dir));
+      cy.get('#diagram-container svg').should('exist');
+      cy.get('[data-testid="present-toggle"]').click();
+
+      // Step 1 (depth 0): only A active -> 1 box
+      cy.get('#diagram-container .walkthrough-step-box').should('have.length', 1);
+
+      // Step 2 (depth 1): B, C + edges A->B, A->C -> one personal box each
+      cy.get('[data-testid="walkthrough-next"]').click();
+      bar().should('have.text', 'Step 2/3');
+      cy.get('#diagram-container .walkthrough-step-box').should('have.length', 4);
+
+      // Step 3 (depth 2): D + edges B->D, C->D, D->B -> 4 personal boxes
+      cy.get('[data-testid="walkthrough-next"]').click();
+      bar().should('have.text', 'Step 3/3');
+      cy.get('#diagram-container .walkthrough-step-box').should('have.length', 4);
+    });
+  });
+
   it('B3 & B7: longest-path depth for skip edges (FLOW_SKIP = 3 steps) and chained/parallel edges', () => {
     createDiagram('walk-flow-b3', FLOW_SKIP).then(({ dir, name }) => {
       cy.visit(appUrl(name, dir, { present: '1' }));

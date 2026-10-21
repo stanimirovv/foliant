@@ -185,6 +185,32 @@ describe('useWalkthroughPlayback', () => {
     expect(screen.getByTestId('is-playing').textContent).toBe('false');
   });
 
+  it('renders one personal step box per active element on a flowchart level (not one union rect)', () => {
+    const { container, rerender } = render(
+      <TestHost code={FLOW_CODE} svg={FLOW_SVG} enabled={true} />,
+    );
+    const host = container.querySelector('#test-walkthrough-container')!;
+
+    // Step 0: only node A is active -> 1 box
+    expect(host.querySelectorAll('rect.walkthrough-step-box')).toHaveLength(1);
+
+    // Step 1 (depth 1): node B AND edge A->B are active -> one box each
+    fireEvent.click(screen.getByTestId('btn-next'));
+    expect(screen.getByTestId('active-index').textContent).toBe('1');
+    expect(host.querySelectorAll('rect.walkthrough-step-box')).toHaveLength(2);
+    expect(host.querySelector('[id$="-flowchart-B-1"]')?.classList.contains('walkthrough-active')).toBe(true);
+    expect(host.querySelector('[data-id="L_A_B_0"]')?.classList.contains('walkthrough-active')).toBe(true);
+
+    // Step 2 (depth 2): node C + labeled edge B->C -> 2 boxes; boxes are
+    // cleared before re-rendering (never accumulate)
+    fireEvent.click(screen.getByTestId('btn-next'));
+    expect(host.querySelectorAll('rect.walkthrough-step-box')).toHaveLength(2);
+
+    // Disabling removes every box
+    rerender(<TestHost code={FLOW_CODE} svg={FLOW_SVG} enabled={false} />);
+    expect(host.querySelectorAll('rect.walkthrough-step-box')).toHaveLength(0);
+  });
+
   it('auto-pans via zoomToElement with scale >= 1 when transformRef is provided, or scrollIntoView when absent', () => {
     const zoomToElementMock = vi.fn();
     const { rerender } = render(
