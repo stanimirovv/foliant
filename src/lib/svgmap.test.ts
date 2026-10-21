@@ -590,8 +590,9 @@ import {
   nearestParticipantAtX,
   sequenceConnectHandlePos, sequenceBottomConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
+  getFlowchartClusterInfo, innermostClusterAtPoint, nodeCenterInCluster, nodeInAnyCluster,
   SEQ_CONNECT_HANDLE_OFFSET, CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
-  ParticipantScreenInfo,
+  ParticipantScreenInfo, ClusterScreenInfo,
 } from './svgmap';
 
 function mockRect(el: Element, left: number, top: number, width: number, height: number) {
@@ -1240,5 +1241,120 @@ describe('labelElementForKey (inline label editing)', () => {
     const svg = parseSvg(FLOW_SVG);
     const model = flowModel();
     expect(labelElementForKey(svg, model, 'e:0')).toBeNull();
+  });
+});
+
+// --- Flowchart cluster (subgraph) helpers ------------------------------------
+
+const FLOW_SUBGRAPH_SVG = `<svg id="fx-flow-sg" class="flowchart" viewBox="-8 -8 400 200">
+<g class="root">
+<g class="clusters">
+<g class="cluster" id="fx-flow-sg-SG1"><rect x="0" y="0" width="150" height="100"></rect></g>
+<g class="cluster" id="fx-flow-sg-SG2"><rect x="200" y="0" width="150" height="100"></rect></g>
+</g>
+<g class="nodes">
+<g class="node default" id="fx-flow-sg-flowchart-A-0"><rect class="basic label-container" x="10" y="10" width="80" height="40"></rect><g class="label"><foreignObject><div><span class="nodeLabel"><p>A</p></span></div></foreignObject></g></g>
+<g class="node default" id="fx-flow-sg-flowchart-B-1"><rect class="basic label-container" x="20" y="60" width="80" height="40"></rect><g class="label"><foreignObject><div><span class="nodeLabel"><p>B</p></span></div></foreignObject></g></g>
+<g class="node default" id="fx-flow-sg-flowchart-C-2"><rect class="basic label-container" x="210" y="10" width="80" height="40"></rect><g class="label"><foreignObject><div><span class="nodeLabel"><p>C</p></span></div></foreignObject></g></g>
+<g class="node default" id="fx-flow-sg-flowchart-D-3"><rect class="basic label-container" x="300" y="120" width="80" height="40"></rect><g class="label"><foreignObject><div><span class="nodeLabel"><p>D</p></span></div></foreignObject></g></g>
+</g>
+</g>
+</svg>`;
+
+const FLOW_SUBGRAPH_CODE = `flowchart TD
+    subgraph S1
+        A
+        B
+    end
+    subgraph S2
+        C
+    end
+    D`;
+
+function mockFlowSubgraphRects(svg: Element) {
+  // Cluster rects
+  mockRect(svg.querySelector('#fx-flow-sg-SG1')!, 0, 0, 150, 100);
+  mockRect(svg.querySelector('#fx-flow-sg-SG2')!, 200, 0, 150, 100);
+  // Node rects (centers inside their respective clusters)
+  const byId = new Map<string, Element>();
+  svg.querySelectorAll('g.node[id]').forEach(g => {
+    const id = g.getAttribute('id') ?? '';
+    const m = id.match(/-flowchart-(.+)-\d+$/);
+    if (m) byId.set(m[1], g);
+  });
+  mockRect(byId.get('A')!, 10, 10, 80, 40);    // center (50, 30) — inside SG1
+  mockRect(byId.get('B')!, 20, 60, 80, 40);    // center (60, 80) — inside SG1
+  mockRect(byId.get('C')!, 210, 10, 80, 40);   // center (250, 30) — inside SG2
+  mockRect(byId.get('D')!, 300, 120, 80, 40);  // center (340, 140) — top level
+}
+
+describe('getFlowchartClusterInfo', () => {
+  it('maps cluster rects to model block keys via member node positions', () => {
+    const svg = parseSvg(FLOW_SUBGRAPH_SVG);
+    mockFlowSubgraphRects(svg);
+    const model = parseModel(FLOW_SUBGRAPH_CODE);
+    const nodes = getNodeScreenInfo(svg, model);
+    const clusters = getFlowchartClusterInfo(svg, model, nodes);
+    expect(clusters).toHaveLength(2);
+    const s1 = clusters.find(c => c.blockKey === 'b:0');
+    const s2 = clusters.find(c => c.blockKey === 'b:1');
+    expect(s1).toMatchObject({ left: 0, top: 0, right: 150, bottom: 100 });
+    expect(s2).toMatchObject({ left: 200, top: 0, right: 350, bottom: 100 });
+  });
+
+  it('returns an empty list for sequence diagrams', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = parseModel(SEQ_CODE);
+    const nodes = getNodeScreenInfo(svg, model);
+    expect(getFlowchartClusterInfo(svg, model, nodes)).toEqual([]);
+  });
+
+  it('returns an empty list when there are no subgraphs', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const model = flowModel();
+    const nodes = getNodeScreenInfo(svg, model);
+    // FLOW_SVG has a cluster but FLOW_CODE has a subgraph — let's use a model without subgraphs
+    const noSubModel = parseModel('flowchart TD\n    A --> B');
+    expect(getFlowchartClusterInfo(svg, noSubModel, nodes)).toEqual([]);
+  });
+});
+
+describe('innermostClusterAtPoint', () => {
+  const clusters: ClusterScreenInfo[] = [
+    { blockKey: 'b:0', left: 0, top: 0, right: 200, bottom: 200, area: 40000 },
+    { blockKey: 'b:1', left: 50, top: 50, right: 100, bottom: 100, area: 2500 }, // nested
+  ];
+
+  it('returns the smallest cluster containing the point', () => {
+    const hit = innermostClusterAtPoint(clusters, 75, 75);
+    expect(hit?.blockKey).toBe('b:1');
+  });
+
+  it('returns the outer cluster when the point is only in the outer', () => {
+    const hit = innermostClusterAtPoint(clusters, 10, 10);
+    expect(hit?.blockKey).toBe('b:0');
+  });
+
+  it('returns null when the point is outside all clusters', () => {
+    expect(innermostClusterAtPoint(clusters, 300, 300)).toBeNull();
+  });
+});
+
+describe('nodeCenterInCluster / nodeInAnyCluster', () => {
+  const node: ParticipantScreenInfo = {
+    key: 'n:0', id: 'A', left: 10, right: 90, top: 10, bottom: 50,
+    centerX: 50, centerY: 30, bottomTop: null, bottomBottom: null,
+  };
+  const cluster = { left: 0, top: 0, right: 100, bottom: 100 };
+
+  it('nodeCenterInCluster checks the node center against the rect', () => {
+    expect(nodeCenterInCluster(node, cluster)).toBe(true);
+    expect(nodeCenterInCluster(node, { left: 60, top: 0, right: 100, bottom: 100 })).toBe(false);
+  });
+
+  it('nodeInAnyCluster returns true when the node is inside any cluster', () => {
+    expect(nodeInAnyCluster(node, [cluster])).toBe(true);
+    expect(nodeInAnyCluster(node, [{ left: 200, top: 200, right: 300, bottom: 300 }])).toBe(false);
+    expect(nodeInAnyCluster(node, [])).toBe(false);
   });
 });

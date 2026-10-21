@@ -1280,8 +1280,9 @@ export default function ClientPage() {
 
   // DiagramViewer drag: reorder a participant (sequence) or a node (flowchart).
   // beforeKey is the processed key of the element to insert before, or null
-  // to move to the end.
-  const handleMoveParticipant = (processedKey: string, beforeProcessedKey: string | null) => {
+  // to move to the end. targetBlockKey (flowchart only) pins the drop to a
+  // subgraph block when the cursor lifts off past the last node inside it.
+  const handleMoveParticipant = (processedKey: string, beforeProcessedKey: string | null, targetBlockKey?: string | null) => {
     if (rawModel.type === 'flowchart') {
       // Flowchart nodes: map the processed keys to raw node keys and move the
       // node's declaration. transformActors only hides/renames flowchart
@@ -1295,7 +1296,13 @@ export default function ClientPage() {
         if (!b || b.kind !== 'node') return;
         beforeRaw = b;
       }
-      applyEditResult(moveNode(rawCode, viewsData, fromRaw.key, beforeRaw?.key));
+      // Map the target block key (processed → raw) for end-of-subgraph drops.
+      let targetBlockRawKey: string | undefined;
+      if (targetBlockKey) {
+        const blockRaw = selectionMap.get(targetBlockKey);
+        if (blockRaw && blockRaw.kind === 'block') targetBlockRawKey = blockRaw.key;
+      }
+      applyEditResult(moveNode(rawCode, viewsData, fromRaw.key, beforeRaw?.key, targetBlockRawKey));
       return;
     }
     // Sequence participants: the drop is computed in rendered order, so

@@ -1390,7 +1390,7 @@ describe('DiagramViewer flowchart node drag', () => {
     // Releasing over another node must NOT create an edge — the node moves:
     // cursor X=250 is past B's center (200) → A lands after B (before C).
     expect(onCreateMessageDrag).not.toHaveBeenCalled();
-    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2');
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2', null);
   });
 
   it('a small node’s body still moves even when the handle zones reach its center', async () => {
@@ -1417,7 +1417,7 @@ describe('DiagramViewer flowchart node drag', () => {
     fireEvent.mouseMove(window, { clientX: 250, clientY: 20 });
     await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
     fireEvent.mouseUp(window, { clientX: 250, clientY: 20 });
-    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2');
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2', null);
     expect(onCreateMessageDrag).not.toHaveBeenCalled();
 
     // Press next to the top handle (2px away) → connect drag.
@@ -1446,7 +1446,7 @@ describe('DiagramViewer flowchart node drag', () => {
     await waitFor(() => expect(container.querySelector('[data-testid="reorder-indicator"]')).toBeTruthy());
 
     fireEvent.mouseUp(window, { clientX: -50, clientY: 200 });
-    expect(onMoveParticipant).toHaveBeenCalledWith('n:2', 'n:0'); // move C before A
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:2', 'n:0', null); // move C before A
     expect(onCreateMessageDrag).not.toHaveBeenCalled();
   });
 
@@ -1465,7 +1465,7 @@ describe('DiagramViewer flowchart node drag', () => {
     fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
     fireEvent.mouseMove(window, { clientX: 500, clientY: 200 });
     fireEvent.mouseUp(window, { clientX: 500, clientY: 200 });
-    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', null); // move A to end
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', null, null); // move A to end
   });
 
   it('dragging a node into the gap between two nodes inserts before the right one', async () => {
@@ -1483,7 +1483,7 @@ describe('DiagramViewer flowchart node drag', () => {
     fireEvent.mouseDown(flowNodeOf(container, '-A-0'), { button: 0, clientX: 50, clientY: 30 });
     fireEvent.mouseMove(window, { clientX: 300, clientY: 200 });
     fireEvent.mouseUp(window, { clientX: 300, clientY: 200 });
-    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2'); // move A before C
+    expect(onMoveParticipant).toHaveBeenCalledWith('n:0', 'n:2', null); // move A before C
   });
 
   it('releasing a connect drag over the source node cancels (no self-edge)', async () => {

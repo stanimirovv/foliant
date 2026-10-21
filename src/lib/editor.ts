@@ -1347,11 +1347,18 @@ export function moveParticipant(
 // the cluster Mermaid draws. Edge lines stay where they are — moving them
 // across a boundary would silently change which cluster they belong to. The
 // inserted declaration uses the target scope's indentation.
+//
+// targetBlockKey (optional) pins the target scope to a specific subgraph block:
+// when beforeKey is undefined, the node is inserted at the END of that block
+// (just before its `end` line) instead of the end of the file. This is how the
+// drag interaction drops a node at the cursor's position inside a subgraph
+// when the cursor is past the subgraph's last node.
 export function moveNode(
   code: string,
   config: DiagramConfig | null,
   key: string,
   beforeKey?: string,
+  targetBlockKey?: string,
 ): EditResult {
   const model = parseModel(code);
   if (model.type !== 'flowchart') return fail(code, config, UNSUPPORTED);
@@ -1367,6 +1374,15 @@ export function moveNode(
     if (targetEl.key === key) return { code, config }; // no-op
   }
 
+  // Resolve the target block when targetBlockKey is given.
+  let pinnedBlock: ModelElement | undefined;
+  if (targetBlockKey !== undefined) {
+    pinnedBlock = findElement(model, targetBlockKey);
+    if (!pinnedBlock || pinnedBlock.kind !== 'block') {
+      return fail(code, config, `Unknown block key: ${targetBlockKey}`);
+    }
+  }
+
   // Nodes in first-declaration order (parseModel emits them in source order).
   const nodes = model.elements.filter(e => e.kind === 'node');
   const idx = nodes.findIndex(n => n.key === key);
@@ -1374,10 +1390,14 @@ export function moveNode(
   const lines = code.split('\n');
   // Insert position, in original line indices: the moved line lands
   // immediately before line `insertAt`. Move-to-end appends at the end of the
-  // file (keeping a trailing newline last).
+  // file (keeping a trailing newline last). When targetBlockKey pins a
+  // subgraph and beforeKey is undefined, insert before the block's `end` line
+  // (end of that subgraph).
   const insertAt = beforeKey !== undefined
     ? targetEl!.lineStart
-    : (lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length);
+    : pinnedBlock
+      ? pinnedBlock.lineEnd
+      : (lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length);
 
   // The innermost block (subgraph) containing a line, if any.
   const blockAt = (line: number): ModelElement | undefined => {
@@ -1396,6 +1416,11 @@ export function moveNode(
     // nothing to change. (Crossing a subgraph boundary is never a no-op,
     // even when the nodes are adjacent in model order.)
     if (nodes[idx + 1]?.key === beforeKey && !crossingSubgraph) return { code, config };
+  } else if (pinnedBlock) {
+    // Pinned to a subgraph with no beforeKey: no-op when the node's first
+    // declaration is already the last line inside that block (just before
+    // the block's `end`).
+    if (!crossingSubgraph && el.lineStart === pinnedBlock.lineEnd - 1) return { code, config };
   } else if (nodes[nodes.length - 1].key === key && !crossingSubgraph) {
     return { code, config }; // already last, same scope
   }
@@ -1420,22 +1445,38 @@ export function moveNode(
 
   // When crossing a subgraph boundary, the inserted declaration must use the
   // TARGET scope's indentation (the subgraph's content indent, or the base
-  // indent for top level). Detect it from the target line, or from the first
-  // top-level flowchart line for move-to-end.
+  // indent for top level). Detect it from the target line, or from the
+  // content lines inside the target block for end-of-subgraph drops.
+  // Block delimiters (`end`, `subgraph …`) are skipped: parseFlowchartLine
+  // would otherwise parse `end` as a node id with the wrong indent.
+  const isBlockDelimiter = (line: string) => BLOCK_END_RE.test(line) || BLOCK_OPEN_RE.test(line);
   let targetIndent = indent;
   if (crossingSubgraph) {
-    if (insertAt < lines.length) {
+    if (insertAt < lines.length && !isBlockDelimiter(lines[insertAt])) {
       const parsedTarget = parseFlowchartLine(lines[insertAt]);
       if (parsedTarget?.indent) targetIndent = parsedTarget.indent;
     }
     if (targetIndent === indent) {
-      // insertAt line is not a flowchart line (e.g. move-to-end past a
-      // subgraph's `end`): detect the base indent from the first top-level
-      // flowchart line.
-      for (let i = 0; i < lines.length; i++) {
-        if (blockAt(i)) continue; // skip lines inside subgraphs
-        const parsed = parseFlowchartLine(lines[i]);
-        if (parsed?.indent) { targetIndent = parsed.indent; break; }
+      if (targetBlock) {
+        // insertAt is the block's `end` line (or another non-flowchart line
+        // inside the block): detect the content indent from the first
+        // flowchart line inside the target block.
+        for (let i = targetBlock.lineStart + 1; i < targetBlock.lineEnd; i++) {
+          if (isBlockDelimiter(lines[i])) continue;
+          const parsed = parseFlowchartLine(lines[i]);
+          if (parsed?.indent) { targetIndent = parsed.indent; break; }
+        }
+      }
+      if (targetIndent === indent) {
+        // No content lines in the target block (empty subgraph) or target is
+        // top level: detect the base indent from the first top-level
+        // flowchart line.
+        for (let i = 0; i < lines.length; i++) {
+          if (isBlockDelimiter(lines[i])) continue;
+          if (blockAt(i)) continue; // skip lines inside subgraphs
+          const parsed = parseFlowchartLine(lines[i]);
+          if (parsed?.indent) { targetIndent = parsed.indent; break; }
+        }
       }
     }
   }

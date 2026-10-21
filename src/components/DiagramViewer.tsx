@@ -13,8 +13,10 @@ import {
   nearestParticipantAtX, nearestMessageKeyAt,
   sequenceConnectHandlePos, sequenceBottomConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
+  getFlowchartClusterInfo, innermostClusterAtPoint, nodeCenterInCluster, nodeInAnyCluster,
   CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo, EdgeEndpointScreenInfo,
+  ClusterScreenInfo,
 } from '@/lib/svgmap';
 import { DiagramConfig, StickyNote as StickyNoteType, parseViewsData } from '@/lib/views';
 import { MessageInsertPosition } from '@/lib/editor';
@@ -38,7 +40,9 @@ interface DiagramViewerProps {
   onSelect?: (key: string | null, options?: { shiftKey?: boolean }) => void;
   // Drag callbacks (processed keys; ClientPage maps them to raw keys).
   // onMoveParticipant moves a participant (sequence) or a node (flowchart).
-  onMoveParticipant?: (participantKey: string, beforeKey: string | null) => void;
+  // targetBlockKey (flowchart only) pins the drop to a subgraph block when
+  // the cursor lifts off past the last node inside that subgraph.
+  onMoveParticipant?: (participantKey: string, beforeKey: string | null, targetBlockKey?: string | null) => void;
   onCreateMessageDrag?: (fromKey: string, toKey: string, position: MessageInsertPosition) => void;
   // Retarget a sequence message: end 'to' drags the arrow head (recipient),
   // 'from' drags the tail (origin) onto the participant with the given key.
@@ -115,6 +119,9 @@ interface DragState {
   anchorY: number;
   // Reorder/node move: the participant before which to insert (null = move to end).
   targetBeforeKey: string | null;
+  // Flowchart node move: the subgraph block to drop into when the cursor is
+  // past the last node inside that subgraph (null = top-level scope).
+  targetBlockKey: string | null;
   // Message/connect: the participant/node under the cursor (null = no target).
   toParticipantKey: string | null;
   toParticipantId: string | null;
@@ -1098,6 +1105,7 @@ export default function DiagramViewer({
       anchorX,
       anchorY,
       targetBeforeKey: null,
+      targetBlockKey: null,
       toParticipantKey: null,
       toParticipantId: null,
       insertPosition: null,
@@ -1315,12 +1323,42 @@ export default function DiagramViewer({
       // Node move: dashed insertion indicator along the layout axis. Edge
       // creation is only possible from a node's connect handles (drag.type
       // 'connect'), so a body drag can never create an edge by accident.
+      //
+      // Subgraph-aware: only nodes in the same scope as the cursor are drop
+      // targets. When the cursor is inside a subgraph, top-level nodes are
+      // excluded (and vice versa). When the cursor lifts off past the last
+      // node inside a subgraph, targetBlockKey pins the drop to that subgraph
+      // (insert before its `end` line).
       const axis = flowAxisOf(code);
       const cursorCoord = axis === 'x' ? drag.currentX : drag.currentY;
       drag.toParticipantKey = null;
       drag.toParticipantId = null;
+
+      // Determine the cursor's subgraph scope from the rendered clusters.
+      let scopeNodes = cache.participants;
+      drag.targetBlockKey = null;
+      const ctx = getSvgAndModel();
+      if (ctx && ctx.model.type === 'flowchart') {
+        const clusters = getFlowchartClusterInfo(ctx.svgRoot, ctx.model, cache.participants);
+        if (clusters.length > 0) {
+          const targetCluster = innermostClusterAtPoint(clusters, drag.currentX, drag.currentY);
+          if (targetCluster) {
+            // Inside a subgraph: only nodes whose center is in that cluster.
+            scopeNodes = cache.participants.filter(n => nodeCenterInCluster(n, targetCluster));
+            // If past all in-scope nodes, pin the drop to this subgraph.
+            const { beforeKey: rawBefore } = computeReorderDrop(
+              scopeNodes, drag.participantKey, cursorCoord, axis
+            );
+            if (rawBefore === null) drag.targetBlockKey = targetCluster.blockKey;
+          } else {
+            // Top-level scope: exclude nodes inside any cluster.
+            scopeNodes = cache.participants.filter(n => !nodeInAnyCluster(n, clusters));
+          }
+        }
+      }
+
       const { beforeKey, indicator } = computeReorderDrop(
-        cache.participants, drag.participantKey, cursorCoord, axis
+        scopeNodes, drag.participantKey, cursorCoord, axis
       );
       drag.targetBeforeKey = beforeKey;
       const svgRect = document.getElementById('diagram-container')?.getBoundingClientRect();
@@ -1482,9 +1520,10 @@ export default function DiagramViewer({
         }
       } else if (drag.type === 'node') {
         // Node move: reorder the node. targetBeforeKey === null means "move
-        // to end"; the transform handles no-ops.
+        // to end"; targetBlockKey pins the drop to a subgraph when the cursor
+        // lifts off past the last node inside it. The transform handles no-ops.
         if (onMoveParticipant && drag.targetBeforeKey !== undefined) {
-          onMoveParticipant(drag.participantKey, drag.targetBeforeKey);
+          onMoveParticipant(drag.participantKey, drag.targetBeforeKey, drag.targetBlockKey);
         }
       } else if (drag.type === 'endpoint') {
         if (isFlowchartDiagram) {

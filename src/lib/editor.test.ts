@@ -1380,6 +1380,45 @@ flowchart TD
     expect(res.code).toBe(`flowchart TD\n    subgraph S\n        B\n    end\n    A[Alice]\n    C`);
   });
 
+  it('moves a node to the end of a subgraph via targetBlockKey', () => {
+    const code = `flowchart TD\n    A\n    subgraph S\n        B\n        C\n    end`;
+    // A (n:0, top level) to end of subgraph S (b:0): insert before `end`.
+    const res = moveNode(code, null, 'n:0', undefined, 'b:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S\n        B\n        C\n        A\n    end`);
+  });
+
+  it('targetBlockKey with beforeKey inserts before the node inside the block', () => {
+    const code = `flowchart TD\n    A\n    subgraph S\n        B\n        C\n    end`;
+    // A (n:0, top level) before C (n:2, inside S), pinned to S (b:0).
+    // The standalone declaration moves from top level into the subgraph.
+    const res = moveNode(code, null, 'n:0', 'n:2', 'b:0');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S\n        B\n        A\n        C\n    end`);
+  });
+
+  it('targetBlockKey no-op when the node is already last in the block', () => {
+    const code = `flowchart TD\n    subgraph S\n        B\n        A\n    end\n    C`;
+    // A (n:1) is already the last node inside S (b:0). Move to end of S = no-op.
+    const res = moveNode(code, null, 'n:1', undefined, 'b:0');
+    expect(res.code).toBe(code);
+  });
+
+  it('targetBlockKey moves a node from one subgraph to the end of another', () => {
+    const code = `flowchart TD\n    subgraph S1\n        A\n    end\n    subgraph S2\n        B\n    end`;
+    // A (n:0, inside S1) to end of S2 (b:1): insert before S2's `end`.
+    const res = moveNode(code, null, 'n:0', undefined, 'b:1');
+    expect(res.warning).toBeUndefined();
+    expect(res.code).toBe(`flowchart TD\n    subgraph S1\n    end\n    subgraph S2\n        B\n        A\n    end`);
+  });
+
+  it('targetBlockKey soft-fails on an unknown block key', () => {
+    const code = `flowchart TD\n    A\n    subgraph S\n        B\n    end`;
+    const res = moveNode(code, null, 'n:0', undefined, 'b:99');
+    expect(res.warning).toBeTruthy();
+    expect(res.code).toBe(code);
+  });
+
   it('moves a top-level node to the end of a diagram with a subgraph', () => {
     const code = `flowchart TD\n    A --> B\n    subgraph S\n        C\n    end`;
     const res = moveNode(code, null, 'n:0');

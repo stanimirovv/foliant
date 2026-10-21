@@ -1054,6 +1054,113 @@ export function nearestNodeHandleAt(
   return best;
 }
 
+// --- Flowchart cluster (subgraph) screen helpers ----------------------------
+// Mermaid renders flowchart subgraphs as g.cluster elements wrapping their
+// member nodes. These helpers map cluster screen rects to model block keys so
+// the node drag interaction can be subgraph-aware: only nodes in the same
+// scope as the cursor are drop targets, and a drop at the end of a subgraph
+// (past its last node) targets that subgraph's block.
+
+export interface ClusterScreenInfo {
+  blockKey: string;   // model key of the subgraph block
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  area: number;       // for innermost selection (smallest area wins)
+}
+
+// Screen rects of all flowchart clusters, each mapped to its model block key.
+// Mapping: a block's member nodes (first declaration inside the block's line
+// span) have screen centers that fall inside the cluster's rect — the cluster
+// whose rect contains the most member centers is the block's cluster.
+export function getFlowchartClusterInfo(
+  svg: Element,
+  model: DiagramModel,
+  nodes: ParticipantScreenInfo[],
+): ClusterScreenInfo[] {
+  if (model.type !== 'flowchart') return [];
+  const blocks = model.elements.filter(
+    e => e.kind === 'block' && e.blockType === 'subgraph'
+  ) as BlockElement[];
+  if (blocks.length === 0) return [];
+
+  const clusterRects: { left: number; top: number; right: number; bottom: number; area: number }[] = [];
+  svg.querySelectorAll('g.cluster').forEach(el => {
+    const r = el.getBoundingClientRect();
+    clusterRects.push({
+      left: r.left, top: r.top, right: r.right, bottom: r.bottom,
+      area: r.width * r.height,
+    });
+  });
+  if (clusterRects.length === 0) return [];
+
+  const nodeEls = new Map(nodes.map(n => [n.key, n]));
+  const result: ClusterScreenInfo[] = [];
+  for (const block of blocks) {
+    // Member nodes: first declaration line inside the block's span.
+    const memberKeys = new Set<string>();
+    for (const e of model.elements) {
+      if (e.kind === 'node' && e.lineStart > block.lineStart && e.lineStart <= block.lineEnd) {
+        memberKeys.add(e.key);
+      }
+    }
+    if (memberKeys.size === 0) continue;
+    // Score each cluster rect by how many member centers it contains.
+    let bestRect: typeof clusterRects[number] | null = null;
+    let bestScore = 0;
+    for (const rect of clusterRects) {
+      let score = 0;
+      for (const [key, n] of nodeEls) {
+        if (!memberKeys.has(key)) continue;
+        if (n.centerX >= rect.left && n.centerX <= rect.right &&
+            n.centerY >= rect.top && n.centerY <= rect.bottom) {
+          score++;
+        }
+      }
+      if (score > bestScore) { bestScore = score; bestRect = rect; }
+    }
+    if (bestRect && bestScore > 0) {
+      result.push({ blockKey: block.key, ...bestRect });
+    }
+  }
+  return result;
+}
+
+// The innermost (smallest-area) cluster whose rect contains (x, y).
+// Null when the point is outside every cluster (top-level scope).
+export function innermostClusterAtPoint(
+  clusters: ClusterScreenInfo[],
+  x: number,
+  y: number,
+): ClusterScreenInfo | null {
+  let best: ClusterScreenInfo | null = null;
+  for (const c of clusters) {
+    if (x >= c.left && x <= c.right && y >= c.top && y <= c.bottom) {
+      if (!best || c.area < best.area) best = c;
+    }
+  }
+  return best;
+}
+
+// True when the node's center falls inside the given cluster rect.
+export function nodeCenterInCluster(
+  node: ParticipantScreenInfo,
+  cluster: { left: number; top: number; right: number; bottom: number },
+): boolean {
+  return node.centerX >= cluster.left && node.centerX <= cluster.right &&
+         node.centerY >= cluster.top && node.centerY <= cluster.bottom;
+}
+
+// True when the node's center falls inside ANY cluster rect (i.e. the node is
+// inside a subgraph, not at top level).
+export function nodeInAnyCluster(
+  node: ParticipantScreenInfo,
+  clusters: { left: number; top: number; right: number; bottom: number }[],
+): boolean {
+  return clusters.some(c => nodeCenterInCluster(node, c));
+}
+
 // Selection map (processed -> raw), plan 4.7: parses both models, rewrites
 // the raw model's ids through buildActorRewriteMap, and joins on
 // (kind, from, to, label, occurrence). Elements stripped by the transform
