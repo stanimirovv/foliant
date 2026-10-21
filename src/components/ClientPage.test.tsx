@@ -4361,3 +4361,49 @@ describe('ClientPage — top menu bar responsiveness', () => {
   });
 });
 
+describe('ClientPage — theme switching and right menu theme colors', () => {
+  afterEach(() => {
+    cleanup();
+    document.documentElement.classList.remove('dark');
+  });
+
+  it('synchronizes documentElement and right sidebar styles with light and dark themes', async () => {
+    // 1. Light theme
+    currentMockParams = { file: 'demo.mmd', edit: '1', theme: 'default' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    mockFetchWithFile('sequenceDiagram\n    participant A\n    participant B\n    A->>B: Ping');
+
+    const { rerender } = render(<ClientPage />);
+    const sidebarLight = await screen.findByTestId('editor-sidebar');
+    expect(sidebarLight.className).toContain('bg-white');
+    expect(sidebarLight.className).toContain('text-gray-900');
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+
+    // Theme toggle button allows switching to dark mode
+    const toggleBtnLight = screen.getByTitle('Switch to dark mode');
+    expect(toggleBtnLight).toBeTruthy();
+    fireEvent.click(toggleBtnLight);
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('theme=dark'));
+
+    // 2. Dark theme
+    currentMockParams = { file: 'demo.mmd', edit: '1', theme: 'dark' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+
+    rerender(<ClientPage />);
+    await waitFor(() => {
+      expect(document.documentElement.classList.contains('dark')).toBe(true);
+    });
+
+    const sidebarDark = screen.getByTestId('editor-sidebar');
+    expect(sidebarDark.className).toContain('bg-slate-900');
+    expect(sidebarDark.className).toContain('text-slate-100');
+
+    // Theme toggle button allows switching to light mode
+    const toggleBtnDark = screen.getByTitle('Switch to light mode');
+    expect(toggleBtnDark).toBeTruthy();
+    fireEvent.click(toggleBtnDark);
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('theme=default'));
+  });
+});
+
+

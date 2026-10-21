@@ -332,6 +332,16 @@ export default function ClientPage() {
   const isDark = theme === 'dark';
   const dirParam = searchParams.get('dir') || '';
 
+  // Synchronize the root <html> class with the active theme so Tailwind's
+  // `dark:` variant and CSS theme variables respond dynamically to theme switches.
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDark]);
+
   // A markdown file selected with a `diagram` index opens that embedded
   // diagram (0-based among the ```mermaid blocks of the file) in the diagram
   // editor; a markdown file without the index opens the whole document in the
@@ -3182,7 +3192,9 @@ export default function ClientPage() {
               <div className="flex-1 min-h-0 flex overflow-hidden">
                 {isSplitView ? (
                   <>
-                    <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-y-auto">
+                    <div className={`w-72 flex-shrink-0 border-r overflow-y-auto ${
+                      isDark ? 'border-slate-800 bg-slate-900' : 'border-gray-200 bg-white'
+                    }`}>
                       <EditorPanel
                         element={selectedRawElement}
                         selectedElements={selectedRawElements}
@@ -3246,7 +3258,9 @@ export default function ClientPage() {
                     </div>
                   </>
                 ) : sidebarTab === 'properties' ? (
-                  <div className="w-full h-full bg-white dark:bg-slate-900 overflow-y-auto">
+                  <div className={`w-full h-full overflow-y-auto ${
+                    isDark ? 'bg-slate-900' : 'bg-white'
+                  }`}>
                     <EditorPanel
                       element={selectedRawElement}
                       selectedElements={selectedRawElements}
@@ -3361,7 +3375,7 @@ function NewDiagramDialog({
           <input
             type="text"
             data-testid="new-diagram-name"
-            className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 px-2 py-1 text-sm border border-gray-200 dark:border-slate-700 rounded bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder={kind === 'markdown' ? 'my-document' : 'my-diagram'}
             value={name}
             onChange={(e) => { setName(e.target.value); setError(null); }}
@@ -3377,7 +3391,7 @@ function NewDiagramDialog({
           <span className="text-xs text-gray-500 dark:text-slate-400">Type</span>
           <select
             data-testid="new-diagram-type"
-            className="w-full mt-1 px-2 py-1 text-sm border rounded bg-gray-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 px-2 py-1 text-sm border border-gray-200 dark:border-slate-700 rounded bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={kind}
             onChange={(e) => setKind(e.target.value as NewFileKind)}
           >

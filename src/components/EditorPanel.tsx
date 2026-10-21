@@ -249,6 +249,7 @@ export default function EditorPanel({
             <GlobalArrowFields
               arrowStyle={globalArrowStyle ?? null}
               arrowColors={arrowColors}
+              theme={theme}
               onSetColor={onSetGlobalColor}
               onSetWidth={onSetGlobalWidth}
             />
@@ -311,6 +312,7 @@ export default function EditorPanel({
           key={activeElement.key}
           element={activeElement}
           diagramType={diagramType}
+          theme={theme}
           arrowStyle={arrowStyle}
           arrowTags={arrowTags}
           arrowColors={arrowColors}
@@ -750,7 +752,8 @@ function MultiElementFields({
                 <div className="mt-2" data-testid="multi-arrow-animation-dropdown-content">
                   <AnimatedArrowSelector
                     currentAnimation={arrowStyle?.animation ?? 'none'}
-                    currentColor={arrowStyle?.color ? colorToHex(arrowStyle?.color) : '#00ff9d'}
+                    currentColor={arrowStyle?.color ? colorToHex(arrowStyle?.color) : (theme === 'default' ? '#00b875' : '#00ff9d')}
+                    theme={theme}
                     onSelectAnimation={onSetAnimation}
                     onSelectColor={onSetColor}
                     hasSelectedArrow={true}
@@ -1007,7 +1010,7 @@ function ParticipantFields({
                 data-testid="actor-color-picker"
                 className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
                 list="editor-actor-color-list"
-                value={colorToHex(effectiveColor)}
+                value={colorToHex(effectiveColor, theme === 'default' ? presetPalette[0] : '#213b5e')}
                 onChange={(e) => onSetColor(e.target.value)}
               />
               <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={effectiveColor || 'Default'}>
@@ -1069,7 +1072,7 @@ function ParticipantFields({
                 data-testid="actor-color-picker"
                 className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
                 list="editor-actor-color-list"
-                value={colorToHex(effectiveColor)}
+                value={colorToHex(effectiveColor, theme === 'default' ? presetPalette[0] : '#213b5e')}
                 onChange={(e) => onSetColor(e.target.value)}
               />
               <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={effectiveColor || 'Default'}>
@@ -1113,7 +1116,7 @@ function ParticipantFields({
               data-testid="actor-color-picker"
               className="h-8 w-12 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5"
               list="editor-actor-color-list"
-              value={colorToHex(effectiveColor)}
+              value={colorToHex(effectiveColor, theme === 'default' ? presetPalette[0] : '#213b5e')}
               onChange={(e) => onSetColor(e.target.value)}
             />
             <span className="text-xs text-gray-500 dark:text-slate-400 font-mono flex-1">
@@ -1371,7 +1374,7 @@ function NoteFields({
               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs cursor-pointer ${
                 element.over.includes(id)
                   ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
-                  : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300'
+                  : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 bg-white dark:bg-slate-800'
               }`}
             >
               <input
@@ -1767,13 +1770,14 @@ function StickyNoteFields({
 interface GlobalArrowFieldsProps {
   arrowStyle: ArrowStyleDefaults | null;
   arrowColors: string[];
+  theme?: 'default' | 'dark';
   onSetColor: (color: string) => void;
   onSetWidth: (width: number | '') => void;
 }
 
 // Default style applied to every arrow without its own entry field
 // (CONFIG.defaultArrowStyle). Shown when nothing is selected.
-function GlobalArrowFields({ arrowStyle, arrowColors, onSetColor, onSetWidth }: GlobalArrowFieldsProps) {
+function GlobalArrowFields({ arrowStyle, arrowColors, theme = 'dark', onSetColor, onSetWidth }: GlobalArrowFieldsProps) {
   return (
     <div
       className="space-y-2 border border-blue-100 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 rounded p-2.5"
@@ -1790,7 +1794,7 @@ function GlobalArrowFields({ arrowStyle, arrowColors, onSetColor, onSetWidth }: 
               data-testid="global-arrow-color-picker"
               className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
               list="editor-global-arrow-color-list"
-              value={colorToHex(arrowStyle?.color, '#00ff9d')}
+              value={colorToHex(arrowStyle?.color, theme === 'default' ? '#00b875' : '#00ff9d')}
               onChange={(e) => onSetColor(e.target.value)}
             />
             <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={arrowStyle?.color || 'Default'}>
@@ -1848,6 +1852,7 @@ function GlobalArrowFields({ arrowStyle, arrowColors, onSetColor, onSetWidth }: 
 interface ArrowFieldsProps {
   element: MessageElement | EdgeElement;
   diagramType: DiagramType;
+  theme?: 'default' | 'dark';
   arrowStyle: ArrowStylePatch | null;
   arrowTags: ArrowTagInfo | null;
   arrowColors: string[];
@@ -1866,7 +1871,7 @@ interface ArrowFieldsProps {
 }
 
 function ArrowFields({
-  element, diagramType, arrowStyle, arrowTags, arrowColors, actorKeys,
+  element, diagramType, theme = 'dark', arrowStyle, arrowTags, arrowColors, actorKeys,
   onEditLabel, onSetColor, onSetType, onSetWidth, onSetDash, onSetAnimation,
   onToggleActivation, onAddTag, onRemoveTag, onSetKeyMode, onRequestDelete,
 }: ArrowFieldsProps) {
@@ -1895,7 +1900,7 @@ function ArrowFields({
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-gray-400 dark:text-slate-500">
         {element.kind === 'message' ? 'Message' : 'Edge'}:{' '}
         <span className="font-mono">{element.from} {element.operator} {element.to}</span>
       </p>
@@ -1931,7 +1936,7 @@ function ArrowFields({
               data-testid="arrow-color-picker"
               className="h-8 w-10 cursor-pointer rounded border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5 shrink-0"
               list="editor-arrow-color-list"
-              value={colorToHex(arrowStyle?.color, '#00ff9d')}
+              value={colorToHex(arrowStyle?.color, theme === 'default' ? '#00b875' : '#00ff9d')}
               onChange={(e) => onSetColor(e.target.value)}
             />
             <span className="text-xs text-gray-500 dark:text-slate-400 font-mono truncate flex-1 min-w-0" title={arrowStyle?.color || 'Default'}>
@@ -2022,7 +2027,8 @@ function ArrowFields({
         <div className="pt-2 border-t border-gray-100 dark:border-slate-800">
           <AnimatedArrowSelector
             currentAnimation={arrowStyle?.animation ?? 'none'}
-            currentColor={arrowStyle?.color ? colorToHex(arrowStyle?.color) : '#00ff9d'}
+            currentColor={arrowStyle?.color ? colorToHex(arrowStyle?.color) : (theme === 'default' ? '#00b875' : '#00ff9d')}
+            theme={theme}
             onSelectAnimation={onSetAnimation}
             onSelectColor={onSetColor}
             hasSelectedArrow={true}

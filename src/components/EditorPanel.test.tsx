@@ -1180,6 +1180,93 @@ describe('EditorPanel', () => {
       const boxColorInputDark = screen.getByTestId('group-box-color') as HTMLInputElement;
       expect(boxColorInputDark.placeholder).toContain('#213b5e');
     });
+
+    it('adapts inputs and color pickers in right menu depending on theme', () => {
+      // 1. Participant without explicit color defaults picker to theme preset
+      const { rerender } = render(
+        <EditorPanel
+          {...makeProps({
+            element: participantA,
+            theme: 'default',
+          })}
+        />
+      );
+
+      const colorPickerLight = screen.getByTestId('actor-color-picker') as HTMLInputElement;
+      expect(colorPickerLight.value).toBe('#cfe2f3');
+      expect(colorPickerLight.className).toContain('bg-white');
+      expect(colorPickerLight.className).toContain('dark:bg-slate-800');
+      expect(colorPickerLight.className).toContain('border-gray-200');
+      expect(colorPickerLight.className).toContain('dark:border-slate-700');
+
+      rerender(
+        <EditorPanel
+          {...makeProps({
+            element: participantA,
+            theme: 'dark',
+          })}
+        />
+      );
+
+      const colorPickerDark = screen.getByTestId('actor-color-picker') as HTMLInputElement;
+      expect(colorPickerDark.value).toBe('#213b5e');
+
+      // 2. Global arrow fields default fallback color adapts to theme
+      rerender(
+        <EditorPanel
+          {...makeProps({
+            element: null,
+            selectedElements: [],
+            onSetGlobalColor: vi.fn(),
+            onSetGlobalWidth: vi.fn(),
+            theme: 'default',
+          })}
+        />
+      );
+
+      const globalColorPickerLight = screen.getByTestId('global-arrow-color-picker') as HTMLInputElement;
+      expect(globalColorPickerLight.value).toBe('#00b875');
+
+      rerender(
+        <EditorPanel
+          {...makeProps({
+            element: null,
+            selectedElements: [],
+            onSetGlobalColor: vi.fn(),
+            onSetGlobalWidth: vi.fn(),
+            theme: 'dark',
+          })}
+        />
+      );
+
+      const globalColorPickerDark = screen.getByTestId('global-arrow-color-picker') as HTMLInputElement;
+      expect(globalColorPickerDark.value).toBe('#00ff9d');
+
+      // 3. Arrow fields color picker default adapts to theme
+      rerender(
+        <EditorPanel
+          {...makeProps({
+            element: message0,
+            theme: 'default',
+          })}
+        />
+      );
+
+      const arrowColorPickerLight = screen.getByTestId('arrow-color-picker') as HTMLInputElement;
+      expect(arrowColorPickerLight.value).toBe('#00b875');
+
+      rerender(
+        <EditorPanel
+          {...makeProps({
+            element: message0,
+            theme: 'dark',
+          })}
+        />
+      );
+
+      const arrowColorPickerDark = screen.getByTestId('arrow-color-picker') as HTMLInputElement;
+      expect(arrowColorPickerDark.value).toBe('#00ff9d');
+    });
   });
 });
 

@@ -118,4 +118,23 @@ describe('AnimatedArrowSelector', () => {
       expect(markerPath?.getAttribute('fill')).toBe(expectedHex);
     }
   });
+
+  it('adapts broken connection indicator circles to theme with fill-white and dark:fill-slate-800', () => {
+    const { container } = render(
+      <AnimatedArrowSelector
+        currentAnimation="none"
+        theme="default"
+        onSelectAnimation={vi.fn()}
+        onSelectColor={vi.fn()}
+      />
+    );
+
+    const xMarkCircles = container.querySelectorAll('.arrow-x-mark circle');
+    expect(xMarkCircles.length).toBeGreaterThan(0);
+    xMarkCircles.forEach(circle => {
+      expect(circle.getAttribute('class')).toContain('fill-white');
+      expect(circle.getAttribute('class')).toContain('dark:fill-slate-800');
+      expect(circle.getAttribute('fill')).toBeNull();
+    });
+  });
 });

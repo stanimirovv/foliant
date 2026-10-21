@@ -11,6 +11,7 @@ import {
 interface AnimatedArrowSelectorProps {
   currentAnimation?: ArrowAnimationType;
   currentColor?: string;
+  theme?: 'default' | 'dark';
   onSelectAnimation: (anim: ArrowAnimationType) => void;
   onSelectColor: (color: string) => void;
   onConvertDiagram?: () => void;
@@ -21,13 +22,15 @@ interface AnimatedArrowSelectorProps {
 export default function AnimatedArrowSelector({
   currentAnimation = 'none',
   currentColor,
+  theme = 'dark',
   onSelectAnimation,
   onSelectColor,
   onConvertDiagram,
   hasSelectedArrow = false,
   compact = false,
 }: AnimatedArrowSelectorProps) {
-  const activeColor = currentColor?.trim().toLowerCase() || '#00ff9d';
+  const defaultFallbackColor = theme === 'default' ? '#00b875' : '#00ff9d';
+  const activeColor = currentColor?.trim().toLowerCase() || defaultFallbackColor;
 
   return (
     <div className={`space-y-3 ${compact ? 'text-xs' : 'text-sm'}`}>
@@ -164,7 +167,7 @@ export default function AnimatedArrowSelector({
                           className="arrow-anim-broken-network"
                         />
                         <g className="arrow-x-mark" transform="translate(34, 9)">
-                          <circle r="5.5" fill="#ffffff" stroke={previewColor} strokeWidth="1.6" />
+                          <circle r="5.5" className="fill-white dark:fill-slate-800" stroke={previewColor} strokeWidth="1.6" />
                           <line x1="-2.4" y1="-2.4" x2="2.4" y2="2.4" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                           <line x1="-2.4" y1="2.4" x2="2.4" y2="-2.4" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                         </g>
@@ -189,7 +192,7 @@ export default function AnimatedArrowSelector({
                           <animate attributeName="stroke-width" values="1.8;0.5" dur="2.6s" repeatCount="indefinite" />
                         </circle>
                         <g className="arrow-x-mark" transform="translate(14, 9)">
-                          <circle r="5.5" fill="var(--background, #090d16)" stroke={previewColor} strokeWidth="1.4" />
+                          <circle r="5.5" className="fill-white dark:fill-slate-800" stroke={previewColor} strokeWidth="1.4" />
                           <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                           <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                         </g>
@@ -222,7 +225,7 @@ export default function AnimatedArrowSelector({
                           <animate attributeName="stroke-width" values="1.8;0.5" dur="2.6s" repeatCount="indefinite" />
                         </circle>
                         <g className="arrow-x-mark" transform="translate(54, 9)">
-                          <circle r="5.5" fill="var(--background, #090d16)" stroke={previewColor} strokeWidth="1.4" />
+                          <circle r="5.5" className="fill-white dark:fill-slate-800" stroke={previewColor} strokeWidth="1.4" />
                           <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                           <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke={previewColor} strokeWidth="1.8" strokeLinecap="round" />
                         </g>
