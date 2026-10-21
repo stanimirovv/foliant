@@ -8,7 +8,7 @@ import MarkdownEditor from './MarkdownEditor';
 import SourceCodePanel from './SourceCodePanel';
 import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen, AlertTriangle } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen, AlertTriangle, Globe } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
 import { parseModel, ModelElement, MessageElement, EdgeElement, NodeShape, ParticipantType, StickyNoteElement, NotePlacement, BlockType } from '@/lib/model';
@@ -36,6 +36,7 @@ import { createSerialQueue } from '@/lib/serialQueue';
 import { extractMermaidBlocks } from '@/lib/markdown';
 import { MERMAID_DIAGRAM_TEMPLATES, scaffoldMermaidBlock } from '@/lib/markdownBlocks';
 import { isReadOnlyFile } from '@/lib/readOnlyFiles';
+import { STATIC_DEMO, getStaticFiles, getStaticMarkdownFiles, getStaticFileContent, getStaticMarkdownDiagrams } from '@/lib/staticDemo';
 
 // Undo/redo history depth: capped so both stacks stay small (10-15 steps).
 const HISTORY_LIMIT = 15;
@@ -527,7 +528,10 @@ export default function ClientPage() {
   useEffect(() => {
     let ignore = false;
     const run = async () => {
-      if (!dirParam && !currentFile) {
+      if (STATIC_DEMO) {
+        // Static mode: no recent dirs, no dir-check — go straight to the file list.
+        recentDirLoadAttemptedRef.current = true;
+      } else if (!dirParam && !currentFile) {
         if (!recentDirLoadAttemptedRef.current) {
           let lastRecent: string | null = null;
           try {
@@ -564,6 +568,29 @@ export default function ClientPage() {
         recentDirLoadAttemptedRef.current = true;
       }
       try {
+        if (STATIC_DEMO) {
+          // Static mode: serve the file list from the bundled data — no API.
+          const staticMmd = getStaticFiles();
+          const staticMd = getStaticMarkdownFiles();
+          if (ignore) return;
+          setFilesError(null);
+          setStorageBackend('static');
+          setFiles(staticMmd);
+          setMarkdownFiles(staticMd);
+          if (!currentFile) {
+            const defaultFile =
+              staticMd.find(f => f === 'tutorial.md') ??
+              staticMd[0] ??
+              staticMmd[0];
+            if (defaultFile) {
+              const params = new URLSearchParams(searchParams.toString());
+              params.set('file', defaultFile);
+              params.delete('diagram');
+              router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+            }
+          }
+          return;
+        }
         const r = await fetch(`/api/files${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
         const data = await r.json();
         if (ignore) return;
@@ -613,6 +640,12 @@ export default function ClientPage() {
       return;
     }
     const dirQs = dirParam ? `&dir=${encodeURIComponent(dirParam)}` : '';
+    if (STATIC_DEMO) {
+      // Static mode: extract diagram metadata from the bundled content.
+      const entries = markdownFiles.map(f => [f, getStaticMarkdownDiagrams(f)] as const);
+      setMdDiagrams(Object.fromEntries(entries));
+      return;
+    }
     Promise.all(markdownFiles.map(async f => {
       try {
         const r = await fetch(`/api/markdown/diagrams?file=${encodeURIComponent(f)}${dirQs}`);
@@ -628,6 +661,9 @@ export default function ClientPage() {
   }, [markdownFiles, dirParam, refreshKey]);
 
   const fetchFileContent = useCallback(async (filename: string): Promise<string | null> => {
+    if (STATIC_DEMO) {
+      return getStaticFileContent(filename);
+    }
     try {
       const r = await fetch(`/api/file/${filename}${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
       const data = await r.json();
@@ -641,6 +677,12 @@ export default function ClientPage() {
   // The full source of one embedded diagram (the fenced block's content,
   // including the %% CONFIG comment as its first line).
   const fetchEmbeddedDiagram = useCallback(async (filename: string, index: number): Promise<string | null> => {
+    if (STATIC_DEMO) {
+      const content = getStaticFileContent(filename);
+      if (content === null) return null;
+      const block = extractMermaidBlocks(content)[index];
+      return block ? block.content : null;
+    }
     try {
       const qs = dirParam ? `&dir=${encodeURIComponent(dirParam)}` : '';
       const r = await fetch(`/api/markdown/diagram?file=${encodeURIComponent(filename)}&index=${index}${qs}`);
@@ -901,6 +943,7 @@ export default function ClientPage() {
   }, [currentFile, diagramIndex, loadFile, postFile, isReadOnly]);
 
   useEffect(() => {
+    if (STATIC_DEMO) return; // no server → no SSE live reload
     const evtSource = new EventSource(`/api/events${dirParam ? `?dir=${encodeURIComponent(dirParam)}` : ''}`);
     evtSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -2346,6 +2389,7 @@ export default function ClientPage() {
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
+          {!STATIC_DEMO && (
           <div className="mb-6">
             <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2 flex items-center`}>
               <Folder size={14} className="mr-1" /> Directory
@@ -2397,10 +2441,12 @@ export default function ClientPage() {
               </div>
             )}
           </div>
+          )}
 
           <div className="mb-6">
             <h2 className={`text-xs font-bold uppercase ${isDark ? 'text-slate-400' : 'text-gray-500'} mb-2 flex items-center`}>
               <Folder size={14} className="mr-1" /> Files
+              {!STATIC_DEMO && (
               <div className="ml-auto flex items-center space-x-2">
                 <button
                   data-testid="new-diagram"
@@ -2419,6 +2465,7 @@ export default function ClientPage() {
                   <Plus size={12} /> New MD
                 </button>
               </div>
+              )}
             </h2>
             {filesError && (
               <p className="text-xs text-red-500 mb-1" data-testid="files-error">
@@ -3052,6 +3099,18 @@ export default function ClientPage() {
                 <span>{currentFile} · Diagram {diagramIndex + 1}</span>
               </span>
             )}
+            {STATIC_DEMO && (
+              <span
+                data-testid="static-demo-badge"
+                className={`text-xs flex items-center space-x-1 px-2 py-0.5 rounded border font-medium ${
+                  isDark ? 'border-blue-600/50 text-blue-400 bg-blue-900/20' : 'border-blue-400 text-blue-700 bg-blue-50'
+                }`}
+                title="Static demo — running entirely in your browser with no server. Explore freely; nothing is saved."
+              >
+                <Globe size={11} />
+                <span>Live demo</span>
+              </span>
+            )}
             {isReadOnly && (
               <span
                 data-testid="read-only-badge"
@@ -3064,7 +3123,7 @@ export default function ClientPage() {
                 <span>Read-only</span>
               </span>
             )}
-            {saveStatus !== 'idle' && !isReadOnly && (
+            {saveStatus !== 'idle' && !isReadOnly && !STATIC_DEMO && (
               <span
                 data-testid="save-indicator"
                 className={`text-xs ${
@@ -3079,7 +3138,7 @@ export default function ClientPage() {
                 {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : 'Save failed'}
               </span>
             )}
-            {saveStatus === 'error' && !isReadOnly && (
+            {saveStatus === 'error' && !isReadOnly && !STATIC_DEMO && (
               <span data-testid="save-error" className="text-xs text-red-500 font-medium" title={saveErrorMessage || "Contents aren't saved"}>
                 {saveErrorMessage && saveErrorMessage.toLowerCase().includes("aren't saved")
                   ? saveErrorMessage

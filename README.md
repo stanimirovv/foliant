@@ -17,6 +17,7 @@
 - [Interactive Tutorial](#interactive-tutorial)
 - [The Gap: Why This Project Exists](#-the-gap-why-this-project-exists)
 - [Quick Start & Build](#-quick-start--build)
+- [Static Build (GitHub Pages / CDN)](#3b-static-build-github-pages--cdn-demo)
 - [Solving The Diagram Maintainability Gap](#-solving-the-diagram-maintainability-gap)
   - [The Problem: Unmaintainable Monoliths](#the-problem-unmaintainable-monolithic-diagrams)
   - [The Solution: Layers & Dynamic Domain Merging](#the-solution-layered-views--dynamic-domain-merging)
@@ -149,6 +150,31 @@ npm run build
 
 # Start the production server
 npm run start
+```
+
+### 3b. Static Build (GitHub Pages / CDN Demo)
+
+The app can be built as a **fully static site** — no server, no API routes, no database. The tutorial and all demo diagrams are bundled into the JavaScript, and the app runs entirely in the browser. This is perfect for hosting a live, explorable demo on GitHub Pages, Cloudflare Pages, Netlify, or any CDN.
+
+```bash
+# Build a static site (no base path — for local preview or custom domain)
+npm run build:static
+# Output: out/ directory — serve with any static file server
+
+# Build a static site for GitHub Pages (with /mermaid-sequence-viewer base path)
+npm run build:gh-pages
+# Output: out/ directory — deploy to the gh-pages branch or via GitHub Actions
+```
+
+**What works in static mode:** Everything — pan, zoom, search, filters, canvas editing, presenter mode, animations, sticky notes, saved views, WYSIWYG markdown, SVG export. The tutorial file is read-only (changes are in-memory only and never saved).
+
+**What's disabled:** File saving (no server), SSE live reload, new file creation, directory switching.
+
+**GitHub Actions deployment:** A workflow at `.github/workflows/deploy-gh-pages.yml` automatically builds and deploys to GitHub Pages on every push to `main`. Enable GitHub Pages in your repo settings (Settings → Pages → Source: GitHub Actions).
+
+**Local preview of the static build:**
+```bash
+npx serve out/
 ```
 
 ### 4. Running Verification & Test Suites
