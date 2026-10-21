@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { parseModel, DiagramModel, ParticipantElement, MessageElement } from './model';
-import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, labelElementForKey, svgElementForKey, SvgZip, EDGE_HIT_CLASS } from './svgmap';
+import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, labelElementForKey, allMessageLabelElements, svgElementForKey, SvgZip, EDGE_HIT_CLASS } from './svgmap';
 import { addEdgeHitPaths } from './styling';
 import { transformActors, processMermaid } from './preprocessor';
 import { DiagramConfig } from './views';
 import { createSequenceDiagram, createFlowchartDiagram, renderPipeline } from './editorTestHarness';
-import { SEQ_SVG, SEQ_CODE, SEQ_AUTONUMBER_SVG, SEQ_AUTONUMBER_CODE, FLOW_SVG, FLOW_CODE, parseSvgRoot } from './svgTestFixtures';
+import { SEQ_SVG, SEQ_CODE, SEQ_AUTONUMBER_SVG, SEQ_AUTONUMBER_CODE, SEQ_WRAPPED_SVG, SEQ_WRAPPED_CODE, FLOW_SVG, FLOW_CODE, parseSvgRoot } from './svgTestFixtures';
 
 function parseSvg(svg: string): Element {
   return parseSvgRoot(svg);
@@ -1241,6 +1241,54 @@ describe('labelElementForKey (inline label editing)', () => {
     const svg = parseSvg(FLOW_SVG);
     const model = flowModel();
     expect(labelElementForKey(svg, model, 'e:0')).toBeNull();
+  });
+});
+
+describe('allMessageLabelElements (wrapped multi-line message labels)', () => {
+  it('returns every wrapped text.messageText line in DOM order for a multi-line label', () => {
+    const svg = parseSvg(SEQ_WRAPPED_SVG);
+    const model = parseModel(SEQ_WRAPPED_CODE);
+    const els = allMessageLabelElements(svg, model, 'm:1');
+    expect(els).toHaveLength(2);
+    expect(els.every((el) => el.matches('text.messageText'))).toBe(true);
+    expect(els.map((el) => el.textContent)).toEqual([
+      'a very long message',
+      'that wraps onto two lines',
+    ]);
+    // the wrapped lines sit consecutively right before the message line
+    const line = svg.querySelector('line[data-id="i2"]')!;
+    expect(els[1].nextElementSibling).toBe(line);
+    expect(els[0].nextElementSibling).toBe(els[1]);
+  });
+
+  it('returns the single label element for a single-line message', () => {
+    const svg = parseSvg(SEQ_WRAPPED_SVG);
+    const model = parseModel(SEQ_WRAPPED_CODE);
+    const els = allMessageLabelElements(svg, model, 'm:0');
+    expect(els.map((el) => el.textContent)).toEqual(['first']);
+    expect(els[0].nextElementSibling?.matches('[data-et="message"]')).toBe(true);
+  });
+
+  it('stops at the previous message line instead of crossing into an earlier message\'s wrapped lines', () => {
+    const svg = parseSvg(SEQ_WRAPPED_SVG);
+    const model = parseModel(SEQ_WRAPPED_CODE);
+    // m:2's label walk must not pick up m:1's wrapped lines, which are
+    // separated from it by m:1's message line
+    const els = allMessageLabelElements(svg, model, 'm:2');
+    expect(els.map((el) => el.textContent)).toEqual(['last']);
+  });
+
+  it('returns an empty array for non-message keys and unknown keys', () => {
+    const svg = parseSvg(SEQ_WRAPPED_SVG);
+    const model = parseModel(SEQ_WRAPPED_CODE);
+    expect(allMessageLabelElements(svg, model, 'p:0')).toEqual([]);
+    expect(allMessageLabelElements(svg, model, 'nope')).toEqual([]);
+  });
+
+  it('returns an empty array for flowchart models', () => {
+    const svg = parseSvg(FLOW_SVG);
+    const model = flowModel();
+    expect(allMessageLabelElements(svg, model, 'n:0')).toEqual([]);
   });
 });
 

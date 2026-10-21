@@ -62,6 +62,31 @@ export const SEQ_AUTONUMBER_CODE = `sequenceDiagram
     B-->>A: m2
     A->>A: m3`;
 
+// A sequence diagram whose middle message (m:1) has a label that wraps onto
+// two rendered text.messageText lines. Mermaid emits one text element per
+// wrapped line, stacked consecutively immediately before the message line.
+export const SEQ_WRAPPED_SVG = `<svg id="fx-seq-wrapped" aria-roledescription="sequence" viewBox="-50 -10 450 453">
+<g><line id="actor1" class="actor-line 200" data-et="life-line" data-id="B" x1="150" y1="50" x2="150" y2="250"></line>
+<g id="root-1" data-et="participant" data-type="participant" data-id="B"><rect class="actor actor-top" name="B" x="100" y="0" width="100" height="50"></rect><text class="actor actor-box"><tspan>B</tspan></text></g></g>
+<g><line id="actor0" class="actor-line 200" data-et="life-line" data-id="A" x1="50" y1="50" x2="50" y2="250"></line>
+<g id="root-0" data-et="participant" data-type="participant" data-id="A"><rect class="actor actor-top" name="A" x="0" y="0" width="100" height="50"></rect><text class="actor actor-box"><tspan>A</tspan></text></g></g>
+<defs><marker id="fx-seq-wrapped-arrowhead" refX="7.9" refY="5"><path d="M -1 0 L 10 5 L 0 10 z"></path></marker></defs>
+<text class="messageText" x="100" y="80">first</text>
+<line class="messageLine0" data-et="message" data-id="i1" data-from="A" data-to="B" x1="50" y1="95" x2="150" y2="95" stroke="none" marker-end="url(#fx-seq-wrapped-arrowhead)"></line>
+<text class="messageText" x="100" y="130">a very long message</text>
+<text class="messageText" x="100" y="145">that wraps onto two lines</text>
+<line class="messageLine1" data-et="message" data-id="i2" data-from="B" data-to="A" x1="150" y1="160" x2="50" y2="160" stroke="none" marker-end="url(#fx-seq-wrapped-arrowhead)"></line>
+<text class="messageText" x="100" y="200">last</text>
+<line class="messageLine0" data-et="message" data-id="i3" data-from="A" data-to="B" x1="50" y1="215" x2="150" y2="215" stroke="none" marker-end="url(#fx-seq-wrapped-arrowhead)"></line>
+</svg>`;
+
+export const SEQ_WRAPPED_CODE = `sequenceDiagram
+    participant A
+    participant B
+    A->>B: first
+    B-->>A: a very long message that wraps onto two lines
+    A->>B: last`;
+
 export const FLOW_SVG = `<svg id="fx-flow" class="flowchart" aria-roledescription="flowchart-v2" viewBox="-8 -8 116 36">
 <g><marker id="fx-flow_flowchart-v2-pointEnd-margin" class="marker flowchart-v2"><path class="arrowMarkerPath" d="M 0 0 L 11.5 7 L 0 14 z"></path></marker>
 <g class="root">

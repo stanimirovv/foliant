@@ -11,6 +11,7 @@ import {
 } from './model';
 import {
   EDGE_HIT_CLASS,
+  allMessageLabelElements,
   labelElementForKey,
   svgElementForKey,
   zipModelToSvg,
@@ -458,7 +459,11 @@ export function dimTargetsForStep(
         const el = zip.messages[idx];
         if (!el) continue;
         pushUnique(dimmed, el);
-        pushUnique(dimmed, labelElementForKey(svg, model, key));
+        // Include ALL wrapped label lines so the dim/highlight covers the
+        // full multi-line text, not just the line nearest the arrow.
+        for (const t of allMessageLabelElements(svg, model, key)) {
+          pushUnique(dimmed, t);
+        }
         pushUnique(dimmed, findSequenceNumberBadge(svg, el, messages[idx].from));
         for (const ov of collectArrowOverlays(el)) {
           pushUnique(dimmed, ov);
@@ -475,7 +480,11 @@ export function dimTargetsForStep(
         const idx = msgIdxByKey.get(key)!;
         const el = zip.messages[idx];
         pushUnique(active, el);
-        pushUnique(active, labelElementForKey(svg, model, key));
+        // Include ALL wrapped label lines so the green step box encompasses
+        // the full multi-line label, not just the line nearest the arrow.
+        for (const t of allMessageLabelElements(svg, model, key)) {
+          pushUnique(active, t);
+        }
       }
     }
 

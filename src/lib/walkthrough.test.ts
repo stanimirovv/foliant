@@ -24,6 +24,8 @@ import {
   SEQ_AUTONUMBER_SVG,
   SEQ_CODE,
   SEQ_SVG,
+  SEQ_WRAPPED_CODE,
+  SEQ_WRAPPED_SVG,
 } from './svgTestFixtures';
 
 describe('walkthrough constants', () => {
@@ -409,6 +411,49 @@ describe('dimTargetsForStep & panTargetForStep — static fixtures & real render
     const pan0 = panTargetForStep(svg, model, plan, 0);
     expect(pan0?.tagName.toLowerCase()).toBe('text');
     expect(pan0?.textContent).toBe('m1');
+  });
+
+  it('includes every wrapped label line in active/dimmed so the step box covers multi-line text (SEQ_WRAPPED_SVG)', () => {
+    const svg = parseSvgRoot(SEQ_WRAPPED_SVG);
+    const model = parseModel(SEQ_WRAPPED_CODE);
+    const plan = buildWalkthroughPlan(SEQ_WRAPPED_CODE, null)!;
+    expect(plan.steps).toHaveLength(3);
+
+    // Step 0: m:0 active with its single-line label; m:1 (wrapped label) and
+    // m:2 dimmed — the dimmed set contains BOTH of m:1's wrapped text lines
+    const step0 = dimTargetsForStep(svg, model, plan, 0);
+    const activeTexts0 = step0.active.filter((el) => el.classList.contains('messageText'));
+    expect(activeTexts0.map((el) => el.textContent)).toEqual(['first']);
+    const dimmedTexts0 = step0.dimmed.filter((el) => el.classList.contains('messageText'));
+    expect(dimmedTexts0.map((el) => el.textContent)).toEqual([
+      'a very long message',
+      'that wraps onto two lines',
+      'last',
+    ]);
+
+    // Step 1: m:1 active — its label wraps onto two rendered text lines, and
+    // BOTH are in the active set alongside the arrow
+    const step1 = dimTargetsForStep(svg, model, plan, 1);
+    const activeTexts1 = step1.active.filter((el) => el.classList.contains('messageText'));
+    expect(activeTexts1.map((el) => el.textContent)).toEqual([
+      'a very long message',
+      'that wraps onto two lines',
+    ]);
+    const activeIds1 = step1.active.map((el) => el.getAttribute('data-id') ?? el.textContent);
+    expect(activeIds1).toContain('i2');
+
+    // m:2 is dimmed with its single-line label; none of m:1's wrapped lines
+    // leak into the dimmed set
+    const dimmedTexts1 = step1.dimmed.filter((el) => el.classList.contains('messageText'));
+    expect(dimmedTexts1.map((el) => el.textContent)).toEqual(['last']);
+
+    // The green step box spans BOTH wrapped lines plus the arrow: with the
+    // jsdom getBBox stub, text bounds fall back to x/y + stub 100x20, so the
+    // union is minX=50 (arrow), minY=130 (first wrapped line), maxX=200 (text
+    // stub width), maxY=165 (second line y=145 + stub height 20). Padding 10.
+    // Covering only the line nearest the arrow would give y=135 instead of 120.
+    const bounds1 = computeActiveStepBounds(svg, step1.active);
+    expect(bounds1).toEqual({ x: 40, y: 120, width: 170, height: 55 });
   });
 
   it('associates and dims autonumber sequenceNumber badges on SEQ_AUTONUMBER_SVG', () => {

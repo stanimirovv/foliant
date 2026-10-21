@@ -630,6 +630,34 @@ export function labelElementForKey(
   return null;
 }
 
+// All `text.messageText` elements that render a sequence message's label.
+// Mermaid wraps long labels into multiple consecutive text.messageText
+// siblings placed before the message line; labelElementForKey returns only
+// the one immediately preceding the line. This walks backwards from the line
+// collecting every consecutive text.messageText sibling, so callers that
+// need the full label extent (e.g. the walkthrough step box) include all
+// wrapped lines. Returns an empty array for non-message keys.
+export function allMessageLabelElements(
+  svg: Element,
+  model: DiagramModel,
+  key: string,
+): Element[] {
+  if (model.type !== 'sequence') return [];
+  const zip = zipModelToSvg(svg, model);
+  const messages = ofKind<MessageElement>(model, 'message');
+  const i = messages.findIndex(m => m.key === key);
+  if (i < 0) return [];
+  const line = zip.messages[i];
+  if (!line) return [];
+  const result: Element[] = [];
+  let sib = line.previousElementSibling;
+  while (sib && sib.matches('text.messageText')) {
+    result.unshift(sib);
+    sib = sib.previousElementSibling;
+  }
+  return result;
+}
+
 // --- Screen-coordinate helpers for drag interactions (sequence diagrams) ---
 // These use getBoundingClientRect (post-transform screen coordinates) so the
 // drag overlay aligns with the rendered diagram regardless of pan/zoom.
