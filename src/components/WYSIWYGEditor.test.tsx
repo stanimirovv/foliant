@@ -10,12 +10,14 @@ vi.mock('./MermaidBlockPreview', () => ({
     index,
     title,
     onSelect,
+    onDelete,
     viewState,
     onViewStateChange,
   }: {
     index: number;
     title: string;
     onSelect: () => void;
+    onDelete?: () => void;
     viewState?: { viewName?: string | null; hideKeys?: string[] };
     onViewStateChange?: (selection: { viewName?: string | null; hideKeys?: string[] }) => void;
   }) => (
@@ -35,6 +37,17 @@ vi.mock('./MermaidBlockPreview', () => ({
       >
         change view state
       </button>
+      {onDelete && (
+        <button
+          data-testid={`mock-mermaid-delete-${index}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          delete diagram
+        </button>
+      )}
     </div>
   ),
 }));
@@ -181,10 +194,45 @@ describe('WYSIWYGEditor', () => {
       expect(newCode).toContain('```mermaid');
     });
 
-    it('deleting a mermaid block is not possible through WYSIWYGBlock (mermaid uses MermaidBlockPreview)', () => {
-      renderEditor();
-      // mermaid blocks don't have a wysiwyg-block-delete button
-      expect(screen.queryByTestId('wysiwyg-block-delete-2')).toBeNull();
+    it('deleting a mermaid block calls onMarkdownEdit with the diagram removed', () => {
+      const { props } = renderEditor();
+      // Mermaid index 0 is document block 2 (between the intro and middle prose).
+      fireEvent.click(screen.getByTestId('mock-mermaid-delete-0'));
+
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      // The first diagram is gone…
+      expect(newCode).not.toContain('sequenceDiagram');
+      expect(newCode).not.toContain('First diagram');
+      expect(newCode.match(/```mermaid/g)).toHaveLength(1);
+      // …but everything else survives, including the second diagram.
+      expect(newCode).toContain('# Architecture Notes');
+      expect(newCode).toContain('Intro prose with **bold** text.');
+      expect(newCode).toContain('Middle prose.');
+      expect(newCode).toContain('flowchart TD');
+      expect(newCode).toContain('Trailing prose.');
+    });
+
+    it('deleting a mermaid block does not open the diagram editor', () => {
+      const { props } = renderEditor();
+      fireEvent.click(screen.getByTestId('mock-mermaid-delete-1'));
+
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      // The second diagram (flowchart) is removed, the first survives.
+      expect(newCode).not.toContain('flowchart TD');
+      expect(newCode).toContain('sequenceDiagram');
+      expect(props.onSelectDiagram).not.toHaveBeenCalled();
+    });
+
+    it('deleting the only mermaid block leaves the surrounding text intact', () => {
+      const md = 'Before.\n\n```mermaid\nsequenceDiagram\n    A->>B: Hi\n```\n\nAfter.\n';
+      const { props } = renderEditor({ code: md });
+      fireEvent.click(screen.getByTestId('mock-mermaid-delete-0'));
+
+      const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      expect(newCode).not.toContain('```mermaid');
+      expect(newCode).toBe('Before.\n\nAfter.\n');
     });
   });
 

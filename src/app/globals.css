@@ -452,6 +452,31 @@ path[data-et="edge"].edge-hover {
 .markdown-body .md-mermaid-block:hover .md-mermaid-edit-chip,
 .markdown-body .md-mermaid-block:focus-visible .md-mermaid-edit-chip { opacity: 1; }
 
+/* Delete button in the mermaid block bar (markdown preview). Hover-revealed
+   like the edit chip; red tint marks it as destructive. */
+.markdown-body .md-mermaid-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1em 0.55em;
+  border-radius: 9999px;
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.markdown-body .md-mermaid-block:hover .md-mermaid-delete-btn,
+.markdown-body .md-mermaid-block:focus-visible .md-mermaid-delete-btn { opacity: 1; }
+
+.markdown-body .md-mermaid-delete-btn:hover { background: rgba(220, 38, 38, 0.2); }
+
 /* Per-block view/tag controls in the mermaid block bar (markdown preview) */
 .markdown-body .md-mermaid-view-controls {
   display: flex;

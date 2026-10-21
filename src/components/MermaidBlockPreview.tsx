@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mermaid from 'mermaid';
-import { Pencil, Play } from 'lucide-react';
+import { Pencil, Play, Trash2 } from 'lucide-react';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchContentRef } from 'react-zoom-pan-pinch';
 import { collectAvailableKeys, parseViewsData } from '@/lib/views';
 import {
@@ -26,6 +26,10 @@ export interface MermaidBlockPreviewProps {
   // Selecting the block opens the diagram in the diagram editor (the same
   // select-to-edit flow as the Files menu).
   onSelect: () => void;
+  // Removes the whole fenced block from the document (the WYSIWYG delete
+  // path — undoable like every other WYSIWYG edit). When provided, the
+  // block header shows a delete button.
+  onDelete?: () => void;
   // Per-block view/tag selection for the preview controls. When provided and
   // the block's CONFIG has saved views or tags, the header bar shows a view
   // dropdown and tag toggle chips, and the rendered SVG applies the selection
@@ -63,6 +67,7 @@ export default function MermaidBlockPreview({
   endLine,
   theme,
   onSelect,
+  onDelete,
   viewState,
   onViewStateChange,
   scrollToMe,
@@ -333,6 +338,22 @@ export default function MermaidBlockPreview({
           >
             Syntax error{lastGoodRef.current !== null ? ' — showing the last successful render' : ''}
           </span>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            data-testid={`md-mermaid-delete-${index}`}
+            className="md-mermaid-delete-btn"
+            title="Delete this diagram from the file"
+            onClick={(e) => {
+              // Deleting must not trigger the block's select-to-edit flow.
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            <Trash2 size={11} />
+            <span>Delete</span>
+          </button>
         )}
         <span
           className={`md-mermaid-edit-chip ${isDark ? 'text-blue-300' : 'text-blue-600'}`}

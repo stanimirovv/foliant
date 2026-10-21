@@ -225,6 +225,7 @@ export default function WYSIWYGEditor({
               endLine={block.endLine}
               theme={theme}
               onSelect={() => onSelectDiagram(block.index)}
+              onDelete={() => handleDelete(i)}
               viewState={viewStates?.get(block.index)}
               onViewStateChange={onViewStateChange
                 ? (selection) => onViewStateChange(block.index, selection)

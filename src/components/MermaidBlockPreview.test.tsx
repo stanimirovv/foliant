@@ -175,6 +175,40 @@ describe('MermaidBlockPreview view/tag controls', () => {
   });
 });
 
+describe('MermaidBlockPreview delete button', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renders a delete button only when onDelete is provided', () => {
+    const { unmount } = renderBlock();
+    expect(screen.queryByTestId('md-mermaid-delete-0')).toBeNull();
+    unmount();
+
+    renderBlock({ onDelete: vi.fn() });
+    expect(screen.getByTestId('md-mermaid-delete-0')).toBeTruthy();
+  });
+
+  it('clicking delete calls onDelete and does not open the diagram editor', () => {
+    const onDelete = vi.fn();
+    const { props } = renderBlock({ onDelete });
+    fireEvent.click(screen.getByTestId('md-mermaid-delete-0'));
+
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(props.onSelect).not.toHaveBeenCalled();
+  });
+
+  it('shows the delete button for a broken diagram too (still deletable)', () => {
+    const onDelete = vi.fn();
+    renderBlock({ content: 'this is not mermaid at all', onDelete });
+    fireEvent.click(screen.getByTestId('md-mermaid-delete-0'));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('MermaidBlockPreview — presentation mode (walkthrough player)', () => {
   beforeEach(() => {
     vi.clearAllMocks();

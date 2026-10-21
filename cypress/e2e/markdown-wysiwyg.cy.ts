@@ -232,6 +232,42 @@ describe('WYSIWYG markdown editor (e2e)', () => {
       });
   });
 
+  it('deletes a mermaid diagram block', () => {
+    let dir = '';
+    cy.task<string>('createTempDiagramDir')
+      .then(d => {
+        dir = d;
+        return cy.request('POST', wysiwygFileApi('notes.md', dir), { content: WYSIWYG_MD });
+      })
+      .then(() => {
+        cy.visit(wysiwygAppUrl(dir, { file: 'notes.md' }));
+        cy.get('[data-testid="wysiwyg-editor"]', { timeout: 10000 }).should('be.visible');
+
+        // The mermaid block (mermaid index 0) — hover reveals the delete button
+        cy.get('[data-testid="md-mermaid-block-0"]').trigger('mouseover');
+        cy.get('[data-testid="md-mermaid-delete-0"]').click({ force: true });
+
+        // The diagram block is removed from the preview; the prose stays.
+        cy.get('[data-testid="md-mermaid-block-0"]').should('not.exist');
+        cy.get('[data-testid="wysiwyg-editor"]').should('contain.text', 'Middle prose');
+        // Deleting must not trigger the select-to-edit flow.
+        cy.location('search').should('not.contain', 'diagram=');
+        wysiwygSaved();
+      })
+      .then(() => {
+        return cy.request('GET', wysiwygFileApi('notes.md', dir)).then(res => {
+          const md = res.body.content as string;
+          expect(md).not.to.contain('```mermaid');
+          expect(md).not.to.contain('First diagram');
+          // surrounding content preserved
+          expect(md).to.contain('# Architecture Notes');
+          expect(md).to.contain('Intro prose that must survive.');
+          expect(md).to.contain('Middle prose with **bold** text.');
+          expect(md).to.contain('Trailing prose.');
+        });
+      });
+  });
+
   it('undo/redo works for WYSIWYG edits', () => {
     let dir = '';
     cy.task<string>('createTempDiagramDir')
