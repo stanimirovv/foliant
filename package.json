@@ -2,6 +2,7 @@
   "name": "mermaid_sequence_diagram",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "node server.js",
     "build": "next build",
@@ -12,7 +13,59 @@
     "test:e2e:storage": "node scripts/e2e-storage.mjs all",
     "test:e2e:storage:fs": "node scripts/e2e-storage.mjs fs",
     "test:e2e:storage:memory": "node scripts/e2e-storage.mjs memory",
-    "test:e2e:storage:s3": "node scripts/e2e-storage.mjs s3"
+    "test:e2e:storage:s3": "node scripts/e2e-storage.mjs s3",
+    "electron:dev": "concurrently -k -s first \"node server.js\" \"wait-on tcp:3000 && electron .\"",
+    "electron:prepare": "node scripts/prepare-standalone.js",
+    "electron:pack": "npm run build && npm run electron:prepare && electron-builder --dir",
+    "electron:build": "npm run build && npm run electron:prepare && electron-builder",
+    "electron:build:mac": "npm run build && npm run electron:prepare && electron-builder --mac",
+    "electron:build:win": "npm run build && npm run electron:prepare && electron-builder --win",
+    "electron:build:linux": "npm run build && npm run electron:prepare && electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.mermaid.sequenceviewer",
+    "productName": "Mermaid Sequence Viewer",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "standalone",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".next/standalone/node_modules",
+        "to": "standalone/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1153.0",
@@ -38,7 +91,10 @@
     "@types/react-dom": "^18",
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/ui": "^5.0.3",
+    "concurrently": "^10.0.6",
     "cypress": "^16.1.1",
+    "electron": "^44.9.2",
+    "electron-builder": "^26.15.3",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "jsdom": "^30.1.1",
@@ -46,6 +102,7 @@
     "tailwindcss": "^3.4.1",
     "typescript": "^5",
     "vite": "^8.3.2",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "wait-on": "^9.5.1"
   }
 }

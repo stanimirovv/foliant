@@ -887,7 +887,8 @@ export function getPresetActorColors(theme: 'default' | 'dark' = 'dark'): string
 export function resolveActorColorForTheme(color: string, theme: 'default' | 'dark' = 'dark'): string {
   const trimmed = color.trim();
   if (!trimmed) return color;
-  const normalized = (/^rgb\(/i.test(trimmed) ? rgbToHexColor(trimmed) : trimmed).toLowerCase();
+  const hex = /^rgb\(/i.test(trimmed) ? rgbToHexColor(trimmed) : trimmed;
+  const normalized = (hex ?? trimmed).toLowerCase();
   const darkIdx = PRESET_ACTOR_COLORS.findIndex(c => c.toLowerCase() === normalized);
   if (darkIdx >= 0) {
     return getPresetActorColors(theme)[darkIdx];
