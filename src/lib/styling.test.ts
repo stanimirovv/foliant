@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, PAN_EXCLUDE_CLASS, EDGE_HIT_STROKE_WIDTH, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
+import { rewriteArrowStyles, applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, ensureLinkTargets, PAN_EXCLUDE_CLASS, EDGE_HIT_STROKE_WIDTH, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS, ALL_ANIMATED_ARROW_COLORS } from './styling';
 import { buildActorRewriteMap, transformActors } from './preprocessor';
 import { parseModel, MessageElement, EdgeElement } from './model';
 import { updateViewsData, DiagramConfig } from './views';
@@ -1194,6 +1194,84 @@ describe('addEdgeHitPaths', () => {
     const res = await renderPipeline(FLOW);
     const root = parseSvgRoot(markPanExclusionTargets(addEdgeHitPaths(res.svg)));
     expect(root.querySelectorAll(`path.edge-hit.${PAN_EXCLUDE_CLASS}`).length).toBe(2);
+  });
+});
+
+describe('ensureLinkTargets', () => {
+  it('adds target="_blank" and rel="noopener noreferrer" to anchors with href but no target', () => {
+    const svg = `<svg><a xlink:href="https://example.com"><g class="node"><rect/></g></a></svg>`;
+    const root = parseSvgRoot(ensureLinkTargets(svg));
+    const anchor = root.querySelector('a');
+    expect(anchor?.getAttribute('target')).toBe('_blank');
+    expect(anchor?.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('handles anchors with plain href attribute', () => {
+    const svg = `<svg><a href="https://example.com"><rect/></a></svg>`;
+    const root = parseSvgRoot(ensureLinkTargets(svg));
+    const anchor = root.querySelector('a');
+    expect(anchor?.getAttribute('target')).toBe('_blank');
+    expect(anchor?.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('does not overwrite an existing target attribute', () => {
+    const svg = `<svg><a href="https://example.com" target="_self"><rect/></a></svg>`;
+    const root = parseSvgRoot(ensureLinkTargets(svg));
+    const anchor = root.querySelector('a');
+    expect(anchor?.getAttribute('target')).toBe('_self');
+    // rel is still added for security
+    expect(anchor?.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('does not overwrite an existing rel attribute', () => {
+    const svg = `<svg><a href="https://example.com" rel="nofollow"><rect/></a></svg>`;
+    const root = parseSvgRoot(ensureLinkTargets(svg));
+    const anchor = root.querySelector('a');
+    expect(anchor?.getAttribute('target')).toBe('_blank');
+    expect(anchor?.getAttribute('rel')).toBe('nofollow');
+  });
+
+  it('is idempotent — running twice produces the same output', () => {
+    const svg = `<svg><a href="https://example.com"><rect/></a></svg>`;
+    const once = ensureLinkTargets(svg);
+    const twice = ensureLinkTargets(once);
+    expect(twice).toBe(once);
+  });
+
+  it('returns the input unchanged when there are no anchors', () => {
+    const svg = `<svg><g class="node"><rect/></g></svg>`;
+    expect(ensureLinkTargets(svg)).toBe(svg);
+  });
+
+  it('returns the input unchanged when the input is not an SVG', () => {
+    expect(ensureLinkTargets('not an svg')).toBe('not an svg');
+  });
+
+  it('processes multiple anchors in the same SVG', () => {
+    const svg = `<svg>
+      <a href="https://a.com"><rect/></a>
+      <a xlink:href="https://b.com"><rect/></a>
+      <a href="https://c.com" target="_self"><rect/></a>
+    </svg>`;
+    const root = parseSvgRoot(ensureLinkTargets(svg));
+    const anchors = root.querySelectorAll('a');
+    expect(anchors.length).toBe(3);
+    expect(anchors[0].getAttribute('target')).toBe('_blank');
+    expect(anchors[1].getAttribute('target')).toBe('_blank');
+    expect(anchors[2].getAttribute('target')).toBe('_self');
+    anchors.forEach(a => expect(a.getAttribute('rel')).toBe('noopener noreferrer'));
+  });
+
+  it('works on a real mermaid flowchart render with click directives', async () => {
+    const code = `flowchart LR
+    A[Click me] --> B[Other]
+    click A href "https://example.com"`;
+    const res = await renderPipeline(code);
+    const root = parseSvgRoot(ensureLinkTargets(res.svg));
+    const anchor = root.querySelector('a');
+    expect(anchor).toBeTruthy();
+    expect(anchor?.getAttribute('target')).toBe('_blank');
+    expect(anchor?.getAttribute('rel')).toBe('noopener noreferrer');
   });
 });
 

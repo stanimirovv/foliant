@@ -181,6 +181,66 @@ describe('DiagramViewer', () => {
     expect(container.querySelector('#diagram-container')!.className).not.toContain('cursor-pointer');
   });
 
+  it('clicking a link inside the SVG does not call onSelect (edit mode stays off)', async () => {
+    // Simulate a mermaid flowchart with `click A href "…"` — the node is
+    // wrapped in an <a> element.
+    const linkSvg = `<svg id="fx-link" class="flowchart" viewBox="0 0 100 100">
+      <a xlink:href="https://example.com" href="https://example.com">
+        <g class="node default" id="fx-link-flowchart-A-0">
+          <rect class="basic label-container" x="10" y="10" width="80" height="40"></rect>
+          <g class="label"><text><tspan>Click me</tspan></text></g>
+        </g>
+      </a>
+    </svg>`;
+    renderMock.mockImplementationOnce(async (id: string) => ({
+      svg: linkSvg.replaceAll('fx-link', id),
+    }));
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null} onSelect={onSelect} />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg a')).toBeTruthy();
+    });
+    // The anchor gets target="_blank" from ensureLinkTargets
+    const anchor = container.querySelector('#diagram-container svg a')!;
+    expect(anchor.getAttribute('target')).toBe('_blank');
+    expect(anchor.getAttribute('rel')).toBe('noopener noreferrer');
+    // Clicking inside the anchor (on the node rect) must not select
+    fireEvent.click(anchor.querySelector('rect')!);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('mousedown on a link inside the SVG does not start a drag in edit mode', async () => {
+    const linkSvg = `<svg id="fx-link2" class="flowchart" viewBox="0 0 100 100">
+      <a xlink:href="https://example.com" href="https://example.com">
+        <g class="node default" id="fx-link2-flowchart-A-0">
+          <rect class="basic label-container" x="10" y="10" width="80" height="40"></rect>
+          <g class="label"><text><tspan>Click me</tspan></text></g>
+        </g>
+      </a>
+    </svg>`;
+    renderMock.mockImplementationOnce(async (id: string) => ({
+      svg: linkSvg.replaceAll('fx-link2', id),
+    }));
+    const onSelect = vi.fn();
+    const onMoveParticipant = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={FLOW_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={onSelect} onMoveParticipant={onMoveParticipant}
+      />
+    );
+    await waitFor(() => {
+      expect(container.querySelector('#diagram-container svg a')).toBeTruthy();
+    });
+    const anchor = container.querySelector('#diagram-container svg a')!;
+    // mousedown inside the anchor must not trigger drag/selection
+    fireEvent.mouseDown(anchor.querySelector('rect')!, { button: 0, clientX: 50, clientY: 30 });
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onMoveParticipant).not.toHaveBeenCalled();
+  });
+
   it('applies the highlight class to the selected element', async () => {
     const { container } = render(
       <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection="m:1" onSelect={() => {}} />

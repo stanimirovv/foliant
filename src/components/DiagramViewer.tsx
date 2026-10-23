@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, MouseEvent as ReactMouseEvent } f
 import mermaid from 'mermaid';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchContentRef } from 'react-zoom-pan-pinch';
 import { parseModel, ParticipantElement, looksLikeMermaidDiagram } from '@/lib/model';
-import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, PAN_EXCLUDE_CLASS } from '@/lib/styling';
+import { applyArrowStyles, applyNodeColors, reorderSequenceLayers, addEdgeHitPaths, markPanExclusionTargets, ensureLinkTargets, PAN_EXCLUDE_CLASS } from '@/lib/styling';
 import {
   elementKeyAtTarget, svgElementForKey, flowchartNodeIdOf, zipModelToSvg, EDGE_HIT_CLASS,
   labelElementForKey,
@@ -605,6 +605,7 @@ export default function DiagramViewer({
         styled = applyNodeColors(styled, nodeColors, theme);
         styled = addEdgeHitPaths(styled);
         styled = markPanExclusionTargets(styled);
+        styled = ensureLinkTargets(styled);
         if (isMounted) {
           setSvgStr(styled);
         }
@@ -944,6 +945,11 @@ export default function DiagramViewer({
     // canvas click.
     if (labelEditRef.current) finishLabelEdit(true);
     if ((e.target as Element).closest('.sticky-note-card')) {
+      return;
+    }
+    // Clicks on diagram links (mermaid `click … href "…"`) must not start a
+    // drag or enter edit mode — the browser handles the navigation.
+    if ((e.target as Element).closest('a')) {
       return;
     }
     if (!editMode || isVisualLocked || presentation || e.button !== 0) return;
@@ -1614,6 +1620,8 @@ export default function DiagramViewer({
   const handleDiagramDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (!editMode || isVisualLocked || presentation || !onLabelEdit) return;
     if ((e.target as Element).closest('.sticky-note-card')) return;
+    // Double-clicks on diagram links must not open the inline label editor.
+    if ((e.target as Element).closest('a')) return;
     const ctx = getSvgAndModel();
     if (!ctx) return;
     const key = elementKeyAtTarget(e.target as Element, ctx.svgRoot, ctx.model, { x: e.clientX, y: e.clientY });
@@ -1647,6 +1655,11 @@ export default function DiagramViewer({
       return;
     }
     if ((e.target as Element).closest('.sticky-note-card')) {
+      return;
+    }
+    // Clicks on diagram links (mermaid `click … href "…"`) must not select
+    // or enter edit mode — the browser handles the navigation.
+    if ((e.target as Element).closest('a')) {
       return;
     }
     if (!editMode || isVisualLocked || !onSelect) return;

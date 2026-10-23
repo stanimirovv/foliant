@@ -13,7 +13,7 @@ import {
 } from '@/lib/diagramView';
 import { WALKTHROUGH_MIN_ZOOM, WALKTHROUGH_MAX_ZOOM } from '@/lib/walkthrough';
 import { useWalkthroughPlayback } from '@/lib/useWalkthroughPlayback';
-import { applyNodeColors } from '@/lib/styling';
+import { applyNodeColors, ensureLinkTargets } from '@/lib/styling';
 import WalkthroughBar from './WalkthroughBar';
 
 export interface MermaidBlockPreviewProps {
@@ -205,7 +205,7 @@ export default function MermaidBlockPreview({
         try {
           const { svg } = await mermaid.render(id, renderInput.code);
           if (cancelled) return;
-          const styled = applyNodeColors(svg, config, theme);
+          const styled = ensureLinkTargets(applyNodeColors(svg, config, theme));
           lastGoodRef.current = styled;
           setSvg(styled);
           setError(null);
@@ -266,7 +266,10 @@ export default function MermaidBlockPreview({
         isDark ? 'border-slate-700 bg-slate-900/60' : 'border-gray-200 bg-gray-50'
       }`}
       title="Click to open this diagram in the editor"
-      onClick={() => {
+      onClick={(e) => {
+        // Clicks on diagram links (mermaid `click … href "…"`) must not
+        // open the editor — the browser handles the navigation.
+        if ((e.target as HTMLElement).closest('a')) return;
         if (!presenting) onSelect();
       }}
     >

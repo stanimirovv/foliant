@@ -1080,3 +1080,33 @@ export function markPanExclusionTargets(svg: string): string {
   }
 }
 
+// --- Link targets ------------------------------------------------------------
+// Mermaid flowcharts wrap clickable nodes in <a xlink:href="…"> without a
+// target attribute by default, so links open in the same tab. Sequence
+// diagrams already set target="_blank". This post-process step ensures every
+// anchor inside the SVG opens in a new tab (target="_blank") with
+// rel="noopener noreferrer" for security. Idempotent: anchors that already
+// have a target are left alone.
+export function ensureLinkTargets(svg: string): string {
+  const root = parseSvgRoot(svg);
+  if (!root) return svg;
+  try {
+    const anchors = root.querySelectorAll('a[href], a[xlink\\:href]');
+    if (anchors.length === 0) return svg;
+    let changed = false;
+    anchors.forEach(el => {
+      if (!el.getAttribute('target')) {
+        el.setAttribute('target', '_blank');
+        changed = true;
+      }
+      if (!el.getAttribute('rel')) {
+        el.setAttribute('rel', 'noopener noreferrer');
+        changed = true;
+      }
+    });
+    return changed ? root.outerHTML : svg;
+  } catch {
+    return svg;
+  }
+}
+

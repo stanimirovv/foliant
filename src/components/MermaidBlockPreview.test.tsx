@@ -209,6 +209,47 @@ describe('MermaidBlockPreview delete button', () => {
   });
 });
 
+describe('MermaidBlockPreview link clicks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('clicking a link inside the diagram does not open the editor', async () => {
+    renderMock.mockImplementation(() => ({
+      svg: '<svg data-testid="mock-mermaid-svg"><a href="https://example.com"><rect width="100" height="100"/></a></svg>',
+    }));
+    const onSelect = vi.fn();
+    const { container } = renderBlock({ onSelect });
+    await waitFor(() => {
+      expect(container.querySelector('svg a')).toBeTruthy();
+    });
+    // ensureLinkTargets adds target="_blank"
+    const anchor = container.querySelector('svg a')!;
+    expect(anchor.getAttribute('target')).toBe('_blank');
+    expect(anchor.getAttribute('rel')).toBe('noopener noreferrer');
+    // Clicking inside the anchor must not call onSelect
+    fireEvent.click(anchor.querySelector('rect')!);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('clicking outside a link still opens the editor', async () => {
+    renderMock.mockImplementation(() => ({
+      svg: '<svg data-testid="mock-mermaid-svg"><a href="https://example.com"><rect width="10" height="10"/></a><rect class="empty-space" width="100" height="100"/></svg>',
+    }));
+    const onSelect = vi.fn();
+    const { container } = renderBlock({ onSelect });
+    await waitFor(() => {
+      expect(container.querySelector('svg')).toBeTruthy();
+    });
+    // Clicking on the block (not on the anchor) still calls onSelect
+    fireEvent.click(container.querySelector('[data-testid="md-mermaid-block-0"]')!);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('MermaidBlockPreview — presentation mode (walkthrough player)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
