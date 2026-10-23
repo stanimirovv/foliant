@@ -92,17 +92,15 @@ export default function WalkthroughBar({
         {totalSteps > 0 ? `Step ${stepIndex + 1}/${totalSteps}` : 'Step 0/0'}
       </span>
 
-      {label && (
-        <span
-          data-testid="walkthrough-step-label"
-          title={label}
-          className={`max-w-[220px] truncate text-xs select-none px-1 ${
-            isDark ? 'text-slate-300' : 'text-gray-600'
-          }`}
-        >
-          {label}
-        </span>
-      )}
+      <span
+        data-testid="walkthrough-step-label"
+        title={label}
+        className={`w-[220px] truncate text-xs select-none px-1 ${
+          isDark ? 'text-slate-300' : 'text-gray-600'
+        }`}
+      >
+        {label ?? ''}
+      </span>
 
       <span
         className={`hidden sm:inline text-[10px] select-none px-1 ${

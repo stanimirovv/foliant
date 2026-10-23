@@ -82,4 +82,32 @@ describe('WalkthroughBar', () => {
     rerender(<WalkthroughBar {...baseProps} theme="dark" />);
     expect(bar.className).toContain('bg-slate-900/90');
   });
+
+  it('always renders the label span with a fixed width so the bar never resizes', () => {
+    render(<WalkthroughBar {...baseProps} label="short" />);
+    const labelEl = screen.getByTestId('walkthrough-step-label');
+    expect(labelEl.className).toContain('w-[220px]');
+    expect(labelEl.className).toContain('truncate');
+    expect(labelEl.className).not.toContain('max-w-');
+  });
+
+  it('renders the label span even when label is undefined so the bar keeps its size', () => {
+    render(<WalkthroughBar {...baseProps} label={undefined} />);
+    const labelEl = screen.getByTestId('walkthrough-step-label');
+    expect(labelEl).toBeTruthy();
+    expect(labelEl.textContent).toBe('');
+    expect(labelEl.className).toContain('w-[220px]');
+  });
+
+  it('keeps the same label span width regardless of label length', () => {
+    const { rerender } = render(<WalkthroughBar {...baseProps} label="A" />);
+    const shortLabel = screen.getByTestId('walkthrough-step-label');
+    const shortClass = shortLabel.className;
+
+    rerender(<WalkthroughBar {...baseProps} label="A very long arrow text that would normally expand the bar well beyond its bounds" />);
+    const longLabel = screen.getByTestId('walkthrough-step-label');
+    expect(longLabel.className).toBe(shortClass);
+    expect(longLabel.className).toContain('w-[220px]');
+    expect(longLabel.className).toContain('truncate');
+  });
 });
