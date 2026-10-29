@@ -69,6 +69,52 @@ describe('zipModelToSvg (flowchart fixture)', () => {
   });
 });
 
+describe('zipModelToSvg (flowchart subgraphs)', () => {
+  it('zips g.cluster elements into zip.blocks matching subgraph ids and titles', () => {
+    const code = `flowchart TD
+    subgraph SG1 [Auth Service]
+        A[Alice] --> B[Bob]
+    end
+    subgraph SG2 [Billing Service]
+        C[Charlie]
+    end
+    D`;
+    const svgStr = `<svg id="fx" class="flowchart" viewBox="0 0 100 100">
+      <g class="root">
+        <g class="clusters">
+          <g class="cluster" id="fx-SG1"><g class="cluster-label"><foreignObject><span class="nodeLabel">Auth Service</span></foreignObject></g></g>
+          <g class="cluster" id="fx-SG2"><g class="cluster-label"><foreignObject><span class="nodeLabel">Billing Service</span></foreignObject></g></g>
+        </g>
+      </g>
+    </svg>`;
+    const svg = parseSvg(svgStr);
+    const model = parseModel(code);
+    const zip = zipModelToSvg(svg, model);
+    expect(zip.blocks).toHaveLength(2);
+    expect(zip.blocks[0]?.id).toBe('fx-SG1');
+    expect(zip.blocks[1]?.id).toBe('fx-SG2');
+  });
+
+  it('falls back to cluster-label text matching when id does not match', () => {
+    const code = `flowchart TD
+    subgraph Auth
+        A
+    end`;
+    const svgStr = `<svg id="fx" class="flowchart" viewBox="0 0 100 100">
+      <g class="root">
+        <g class="clusters">
+          <g class="cluster" id="subgraph-123"><g class="cluster-label"><text>Auth</text></g></g>
+        </g>
+      </g>
+    </svg>`;
+    const svg = parseSvg(svgStr);
+    const model = parseModel(code);
+    const zip = zipModelToSvg(svg, model);
+    expect(zip.blocks).toHaveLength(1);
+    expect(zip.blocks[0]?.id).toBe('subgraph-123');
+  });
+});
+
 describe('zipModelToSvg fallback (plan 4.7 risk 2)', () => {
   it('falls back to label-text matching on count mismatch', () => {
     const svg = parseSvg(SEQ_SVG);
@@ -184,6 +230,49 @@ describe('elementKeyAtTarget (flowchart fixture)', () => {
   it('returns null for clusters and the svg root', () => {
     expect(elementKeyAtTarget(svg.querySelector('g.cluster'), svg, model)).toBeNull();
     expect(elementKeyAtTarget(svg, svg, model)).toBeNull();
+  });
+});
+
+describe('elementKeyAtTarget (flowchart subgraphs)', () => {
+  const code = `flowchart TD
+    subgraph Auth
+        A
+    end`;
+  const svgStr = `<svg id="fx" class="flowchart" viewBox="0 0 100 100">
+    <g class="root">
+      <g class="clusters">
+        <g class="cluster" id="fx-Auth">
+          <rect x="0" y="0" width="100" height="100"></rect>
+          <g class="cluster-label"><text>Auth</text></g>
+        </g>
+      </g>
+      <g class="nodes">
+        <g class="node default" id="fx-flowchart-A-0"><rect></rect></g>
+      </g>
+    </g>
+  </svg>`;
+  const svg = parseSvg(svgStr);
+  const model = parseModel(code);
+
+  it('resolves cluster-label clicks to subgraph block key', () => {
+    const label = svg.querySelector('.cluster-label text')!;
+    expect(elementKeyAtTarget(label, svg, model)).toBe('b:0');
+  });
+
+  it('resolves clicks near cluster rect border to subgraph block key', () => {
+    const rect = svg.querySelector('g.cluster rect')!;
+    rect.getBoundingClientRect = () => ({
+      left: 10, top: 10, right: 110, bottom: 110, width: 100, height: 100, x: 10, y: 10, toJSON: () => {},
+    });
+    // click near top border
+    expect(elementKeyAtTarget(rect, svg, model, { x: 50, y: 15 })).toBe('b:0');
+    // click in interior of cluster rect falls through
+    expect(elementKeyAtTarget(rect, svg, model, { x: 50, y: 60 })).toBeNull();
+  });
+
+  it('prefers node over cluster when clicking node inside cluster', () => {
+    const node = svg.querySelector('g.node')!;
+    expect(elementKeyAtTarget(node, svg, model)).toBe('n:0');
   });
 });
 

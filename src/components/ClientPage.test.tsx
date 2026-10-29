@@ -1187,6 +1187,66 @@ sequenceDiagram
     }, { timeout: 3000 });
   });
 
+  it('Backspace deletes the selected flowchart node and cascades its edges', async () => {
+    const FLOW_DEMO = `flowchart TD\n    A[Alice] --> B[Bob]`;
+    const viewer = await renderInEditMode(FLOW_DEMO, 'A[Alice] --> B[Bob]');
+    fireEvent.click(screen.getByTestId('select-n:0'));
+
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    expect(screen.queryByTestId('delete-dialog')).toBeNull();
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).not.toContain('Alice');
+      expect(code).toContain('B[Bob]');
+    }, { timeout: 3000 });
+  });
+
+  it('Backspace deletes the selected flowchart subgraph and cascades its nodes/edges', async () => {
+    const FLOW_SUBGRAPH = `flowchart TD\n    subgraph S1\n        A[Alice] --> B[Bob]\n    end\n    C[Charlie]`;
+    const viewer = await renderInEditMode(FLOW_SUBGRAPH, 'A[Alice] --> B[Bob]');
+    fireEvent.click(screen.getByTestId('select-b:0'));
+
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    expect(await screen.findByTestId('delete-dialog')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('confirm-delete'));
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).not.toContain('subgraph S1');
+      expect(code).not.toContain('Alice');
+      expect(code).not.toContain('Bob');
+      expect(code).toContain('C[Charlie]');
+    }, { timeout: 3000 });
+  });
+
+  it('Unwrap button unwraps the selected flowchart subgraph', async () => {
+    const FLOW_SUBGRAPH = `flowchart TD\n    subgraph S1\n        A[Alice] --> B[Bob]\n    end\n    C[Charlie]`;
+    const viewer = await renderInEditMode(FLOW_SUBGRAPH, 'A[Alice] --> B[Bob]');
+    fireEvent.click(screen.getByTestId('select-b:0'));
+    const unwrapBtn = await screen.findByTestId('block-unwrap');
+    fireEvent.click(unwrapBtn);
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).not.toContain('subgraph S1');
+      expect(code).toContain('A[Alice] --> B[Bob]');
+      expect(code).toContain('C[Charlie]');
+    }, { timeout: 3000 });
+  });
+
+  it('editing the title of a flowchart subgraph updates the code', async () => {
+    const FLOW_SUBGRAPH = `flowchart TD\n    subgraph S1 [Old Title]\n        A[Alice] --> B[Bob]\n    end`;
+    const viewer = await renderInEditMode(FLOW_SUBGRAPH, 'A[Alice] --> B[Bob]');
+    fireEvent.click(screen.getByTestId('select-b:0'));
+    const titleInput = await screen.findByTestId('block-title');
+    expect((titleInput as HTMLInputElement).value).toBe('Old Title');
+    fireEvent.change(titleInput, { target: { value: 'New Title' } });
+    fireEvent.blur(titleInput);
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('subgraph S1 [New Title]');
+    }, { timeout: 3000 });
+  });
+
   it('Delete key on a selected note opens the cascade confirm dialog, like the panel button', async () => {
     const NOTE_DEMO = `sequenceDiagram
     participant A as Alice

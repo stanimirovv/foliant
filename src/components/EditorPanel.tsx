@@ -1498,21 +1498,25 @@ interface BlockFieldsProps {
 function BlockFields({
   element, onEditBlockTitle, onSetBlockType, onUnwrapBlock, onRequestDelete,
 }: BlockFieldsProps) {
-  const [title, setTitle] = useState(element.title ?? '');
+  const isSubgraph = element.blockType === 'subgraph';
+  const displayTitle = isSubgraph
+    ? (element.title?.match(/^([A-Za-z0-9_-]+)\s*\[(.*)\]$/)?.[2] ?? element.title ?? '')
+    : (element.title ?? '');
+  const [title, setTitle] = useState(displayTitle);
 
   // Keep the local title in sync when another block is selected or the title
   // is edited elsewhere (mirrors NoteFields).
   useEffect(() => {
-    setTitle(element.title ?? '');
-  }, [element.title]);
+    setTitle(displayTitle);
+  }, [displayTitle]);
 
   const commitTitle = () => {
-    if (title !== (element.title ?? '')) onEditBlockTitle?.(title);
+    if (title !== displayTitle) onEditBlockTitle?.(title);
   };
 
   const isRect = element.blockType === 'rect';
   const isLabeled = element.blockType === 'alt' || element.blockType === 'opt'
-    || element.blockType === 'loop' || element.blockType === 'par';
+    || element.blockType === 'loop' || element.blockType === 'par' || isSubgraph;
   const isBox = element.blockType === 'box';
 
   return (
@@ -1568,7 +1572,7 @@ function BlockFields({
         </div>
       )}
 
-      {(isLabeled || isRect) && (
+      {(isLabeled || isRect) && !isSubgraph && (
         <div>
           <span className={fieldLabel}>Type</span>
           <select

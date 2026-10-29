@@ -2527,11 +2527,60 @@ sequenceDiagram
       expect(r.code).toBe(unwrapBlock(BLOCK_SEQ, null, 'b:1').code);
     });
 
-    it('refuses unknown keys, non-blocks and flowcharts', () => {
+    it('refuses unknown keys, non-blocks and flowcharts without blocks', () => {
       expect(deleteBlock(BLOCK_SEQ, null, 'b:99').warning).toContain('not a block');
       expect(deleteBlock(BLOCK_SEQ, null, 'm:0').warning).toContain('not a block');
       expect(deleteBlock(FLOW, FLOW_CFG, 'b:0').warning).toBeTruthy();
     });
+  });
+});
+
+describe('flowchart subgraphs (deleteBlock / unwrapBlock / setBlockTitle)', () => {
+  const FLOW_SUB = `flowchart TD
+    subgraph Auth [Authentication Service]
+        A[Alice] --> B[Bob]
+    end
+    C[Client] --> A`;
+
+  it('deleteBlock with content cascades contained nodes, contained edges, and external edges', () => {
+    const r = deleteBlock(FLOW_SUB, null, 'b:0', { withContent: true });
+    expect(r.warning).toBeUndefined();
+    expect(r.cascaded).toContain('n:0');
+    expect(r.cascaded).toContain('n:1');
+    expect(r.cascaded).toContain('e:0');
+    expect(r.cascaded).toContain('e:1');
+    expect(r.code).toBe(`flowchart TD
+    C[Client]`);
+  });
+
+  it('deleteBlock with withContent: false unwraps the subgraph', () => {
+    const r = deleteBlock(FLOW_SUB, null, 'b:0', { withContent: false });
+    expect(r.warning).toBeUndefined();
+    expect(r.code).toBe(unwrapBlock(FLOW_SUB, null, 'b:0').code);
+  });
+
+  it('unwrapBlock removes subgraph header and end, de-indenting content', () => {
+    const r = unwrapBlock(FLOW_SUB, null, 'b:0');
+    expect(r.warning).toBeUndefined();
+    expect(r.code).toBe(`flowchart TD
+    A[Alice] --> B[Bob]
+    C[Client] --> A`);
+  });
+
+  it('setBlockTitle updates the bracketed title while preserving the subgraph id', () => {
+    const r = setBlockTitle(FLOW_SUB, null, 'b:0', 'Security');
+    expect(r.warning).toBeUndefined();
+    expect(r.code).toContain('subgraph Auth [Security]');
+  });
+
+  it('setBlockTitle updates bare subgraph title', () => {
+    const bare = `flowchart TD
+    subgraph Auth
+        A
+    end`;
+    const r = setBlockTitle(bare, null, 'b:0', 'AuthService');
+    expect(r.warning).toBeUndefined();
+    expect(r.code).toContain('subgraph AuthService');
   });
 });
 

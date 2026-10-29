@@ -40,7 +40,7 @@
 //                        (path.edge-hit, injected by addEdgeHitPaths) with
 //                        the same d/data-id — the reliable click target for
 //                        unlabeled edges, whose visible stroke is only ~2px.
-//   flowchart cluster    | g.cluster (subgraphs; not a node, not selectable).
+//   flowchart cluster    | g.cluster (subgraphs; selectable).
 
 import { DiagramModel, ModelElement, ParticipantElement, MessageElement, NoteElement, BlockElement, NodeElement, EdgeElement, parseModel } from './model';
 import { ActorTransformOptions, buildActorRewriteMap } from './preprocessor';
@@ -253,6 +253,63 @@ function zipBlocks(svg: Element, model: DiagramModel, warnings: string[]): (Elem
   return result;
 }
 
+function parseFlowchartSubgraphHeader(rawTitle: string | undefined): { id: string; title: string } {
+  if (!rawTitle) return { id: '', title: '' };
+  const trimmed = rawTitle.trim();
+  const m = trimmed.match(/^([A-Za-z0-9_-]+)\s*\[["']?([^\]"']*)["']?\]\s*$/);
+  if (m) {
+    return { id: m[1], title: m[2].trim() || m[1] };
+  }
+  const unquoted = trimmed.replace(/^["']|["']$/g, '');
+  return { id: unquoted, title: unquoted };
+}
+
+function zipFlowchartBlocks(svg: Element, model: DiagramModel, warnings: string[]): (Element | null)[] {
+  const allBlocks = ofKind<BlockElement>(model, 'block');
+  const result: (Element | null)[] = allBlocks.map(() => null);
+  if (allBlocks.length === 0) return result;
+
+  const clusters = toArray(svg.querySelectorAll('g.cluster'));
+  if (clusters.length === 0) return result;
+
+  const usedClusters = new Set<Element>();
+  allBlocks.forEach((b, i) => {
+    if (b.blockType !== 'subgraph') return;
+    const { id: subId, title } = parseFlowchartSubgraphHeader(b.title);
+    const matchById = clusters.find(c => {
+      if (usedClusters.has(c)) return false;
+      const cId = c.getAttribute('id') ?? '';
+      return subId !== '' && (cId === subId || cId.endsWith(`-${subId}`));
+    });
+    if (matchById) {
+      result[i] = matchById;
+      usedClusters.add(matchById);
+      return;
+    }
+
+    const matchByLabel = clusters.find(c => {
+      if (usedClusters.has(c)) return false;
+      const labelText = c.querySelector('.cluster-label, .nodeLabel')?.textContent?.trim() ?? '';
+      return title !== '' && labelText === title;
+    });
+    if (matchByLabel) {
+      result[i] = matchByLabel;
+      usedClusters.add(matchByLabel);
+      return;
+    }
+  });
+
+  const remainingClusters = clusters.filter(c => !usedClusters.has(c));
+  let r = 0;
+  allBlocks.forEach((b, i) => {
+    if (b.blockType === 'subgraph' && !result[i] && r < remainingClusters.length) {
+      result[i] = remainingClusters[r++];
+    }
+  });
+
+  return result;
+}
+
 const FLOWCHART_NODE_ID_RE = /-flowchart-(.+)-(\d+)$/;
 
 // Extracts the Mermaid node id from a rendered node group id
@@ -360,7 +417,7 @@ export function zipModelToSvg(svg: Element, model: DiagramModel): SvgZip {
       participants: empty,
       messages: empty,
       notes: empty,
-      blocks: empty,
+      blocks: zipFlowchartBlocks(svg, model, warnings),
       nodes: zipNodes(svg, model, warnings),
       edges: zipEdges(svg, model, warnings),
       warnings,
@@ -532,6 +589,27 @@ export function elementKeyAtTarget(
       }
       return null;
     }
+
+    const cluster = target.closest('g.cluster');
+    if (cluster) {
+      const blocks = ofKind<BlockElement>(model, 'block');
+      const key = keyFromList(blocks, zip.blocks, cluster);
+      if (key) {
+        if (target.closest('.cluster-label')) return key;
+        const rect = cluster.querySelector(':scope > rect') ?? cluster.querySelector('rect');
+        if (rect) {
+          if (!point) return key;
+          const r = rect.getBoundingClientRect();
+          const nearBorder = point.x <= r.left + 12 || point.x >= r.right - 12 ||
+                             point.y <= r.top + 32 || point.y >= r.bottom - 12;
+          if (nearBorder) return key;
+        } else {
+          return key;
+        }
+      }
+      return null;
+    }
+
     return null;
   }
 

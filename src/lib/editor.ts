@@ -2586,18 +2586,29 @@ function rebuildBlockHeader(line: string, keyword: BlockType, title: string | un
 // keyword line. box titles encode color and name and are not editable.
 export function setBlockTitle(code: string, config: DiagramConfig | null, key: string, title: string): EditResult {
   const model = parseModel(code);
-  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  if (model.type !== 'sequence' && model.type !== 'flowchart') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
   if (!el || el.kind !== 'block') return fail(code, config, `Element ${key} is not a block`);
   if (el.blockType === 'box') {
     return fail(code, config, 'A box block title encodes its color and name; unwrap the box or regroup its participants instead');
   }
-  if (el.blockType === 'subgraph') return fail(code, config, 'Subgraph titles are not editable');
   if (title.includes('\n')) return fail(code, config, 'Block title must be a single line');
   if (el.blockType === 'rect' && title !== '' && !isRgbColor(title)) {
     return fail(code, config, `A rect block title must be an rgb(...) color, e.g. ${DEFAULT_RECT_COLOR}`);
   }
   if ((el.title ?? '') === title) return { code, config };
+
+  if (el.blockType === 'subgraph') {
+    const orig = el.title?.match(/^([A-Za-z0-9_-]+)\s*\[(.*)\]$/);
+    let newTitleSpan = title;
+    if (orig && !title.startsWith(orig[1] + ' [') && !title.includes('[')) {
+      newTitleSpan = title !== '' ? `${orig[1]} [${title}]` : orig[1];
+    }
+    const line = code.split('\n')[el.lineStart];
+    const newLine = rebuildBlockHeader(line, el.blockType, newTitleSpan);
+    if (newLine === null) return fail(code, config, `Cannot parse block line: ${line.trim()}`);
+    return { code: replaceLines(code, el.lineStart, el.lineStart, [newLine]), config };
+  }
 
   const line = code.split('\n')[el.lineStart];
   const newLine = rebuildBlockHeader(line, el.blockType, title);
@@ -2649,7 +2660,7 @@ export function setBlockType(code: string, config: DiagramConfig | null, key: st
 // its header. Blank lines are preserved byte-for-byte.
 export function unwrapBlock(code: string, config: DiagramConfig | null, key: string): EditResult {
   const model = parseModel(code);
-  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  if (model.type !== 'sequence' && model.type !== 'flowchart') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
   if (!el || el.kind !== 'block') return fail(code, config, `Element ${key} is not a block`);
 
@@ -2698,10 +2709,14 @@ export function deleteBlock(
   opts?: { withContent?: boolean },
 ): EditResult {
   const model = parseModel(code);
-  if (model.type !== 'sequence') return fail(code, config, UNSUPPORTED);
+  if (model.type !== 'sequence' && model.type !== 'flowchart') return fail(code, config, UNSUPPORTED);
   const el = findElement(model, key);
   if (!el || el.kind !== 'block') return fail(code, config, `Element ${key} is not a block`);
   if (opts?.withContent === false) return unwrapBlock(code, config, key);
+
+  if (model.type === 'flowchart') {
+    return deleteElements(code, config, [key]);
+  }
 
   // Everything whose lines live inside the span goes away with the block.
   const contained: ModelElement[] = [];
