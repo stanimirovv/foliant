@@ -1418,3 +1418,176 @@ export function buildSelectionMap(
 
   return map;
 }
+
+export interface RectArea {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+export function rectsIntersect(
+  a: { left: number; top: number; right: number; bottom: number },
+  b: { left: number; top: number; right: number; bottom: number },
+  pad = 2
+): boolean {
+  return (
+    a.left <= b.right + pad &&
+    a.right >= b.left - pad &&
+    a.top <= b.bottom + pad &&
+    a.bottom >= b.top - pad
+  );
+}
+
+// Find all model elements and sticky notes intersecting a screen bounding box (marquee area).
+export function findElementsInRect(
+  svg: Element,
+  model: DiagramModel,
+  rect: RectArea,
+  stickyNotes?: { id: string }[]
+): string[] {
+  const result = new Set<string>();
+  const zip = zipModelToSvg(svg, model);
+  const escapeSelector = (id: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id);
+
+  if (model.type === 'sequence') {
+    const participants = ofKind<ParticipantElement>(model, 'participant');
+    participants.forEach((p, i) => {
+      const g = zip.participants[i];
+      if (g) {
+        const r = g.getBoundingClientRect();
+        if (rectsIntersect(rect, r)) {
+          result.add(p.key);
+          return;
+        }
+      }
+      // Lifelines
+      const lines = svg.querySelectorAll(`line.actor-line[data-id="${escapeSelector(p.id)}"], line[data-et="life-line"][data-id="${escapeSelector(p.id)}"]`);
+      for (let j = 0; j < lines.length; j++) {
+        const lr = lines[j].getBoundingClientRect();
+        if (rectsIntersect(rect, lr, 4)) {
+          result.add(p.key);
+          return;
+        }
+      }
+      // Bottom actor boxes
+      const bottom = svg.querySelector(`rect.actor-bottom[name="${escapeSelector(p.id)}"], g.actor-man[name="${escapeSelector(p.id)}"]`);
+      if (bottom) {
+        const br = bottom.getBoundingClientRect();
+        if (rectsIntersect(rect, br)) {
+          result.add(p.key);
+          return;
+        }
+      }
+    });
+
+    const messages = ofKind<MessageElement>(model, 'message');
+    const texts = Array.from(svg.querySelectorAll('text.messageText'));
+    messages.forEach((m, i) => {
+      const line = zip.messages[i];
+      if (line) {
+        const r = line.getBoundingClientRect();
+        if (rectsIntersect(rect, r, 4)) {
+          result.add(m.key);
+          return;
+        }
+      }
+      if (texts[i]) {
+        const tr = texts[i].getBoundingClientRect();
+        if (rectsIntersect(rect, tr)) {
+          result.add(m.key);
+          return;
+        }
+      }
+    });
+
+    const notes = ofKind<NoteElement>(model, 'note');
+    notes.forEach((n, i) => {
+      const g = zip.notes[i];
+      if (g) {
+        const r = g.getBoundingClientRect();
+        if (rectsIntersect(rect, r)) {
+          result.add(n.key);
+        }
+      }
+    });
+
+    const blocks = ofKind<BlockElement>(model, 'block');
+    blocks.forEach((b, i) => {
+      const g = zip.blocks[i];
+      if (g) {
+        const r = g.getBoundingClientRect();
+        if (rectsIntersect(rect, r)) {
+          result.add(b.key);
+        }
+      }
+    });
+  } else if (model.type === 'flowchart') {
+    const nodes = ofKind<NodeElement>(model, 'node');
+    nodes.forEach((n, i) => {
+      const g = zip.nodes[i];
+      if (g) {
+        const r = g.getBoundingClientRect();
+        if (rectsIntersect(rect, r)) {
+          result.add(n.key);
+        }
+      }
+    });
+
+    const edges = ofKind<EdgeElement>(model, 'edge');
+    edges.forEach((e, i) => {
+      const path = zip.edges[i];
+      if (path) {
+        const r = path.getBoundingClientRect();
+        if (rectsIntersect(rect, r, 4)) {
+          result.add(e.key);
+          return;
+        }
+      }
+      const hit = svg.querySelector(`path.${EDGE_HIT_CLASS}[data-key="${escapeSelector(e.key)}"]`);
+      if (hit) {
+        const hr = hit.getBoundingClientRect();
+        if (rectsIntersect(rect, hr, 4)) {
+          result.add(e.key);
+          return;
+        }
+      }
+      const label = svg.querySelector(`g.edgeLabel[data-id="${escapeSelector(e.key)}"], g.edgeLabel g.label[data-id="${escapeSelector(e.key)}"]`);
+      if (label) {
+        const lr = label.getBoundingClientRect();
+        if (rectsIntersect(rect, lr)) {
+          result.add(e.key);
+        }
+      }
+    });
+
+    const blocks = ofKind<BlockElement>(model, 'block');
+    blocks.forEach((b, i) => {
+      const g = zip.blocks[i];
+      if (g) {
+        const r = g.getBoundingClientRect();
+        if (rectsIntersect(rect, r)) {
+          result.add(b.key);
+        }
+      }
+    });
+  }
+
+  // Sticky notes in the diagram container
+  const container = svg.closest('#diagram-container') ?? document.getElementById('diagram-container');
+  if (container) {
+    const cards = container.querySelectorAll('.sticky-note-card');
+    cards.forEach(card => {
+      const r = card.getBoundingClientRect();
+      if (rectsIntersect(rect, r)) {
+        const id = card.getAttribute('data-note-id') ??
+          card.getAttribute('data-testid')?.replace(/^sticky-note-/, '');
+        if (id) {
+          result.add(`sticky:${id}`);
+        }
+      }
+    });
+  }
+
+  return Array.from(result);
+}

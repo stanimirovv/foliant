@@ -2655,5 +2655,70 @@ describe('DiagramViewer — presentation mode (walkthrough player)', () => {
     );
     expect(container.querySelector('[data-testid="walkthrough-bar"]')).toBeNull();
   });
+
+  it('dragging empty canvas draws a selection marquee and selects enclosed elements', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        editMode={true}
+        onSelect={onSelect}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const svg = container.querySelector('#diagram-container svg')!;
+    const partA = container.querySelector('g[data-et="participant"][data-id="A"]');
+    if (partA) {
+      vi.spyOn(partA, 'getBoundingClientRect').mockReturnValue({
+        left: 510, top: 510, right: 580, bottom: 550, width: 70, height: 40,
+        x: 510, y: 510, toJSON: () => {},
+      });
+    }
+
+    // Mouse down on empty canvas (far from (0,0) in jsdom)
+    fireEvent.mouseDown(svg, { button: 0, clientX: 500, clientY: 500 });
+    // Move past DRAG_THRESHOLD to start marquee
+    fireEvent.mouseMove(window, { clientX: 620, clientY: 580 });
+
+    // The selection marquee overlay and rect are visible
+    expect(document.querySelector('[data-testid="selection-marquee"]')).toBeTruthy();
+
+    // Release mouse -> onSelect called with enclosed elements
+    fireEvent.mouseUp(window, { clientX: 620, clientY: 580 });
+    expect(onSelect).toHaveBeenCalledWith(expect.arrayContaining(['p:0']), { shiftKey: false });
+    expect(document.querySelector('[data-testid="selection-marquee"]')).toBeNull();
+  });
+
+  it('pressing Space toggles pan cursor and enables panning over marquee select', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        editMode={true}
+        onSelect={onSelect}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    // Press Space
+    fireEvent.keyDown(window, { code: 'Space', key: ' ' });
+    const diagramContainer = container.querySelector('#diagram-container')!;
+    expect(diagramContainer.className).toContain('cursor-grab');
+
+    // Dragging with Space held down does NOT start marquee select
+    const svg = container.querySelector('#diagram-container svg')!;
+    fireEvent.mouseDown(svg, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 120, clientY: 80 });
+    expect(document.querySelector('[data-testid="selection-marquee"]')).toBeNull();
+
+    // Release Space -> cursor resets
+    fireEvent.keyUp(window, { code: 'Space', key: ' ' });
+    expect(diagramContainer.className).not.toContain('cursor-grab');
+  });
 });
 

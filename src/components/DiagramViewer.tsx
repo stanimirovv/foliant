@@ -14,7 +14,7 @@ import {
   sequenceConnectHandlePos, sequenceBottomConnectHandlePos, nodeConnectHandlePositions, nearestConnectHandleAt,
   nearestNodeAtPoint, nearestNodeHandleAt,
   getFlowchartClusterInfo, innermostClusterAtPoint, nodeCenterInCluster, nodeInAnyCluster,
-  computeScopeChangeAid,
+  computeScopeChangeAid, findElementsInRect,
   CONNECT_HANDLE_GRAB_RADIUS, NODE_HOVER_PAD, NODE_DROP_PAD,
   ParticipantScreenInfo, MessageScreenInfo, MessageEndpointScreenInfo, EdgeEndpointScreenInfo,
   ScopeChangeAid,
@@ -38,7 +38,7 @@ interface DiagramViewerProps {
   arrowStyles?: DiagramConfig | null;  // resolved config (rewriteArrowStyles); its arrows are applied
   nodeColors?: DiagramConfig | null;   // raw config; actors colors applied to flowchart nodes
   selection?: string | string[] | null;           // selected processed element key(s)
-  onSelect?: (key: string | null, options?: { shiftKey?: boolean }) => void;
+  onSelect?: (key: string | string[] | null, options?: { shiftKey?: boolean }) => void;
   // Drag callbacks (processed keys; ClientPage maps them to raw keys).
   // onMoveParticipant moves a participant (sequence) or a node (flowchart).
   // targetBlockKey (flowchart only) pins the drop to a subgraph block when
@@ -452,6 +452,56 @@ export default function DiagramViewer({
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const [cursorHint, setCursorHint] = useState<'grab' | 'crosshair' | 'pointer' | null>(null);
 
+  // Space key / middle-click panning & canvas marquee selection states
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [marqueeBox, setMarqueeBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [marqueeSelectedKeys, setMarqueeSelectedKeys] = useState<string[] | null>(null);
+  const marqueeRef = useRef<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    isSelecting: boolean;
+    shiftKey: boolean;
+  } | null>(null);
+
+  // Space key listener for canvas panning
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.key === ' ') {
+        const target = e.target as HTMLElement | null;
+        const inField = Boolean(
+          target &&
+            (target.tagName === 'INPUT' ||
+              target.tagName === 'TEXTAREA' ||
+              target.tagName === 'SELECT' ||
+              target.isContentEditable ||
+              Boolean(target.closest?.('.monaco-editor')))
+        );
+        if (inField) return;
+        e.preventDefault();
+        setIsSpacePressed(true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.key === ' ') {
+        setIsSpacePressed(false);
+      }
+    };
+    const onBlur = () => {
+      setIsSpacePressed(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
   // Zoom pill state: the TransformWrapper instance (zoom in/out/fit/search-pan
   // actions) and the current scale for the percentage readout.
   const transformRef = useRef<ReactZoomPanPinchContentRef | null>(null);
@@ -759,15 +809,25 @@ export default function DiagramViewer({
     const container = document.getElementById('diagram-container');
     if (!container) return;
     container.querySelectorAll('.editor-selected').forEach(el => el.classList.remove('editor-selected'));
-    if (!editMode || selectedProcessedKeys.length === 0) return;
+    if (!editMode) return;
+    const activeKeys = new Set(selectedProcessedKeys);
+    if (marqueeSelectedKeys) {
+      if (marqueeRef.current?.shiftKey) {
+        for (const k of marqueeSelectedKeys) activeKeys.add(k);
+      } else {
+        activeKeys.clear();
+        for (const k of marqueeSelectedKeys) activeKeys.add(k);
+      }
+    }
+    if (activeKeys.size === 0) return;
     const svgRoot = container.querySelector('svg');
     if (!svgRoot) return;
     const model = parseModel(code);
-    for (const key of selectedProcessedKeys) {
+    for (const key of activeKeys) {
       const el = svgElementForKey(svgRoot, model, key);
       if (el) el.classList.add('editor-selected');
     }
-  }, [svgStr, selectedProcessedKeys, editMode, code]);
+  }, [svgStr, selectedProcessedKeys, marqueeSelectedKeys, editMode, code]);
 
   // Edge hover affordance: the hovered edge's invisible hit path lights up as
   // a translucent band and the visible edge gets a soft glow, so unlabeled
@@ -953,18 +1013,10 @@ export default function DiagramViewer({
       return;
     }
     if (!editMode || isVisualLocked || presentation || e.button !== 0) return;
+    if (isSpacePressed) return; // Space + drag is reserved for panning
     const ctx = getSvgAndModel();
     if (!ctx || (ctx.model.type !== 'sequence' && ctx.model.type !== 'flowchart')) return;
     if (!onSelect) return;
-
-    if (e.shiftKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof window !== 'undefined' && window.getSelection) {
-        window.getSelection()?.removeAllRanges();
-      }
-      return;
-    }
 
     const target = e.target as Element;
     let key = elementKeyAtTarget(target, ctx.svgRoot, ctx.model, { x: e.clientX, y: e.clientY });
@@ -974,6 +1026,26 @@ export default function DiagramViewer({
         e.clientX,
         e.clientY,
       );
+    }
+
+    if (e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof window !== 'undefined' && window.getSelection) {
+        window.getSelection()?.removeAllRanges();
+      }
+      if (!key) {
+        // Shift + drag on canvas: marquee selection
+        marqueeRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          currentX: e.clientX,
+          currentY: e.clientY,
+          isSelecting: false,
+          shiftKey: true,
+        };
+      }
+      return;
     }
 
     let dragType: 'reorder' | 'message' | 'node' | 'endpoint' | 'connect' | null = null;
@@ -1082,7 +1154,18 @@ export default function DiagramViewer({
       }
     }
 
-    if (!dragType || !participantKey) return; // not a drag — let the event propagate
+    if (!dragType || !participantKey) {
+      // Empty canvas press: initialize marquee selection
+      marqueeRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        currentX: e.clientX,
+        currentY: e.clientY,
+        isSelecting: false,
+        shiftKey: false,
+      };
+      return;
+    }
 
     // Prevent TransformWrapper panning and text selection.
     e.stopPropagation();
@@ -1506,6 +1589,29 @@ export default function DiagramViewer({
     if (!editMode) return;
 
     const onMouseMove = (e: MouseEvent) => {
+      const marquee = marqueeRef.current;
+      if (marquee) {
+        const dx = e.clientX - marquee.startX;
+        const dy = e.clientY - marquee.startY;
+        if (!marquee.isSelecting && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+        marquee.isSelecting = true;
+        suppressClickRef.current = true;
+        marquee.currentX = e.clientX;
+        marquee.currentY = e.clientY;
+        const left = Math.min(marquee.startX, marquee.currentX);
+        const top = Math.min(marquee.startY, marquee.currentY);
+        const right = Math.max(marquee.startX, marquee.currentX);
+        const bottom = Math.max(marquee.startY, marquee.currentY);
+        setMarqueeBox({ left, top, width: right - left, height: bottom - top });
+
+        const ctx = getSvgAndModel();
+        if (ctx) {
+          const keysInRect = findElementsInRect(ctx.svgRoot, ctx.model, { left, top, right, bottom }, showNotes ? notes : undefined);
+          setMarqueeSelectedKeys(keysInRect);
+        }
+        return;
+      }
+
       const drag = dragRef.current;
       if (!drag) return;
       const dx = e.clientX - drag.startX;
@@ -1519,6 +1625,26 @@ export default function DiagramViewer({
     };
 
     const onMouseUp = () => {
+      const marquee = marqueeRef.current;
+      if (marquee) {
+        marqueeRef.current = null;
+        setMarqueeBox(null);
+        setMarqueeSelectedKeys(null);
+        if (marquee.isSelecting) {
+          suppressClickRef.current = true;
+          const left = Math.min(marquee.startX, marquee.currentX);
+          const top = Math.min(marquee.startY, marquee.currentY);
+          const right = Math.max(marquee.startX, marquee.currentX);
+          const bottom = Math.max(marquee.startY, marquee.currentY);
+          const ctx = getSvgAndModel();
+          if (ctx && onSelect) {
+            const keysInRect = findElementsInRect(ctx.svgRoot, ctx.model, { left, top, right, bottom }, showNotes ? notes : undefined);
+            onSelect(keysInRect, { shiftKey: marquee.shiftKey });
+          }
+          return;
+        }
+      }
+
       const drag = dragRef.current;
       if (!drag) return;
       dragRef.current = null;
@@ -1580,7 +1706,7 @@ export default function DiagramViewer({
       window.removeEventListener('mouseup', onMouseUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode, code, selection, onMoveParticipant, onCreateMessageDrag, onMoveMessageEndpoint, onMoveEdgeEndpoint, onMoveMessage]);
+  }, [editMode, code, selection, onSelect, showNotes, notes, onMoveParticipant, onCreateMessageDrag, onMoveMessageEndpoint, onMoveEdgeEndpoint, onMoveMessage]);
 
   // Escape cancels an active canvas drag: the pending mouseup then does
   // nothing and the selection made on press stays. The event is marked handled
@@ -1596,6 +1722,15 @@ export default function DiagramViewer({
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' || target.isContentEditable)) return;
+      if (marqueeRef.current?.isSelecting) {
+        marqueeRef.current = null;
+        setMarqueeBox(null);
+        setMarqueeSelectedKeys(null);
+        suppressClickRef.current = true;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       const drag = dragRef.current;
       if (!drag) return;
       dragRef.current = null;
@@ -1720,8 +1855,16 @@ export default function DiagramViewer({
       )}
       <div
         id="diagram-container"
-        className={`w-full h-full select-none ${editMode && !presentation ? (isVisualLocked ? 'cursor-not-allowed' : 'cursor-pointer') : ''}`}
-        style={cursorHint ? { cursor: cursorHint } : undefined}
+        className={`w-full h-full select-none ${
+          editMode && !presentation
+            ? isVisualLocked
+              ? 'cursor-not-allowed'
+              : isSpacePressed
+                ? (isPanning ? 'cursor-grabbing' : 'cursor-grab')
+                : 'cursor-default'
+            : ''
+        }`}
+        style={cursorHint ? { cursor: cursorHint } : (isSpacePressed ? { cursor: isPanning ? 'grabbing' : 'grab' } : undefined)}
         onClick={handleDiagramClick}
         onDoubleClick={handleDiagramDoubleClick}
         onMouseDownCapture={handleMouseDownCapture}
@@ -1735,13 +1878,19 @@ export default function DiagramViewer({
       >
         <TransformWrapper
           ref={transformRef}
-          panning={{ excluded: panExclusions }}
+          panning={{
+            excluded: panExclusions,
+            allowLeftClickPan: isSpacePressed || !editMode || presentation,
+            allowMiddleClickPan: true,
+          }}
           minScale={MIN_ZOOM_SCALE}
           maxScale={MAX_ZOOM_SCALE}
           // Double-click-to-zoom is disabled: double-clicking a participant,
           // node or message opens the inline label editor instead.
           doubleClick={{ disabled: true }}
           onTransform={handleTransform}
+          onPanningStart={() => setIsPanning(true)}
+          onPanningStop={() => setIsPanning(false)}
         >
           <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full flex items-center justify-center p-8">
             {svgStr ? (
@@ -2218,6 +2367,26 @@ export default function DiagramViewer({
               </g>
             </>
           )}
+        </svg>
+      )}
+      {marqueeBox && (
+        <svg
+          data-testid="selection-marquee-overlay"
+          className="fixed inset-0 pointer-events-none z-40"
+          style={{ width: '100vw', height: '100vh', overflow: 'visible' }}
+        >
+          <rect
+            data-testid="selection-marquee"
+            x={marqueeBox.left}
+            y={marqueeBox.top}
+            width={marqueeBox.width}
+            height={marqueeBox.height}
+            fill="rgba(59, 130, 246, 0.15)"
+            stroke="#3b82f6"
+            strokeWidth={1.5}
+            strokeDasharray="4 3"
+            rx={2}
+          />
         </svg>
       )}
     </div>

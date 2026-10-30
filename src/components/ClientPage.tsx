@@ -1302,9 +1302,37 @@ export default function ClientPage() {
   }, [selectedRawElements, rawCode, viewsData]);
 
   // DiagramViewer click: processed key -> raw key.
-  const handleSelect = (processedKey: string | null, options?: { shiftKey?: boolean }) => {
+  const handleSelect = (processedKey: string | string[] | null, options?: { shiftKey?: boolean }) => {
+    if (Array.isArray(processedKey)) {
+      const rawKeys: string[] = [];
+      for (const pk of processedKey) {
+        if (pk.startsWith('sticky:')) {
+          rawKeys.push(pk);
+        } else {
+          const raw = selectionMap.get(pk);
+          if (raw) rawKeys.push(raw.key);
+        }
+      }
+      if (options?.shiftKey) {
+        setSelectedKeys(prev => {
+          const set = new Set(prev);
+          for (const k of rawKeys) set.add(k);
+          return Array.from(set);
+        });
+      } else {
+        setSelectedKeys(rawKeys);
+      }
+      return;
+    }
+
     if (options?.shiftKey) {
       if (!processedKey) return;
+      if (processedKey.startsWith('sticky:')) {
+        setSelectedKeys(prev =>
+          prev.includes(processedKey) ? prev.filter(k => k !== processedKey) : [...prev, processedKey]
+        );
+        return;
+      }
       const raw = selectionMap.get(processedKey);
       if (!raw) return;
       setSelectedKeys(prev => {
@@ -1319,6 +1347,10 @@ export default function ClientPage() {
 
     if (!processedKey) {
       setSelectedKeys([]);
+      return;
+    }
+    if (processedKey.startsWith('sticky:')) {
+      setSelectedKeys([processedKey]);
       return;
     }
     const raw = selectionMap.get(processedKey);
@@ -1541,6 +1573,7 @@ export default function ClientPage() {
   };
 
   const handleAddNote = () => {
+    if (!showNotes) setShowNotes(true);
     let x = 120;
     let y = 80;
     const container = document.getElementById('diagram-container');
@@ -2025,12 +2058,16 @@ export default function ClientPage() {
 
   // Canvas keyboard shortcuts: Delete/Backspace runs the same delete as the
   // panel's Delete button (handleRequestDelete), Escape clears the canvas
-  // selection. Both are skipped inside text fields (native behavior wins
+  // selection. '1' adds a participant (or flowchart node), '2' adds a sticky note.
+  // Both are skipped inside text fields (native behavior wins
   // there) and while visual edits are locked (editing source code). Escape
   // during an active canvas drag is handled by DiagramViewer, which cancels
   // the drag and marks the event as handled so the selection survives.
   const handleRequestDeleteRef = useRef(handleRequestDelete);
   handleRequestDeleteRef.current = handleRequestDelete;
+  const handleAddParticipantRef = useRef<() => void>(() => {});
+  const handleAddNoteRef = useRef(handleAddNote);
+  handleAddNoteRef.current = handleAddNote;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
@@ -2044,6 +2081,18 @@ export default function ClientPage() {
         setSelection(null);
         return;
       }
+      if (e.key === '1' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (!editMode || isVisualLocked) return;
+        e.preventDefault();
+        handleAddParticipantRef.current();
+        return;
+      }
+      if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (!editMode || isVisualLocked || !rawCode) return;
+        e.preventDefault();
+        handleAddNoteRef.current();
+        return;
+      }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       if (!editMode || isVisualLocked || selectedKeys.length === 0) return;
       e.preventDefault();
@@ -2051,7 +2100,7 @@ export default function ClientPage() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editMode, isVisualLocked, selectedKeys]);
+  }, [editMode, isVisualLocked, selectedKeys, rawCode]);
 
   const handleConfirmDelete = () => {
     if (!pendingDelete) return;
@@ -2104,6 +2153,7 @@ export default function ClientPage() {
     const afterKey = selectedComponent ? selectedComponent.key : undefined;
     applyEditResult(addParticipant(rawCode, viewsData, afterKey, undefined, 'participant', theme));
   };
+  handleAddParticipantRef.current = handleAddParticipant;
 
   const handleAddMessage = () => {
     if (componentElements.length === 0) {

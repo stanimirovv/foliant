@@ -36,24 +36,63 @@ const panVisitDiagram = () => {
 };
 
 describe('Diagram panning (e2e)', () => {
-  it('dragging empty canvas pans the diagram in edit mode', () => {
+  it('dragging empty canvas draws a selection box in edit mode and does not pan', () => {
     panVisitDiagram();
     cy.get('#diagram-container').then(($c) => {
       const r = ($c[0] as HTMLElement).getBoundingClientRect();
-      // top-left corner of the container: empty space, far from lifelines
       const x0 = Math.round(r.left + 15);
       const y0 = Math.round(r.top + 15);
       cy.get('.react-transform-component').invoke('css', 'transform').then((initial) => {
         cy.window().then((win) => {
           const svg = win.document.querySelector('#diagram-container svg') as unknown as SVGElement;
-          // Dispatch raw MouseEvents (cy.trigger drops the `buttons` flag,
-          // and the library aborts a pan when a move event reports
-          // buttons === 0 — it treats that as a missed mouseup). The
-          // mousedown targets the svg root itself, so no hit-testing is
-          // involved.
+          svg.dispatchEvent(new win.MouseEvent('mousedown', { button: 0, buttons: 1, clientX: x0, clientY: y0, bubbles: true, cancelable: true }));
+          win.document.body.dispatchEvent(new win.MouseEvent('mousemove', { buttons: 1, clientX: x0 + 100, clientY: y0 + 80, bubbles: true, cancelable: true }));
+        });
+        cy.get('[data-testid="selection-marquee"]').should('exist');
+        cy.window().then((win) => {
+          win.document.body.dispatchEvent(new win.MouseEvent('mouseup', { button: 0, buttons: 0, clientX: x0 + 100, clientY: y0 + 80, bubbles: true, cancelable: true }));
+        });
+        cy.get('.react-transform-component').should(($el) => {
+          expect($el.css('transform')).to.eq(initial);
+        });
+      });
+    });
+  });
+
+  it('Space + drag pans the diagram in edit mode', () => {
+    panVisitDiagram();
+    cy.get('#diagram-container').then(($c) => {
+      const r = ($c[0] as HTMLElement).getBoundingClientRect();
+      const x0 = Math.round(r.left + 15);
+      const y0 = Math.round(r.top + 15);
+      cy.get('.react-transform-component').invoke('css', 'transform').then((initial) => {
+        cy.window().then((win) => {
+          win.dispatchEvent(new win.KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }));
+          const svg = win.document.querySelector('#diagram-container svg') as unknown as SVGElement;
           svg.dispatchEvent(new win.MouseEvent('mousedown', { button: 0, buttons: 1, clientX: x0, clientY: y0, bubbles: true, cancelable: true }));
           win.document.body.dispatchEvent(new win.MouseEvent('mousemove', { buttons: 1, clientX: x0 + 100, clientY: y0 + 80, bubbles: true, cancelable: true }));
           win.document.body.dispatchEvent(new win.MouseEvent('mouseup', { button: 0, buttons: 0, clientX: x0 + 100, clientY: y0 + 80, bubbles: true, cancelable: true }));
+          win.dispatchEvent(new win.KeyboardEvent('keyup', { code: 'Space', key: ' ', bubbles: true }));
+        });
+        cy.get('.react-transform-component').should(($el) => {
+          expect($el.css('transform')).to.not.eq(initial);
+        });
+      });
+    });
+  });
+
+  it('middle-click drag pans the diagram in edit mode', () => {
+    panVisitDiagram();
+    cy.get('#diagram-container').then(($c) => {
+      const r = ($c[0] as HTMLElement).getBoundingClientRect();
+      const x0 = Math.round(r.left + 15);
+      const y0 = Math.round(r.top + 15);
+      cy.get('.react-transform-component').invoke('css', 'transform').then((initial) => {
+        cy.window().then((win) => {
+          const svg = win.document.querySelector('#diagram-container svg') as unknown as SVGElement;
+          svg.dispatchEvent(new win.MouseEvent('mousedown', { button: 1, buttons: 4, clientX: x0, clientY: y0, bubbles: true, cancelable: true }));
+          win.document.body.dispatchEvent(new win.MouseEvent('mousemove', { buttons: 4, clientX: x0 + 100, clientY: y0 + 80, bubbles: true, cancelable: true }));
+          win.document.body.dispatchEvent(new win.MouseEvent('mouseup', { button: 1, buttons: 0, clientX: x0 + 100, clientY: y0 + 80, bubbles: true, cancelable: true }));
         });
         cy.get('.react-transform-component').should(($el) => {
           expect($el.css('transform')).to.not.eq(initial);

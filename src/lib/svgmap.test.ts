@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { parseModel, DiagramModel, ParticipantElement, MessageElement } from './model';
-import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, labelElementForKey, allMessageLabelElements, svgElementForKey, SvgZip, EDGE_HIT_CLASS } from './svgmap';
+import { zipModelToSvg, elementKeyAtTarget, buildSelectionMap, flowchartNodeIdOf, nearestMessageKeyAt, labelElementForKey, allMessageLabelElements, svgElementForKey, SvgZip, EDGE_HIT_CLASS, rectsIntersect, findElementsInRect } from './svgmap';
 import { addEdgeHitPaths } from './styling';
 import { transformActors, processMermaid } from './preprocessor';
 import { DiagramConfig } from './views';
@@ -1581,5 +1581,50 @@ describe('computeScopeChangeAid', () => {
     )!;
     expect(clamped.badgeX + clamped.badgeWidth).toBeLessThanOrEqual(window.innerWidth);
     expect(clamped.badgeY + 22).toBeLessThanOrEqual(window.innerHeight);
+  });
+});
+
+describe('rectsIntersect and findElementsInRect', () => {
+  it('rectsIntersect detects overlaps and non-overlaps correctly', () => {
+    const a = { left: 10, top: 10, right: 50, bottom: 50 };
+    // Overlapping
+    expect(rectsIntersect(a, { left: 20, top: 20, right: 60, bottom: 60 })).toBe(true);
+    // Enclosing
+    expect(rectsIntersect(a, { left: 0, top: 0, right: 100, bottom: 100 })).toBe(true);
+    // Non-overlapping (to the right)
+    expect(rectsIntersect(a, { left: 60, top: 10, right: 100, bottom: 50 })).toBe(false);
+    // Non-overlapping (below)
+    expect(rectsIntersect(a, { left: 10, top: 60, right: 50, bottom: 100 })).toBe(false);
+  });
+
+  it('findElementsInRect finds sequence elements intersecting the marquee box', () => {
+    const svg = parseSvg(SEQ_SVG);
+    const model = seqModel();
+    // In jsdom getBoundingClientRect returns zeros by default unless mocked,
+    // so we mock getBoundingClientRect on elements.
+    const partA = svg.querySelector('g[data-et="participant"][data-id="A"]');
+    if (partA) {
+      vi.spyOn(partA, 'getBoundingClientRect').mockReturnValue({
+        left: 20, top: 20, right: 100, bottom: 60, width: 80, height: 40,
+        x: 20, y: 20, toJSON: () => {},
+      });
+    }
+    const partB = svg.querySelector('g[data-et="participant"][data-id="B"]');
+    if (partB) {
+      vi.spyOn(partB, 'getBoundingClientRect').mockReturnValue({
+        left: 150, top: 20, right: 230, bottom: 60, width: 80, height: 40,
+        x: 150, y: 20, toJSON: () => {},
+      });
+    }
+
+    // Box enclosing only participant A
+    const keysA = findElementsInRect(svg, model, { left: 10, top: 10, right: 110, bottom: 70 });
+    expect(keysA).toContain('p:0');
+    expect(keysA).not.toContain('p:1');
+
+    // Box enclosing both A and B
+    const keysBoth = findElementsInRect(svg, model, { left: 10, top: 10, right: 250, bottom: 70 });
+    expect(keysBoth).toContain('p:0');
+    expect(keysBoth).toContain('p:1');
   });
 });

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { ComponentProps } from 'react';
 import EditorPanel, { colorToHex } from './EditorPanel';
 import { parseModel } from '@/lib/model';
+import { DiagramConfig } from '@/lib/views';
 
 // Elements come from freshly parsed diagrams (EDITING_PLAN.md 4.13: create,
 // never a stale fixture).

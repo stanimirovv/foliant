@@ -198,4 +198,29 @@ describe('Canvas keyboard shortcuts (e2e)', () => {
         });
       });
   });
+
+  it('pressing 1 adds a participant; pressing 2 adds a sticky note', () => {
+    let dir = '';
+    let name = '';
+    cy.task<string>('createTempDiagramDir')
+      .then((d) => {
+        dir = d;
+        name = `cypress-shortcuts-hotkeys-${Date.now()}.mmd`;
+        return cy.request('POST', fileApi(name, dir), { content: SEQ_CONTENT });
+      })
+      .then(() => {
+        cy.visit(appUrl(name, dir));
+        cy.get('#diagram-container svg').should('exist');
+
+        // Hotkey 1: Adds a participant
+        cy.get('body').type('1');
+        cy.get('#diagram-container').contains('New Participant').should('exist');
+        saved();
+
+        // Hotkey 2: Adds a sticky note
+        cy.get('body').type('2');
+        cy.get('.sticky-note-card').should('exist');
+        saved();
+      });
+  });
 });

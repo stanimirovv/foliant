@@ -354,6 +354,7 @@ export default function StickyNote({
   return (
     <div
       data-testid={`sticky-note-${note.id}`}
+      data-note-id={note.id}
       data-selected={selected ? 'true' : undefined}
       className={`sticky-note-card absolute select-none rounded border shadow-md transition-shadow hover:shadow-lg overflow-hidden ${colorConfig.bg} ${colorConfig.border} ${colorConfig.text} flex flex-col ${selected ? 'ring-2 ring-blue-500' : ''}`}
       style={{

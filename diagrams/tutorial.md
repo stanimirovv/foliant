@@ -1045,11 +1045,14 @@ sequenceDiagram
 ### Canvas Interactions
 | Action | How |
 |---|---|
-| Pan | Drag canvas |
+| Pan | Space + drag / middle-click / drag canvas (view mode) |
+| Area select | Drag canvas (edit mode) |
 | Zoom | Mouse wheel / pinch / zoom pill |
 | Fit to screen | Click "Fit" in zoom pill |
 | Select element | Click it |
-| Multi-select | Shift+click |
+| Multi-select | Shift+click or drag selection box |
+| Add participant | Hotkey `1` |
+| Add note | Hotkey `2` |
 | Clear selection | Click empty canvas or `Escape` |
 | Create message (seq) | Drag from lifeline connect handle to another lifeline |
 | Create self-call (seq) | Drag from handle back to same lifeline |

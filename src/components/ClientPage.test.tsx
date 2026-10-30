@@ -1322,6 +1322,25 @@ sequenceDiagram
     expect(screen.queryByTestId('delete-dialog')).toBeNull();
   });
 
+  it('pressing 1 adds a participant in edit mode', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.keyDown(document.body, { key: '1' });
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('New Participant');
+    }, { timeout: 3000 });
+  });
+
+  it('pressing 2 adds a sticky note in edit mode', async () => {
+    const viewer = await renderInEditMode(DEMO, 'A->>B: Hello');
+    fireEvent.keyDown(document.body, { key: '2' });
+    await waitFor(() => {
+      const code = viewer.getAttribute('data-code') ?? '';
+      expect(code).toContain('CONFIG:');
+      expect(code).toContain('"notes":');
+    }, { timeout: 3000 });
+  });
+
   it('Delete/Backspace do nothing outside edit mode (edit=0)', async () => {
     mockParams({ file: 'demo.mmd', edit: '0' });
     mockFetchWithFile(DEMO);
