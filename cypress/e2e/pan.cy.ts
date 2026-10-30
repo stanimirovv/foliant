@@ -101,6 +101,26 @@ describe('Diagram panning (e2e)', () => {
     });
   });
 
+  it('right-click (secondary button) drag pans the diagram in edit mode (Lucid-style)', () => {
+    panVisitDiagram();
+    cy.get('#diagram-container').then(($c) => {
+      const r = ($c[0] as HTMLElement).getBoundingClientRect();
+      const x0 = Math.round(r.left + 15);
+      const y0 = Math.round(r.top + 15);
+      cy.get('.react-transform-component').invoke('css', 'transform').then((initial) => {
+        cy.window().then((win) => {
+          const svg = win.document.querySelector('#diagram-container svg') as unknown as SVGElement;
+          svg.dispatchEvent(new win.MouseEvent('mousedown', { button: 2, buttons: 2, clientX: x0, clientY: y0, bubbles: true, cancelable: true }));
+          win.document.body.dispatchEvent(new win.MouseEvent('mousemove', { button: 2, buttons: 2, clientX: x0 + 120, clientY: y0 + 90, bubbles: true, cancelable: true }));
+          win.document.body.dispatchEvent(new win.MouseEvent('mouseup', { button: 2, buttons: 0, clientX: x0 + 120, clientY: y0 + 90, bubbles: true, cancelable: true }));
+        });
+        cy.get('.react-transform-component').should(($el) => {
+          expect($el.css('transform')).to.not.eq(initial);
+        });
+      });
+    });
+  });
+
   it('dragging a participant does not pan the diagram in edit mode', () => {
     panVisitDiagram();
     cy.get('.react-transform-component').invoke('css', 'transform').then((initial) => {

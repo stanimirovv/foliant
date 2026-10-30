@@ -4485,4 +4485,57 @@ describe('ClientPage — theme switching and right menu theme colors', () => {
   });
 });
 
+describe('ClientPage — adding sticky note in visible screen section', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('places a newly added sticky note within the visible section of the diagram container when panned and zoomed', async () => {
+    currentMockParams = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    mockFetchWithFile('sequenceDiagram\n    participant A\n    participant B\n    A->>B: Ping');
+
+    render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => expect(viewer.getAttribute('data-code')).toContain('sequenceDiagram'));
+
+    const svg = screen.getByTestId('mock-diagram-svg');
+    // Simulate a transform component scaled to 2x inside the container
+    const transformDiv = document.createElement('div');
+    transformDiv.className = 'react-transform-component';
+    transformDiv.style.transform = 'translate3d(-600px, -900px, 0px) scale(2)';
+    viewer.appendChild(transformDiv);
+
+    // Visible container rect on screen: [100..900] x [80..680]
+    vi.spyOn(viewer, 'getBoundingClientRect').mockReturnValue({
+      left: 100, top: 80, right: 900, bottom: 680, width: 800, height: 600,
+      x: 100, y: 80, toJSON: () => {},
+    });
+    // Large panned & zoomed SVG: top-left is far off-screen at (-500, -820), size 3000x4000
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+      left: -500, top: -820, right: 2500, bottom: 3180, width: 3000, height: 4000,
+      x: -500, y: -820, toJSON: () => {},
+    });
+
+    fireEvent.click(screen.getByTestId('add-sticky-note'));
+
+    await waitFor(() => {
+      const parsed = parseViewsData(viewer.getAttribute('data-code') ?? '');
+      expect(parsed?.notes).toHaveLength(1);
+      const note = parsed!.notes![0];
+      // Convert note's local (x, y) back to screen coordinates: svgRect.left + note.x * scale
+      const screenLeft = -500 + note.x * 2;
+      const screenTop = -820 + note.y * 2;
+      const screenRight = screenLeft + 65 * 2;
+      const screenBottom = screenTop + 55 * 2;
+      // The note must be inside the visible container [100..900] x [80..680]
+      expect(screenLeft).toBeGreaterThanOrEqual(100);
+      expect(screenRight).toBeLessThanOrEqual(900);
+      expect(screenTop).toBeGreaterThanOrEqual(80);
+      expect(screenBottom).toBeLessThanOrEqual(680);
+    });
+  });
+});
+
+
 

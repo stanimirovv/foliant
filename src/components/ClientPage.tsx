@@ -1580,10 +1580,66 @@ export default function ClientPage() {
     if (container) {
       const svg = container.querySelector('svg');
       if (svg) {
-        const rect = svg.getBoundingClientRect();
+        const svgRect = svg.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const transformEl = container.querySelector('.react-transform-component') as HTMLElement | null;
+        const scaleMatch = transformEl?.style.transform.match(/scale\(([\d.]+)\)/);
+        const parsedScale = scaleMatch ? parseFloat(scaleMatch[1]) : 1;
+        const scale = Number.isFinite(parsedScale) && parsedScale > 0 ? parsedScale : 1;
         const offset = (stickyNotes.length % 6) * 20;
-        x = Math.max(20, Math.round(rect.width / 2 - 32 + offset));
-        y = Math.max(20, Math.round(rect.height / 2 - 27 + offset));
+
+        if (containerRect.width > 0 && containerRect.height > 0 && svgRect.width > 0 && svgRect.height > 0) {
+          const viewLeft = typeof window !== 'undefined' && window.innerWidth > 0
+            ? Math.max(containerRect.left, 0)
+            : containerRect.left;
+          const viewTop = typeof window !== 'undefined' && window.innerHeight > 0
+            ? Math.max(containerRect.top, 0)
+            : containerRect.top;
+          const viewRight = typeof window !== 'undefined' && window.innerWidth > 0
+            ? Math.min(containerRect.right, window.innerWidth)
+            : containerRect.right;
+          const viewBottom = typeof window !== 'undefined' && window.innerHeight > 0
+            ? Math.min(containerRect.bottom, window.innerHeight)
+            : containerRect.bottom;
+
+          const vLeft = viewRight > viewLeft ? viewLeft : containerRect.left;
+          const vTop = viewBottom > viewTop ? viewTop : containerRect.top;
+          const vRight = viewRight > viewLeft ? viewRight : containerRect.right;
+          const vBottom = viewBottom > viewTop ? viewBottom : containerRect.bottom;
+
+          const interLeft = Math.max(vLeft, svgRect.left);
+          const interTop = Math.max(vTop, svgRect.top);
+          const interRight = Math.min(vRight, svgRect.right);
+          const interBottom = Math.min(vBottom, svgRect.bottom);
+
+          const boxLeft = interRight > interLeft ? interLeft : vLeft;
+          const boxRight = interRight > interLeft ? interRight : vRight;
+          const boxTop = interBottom > interTop ? interTop : vTop;
+          const boxBottom = interBottom > interTop ? interBottom : vBottom;
+
+          const centerScreenX = (boxLeft + boxRight) / 2;
+          const centerScreenY = (boxTop + boxBottom) / 2;
+
+          let noteX = (centerScreenX - svgRect.left) / scale - 32 + offset;
+          let noteY = (centerScreenY - svgRect.top) / scale - 27 + offset;
+
+          const minVisX = (vLeft - svgRect.left) / scale + 8;
+          const maxVisX = (vRight - svgRect.left) / scale - 65 - 8;
+          if (maxVisX >= minVisX) {
+            noteX = Math.min(Math.max(noteX, minVisX), maxVisX);
+          }
+          const minVisY = (vTop - svgRect.top) / scale + 8;
+          const maxVisY = (vBottom - svgRect.top) / scale - 55 - 8;
+          if (maxVisY >= minVisY) {
+            noteY = Math.min(Math.max(noteY, minVisY), maxVisY);
+          }
+
+          x = Math.round(noteX);
+          y = Math.round(noteY);
+        } else if (svgRect.width > 0 && svgRect.height > 0) {
+          x = Math.max(20, Math.round((svgRect.width / scale) / 2 - 32 + offset));
+          y = Math.max(20, Math.round((svgRect.height / scale) / 2 - 27 + offset));
+        }
       }
     }
     const newNote: StickyNote = {

@@ -452,7 +452,7 @@ export default function DiagramViewer({
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const [cursorHint, setCursorHint] = useState<'grab' | 'crosshair' | 'pointer' | null>(null);
 
-  // Space key / middle-click panning & canvas marquee selection states
+  // Space key / middle-click / secondary-button (right-click) panning & canvas marquee selection states
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [marqueeBox, setMarqueeBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
@@ -464,6 +464,13 @@ export default function DiagramViewer({
     currentY: number;
     isSelecting: boolean;
     shiftKey: boolean;
+  } | null>(null);
+  const secondaryPanRef = useRef<{
+    startX: number;
+    startY: number;
+    startPosX: number;
+    startPosY: number;
+    isDragging: boolean;
   } | null>(null);
 
   // Space key listener for canvas panning
@@ -498,6 +505,44 @@ export default function DiagramViewer({
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  // Secondary (right) mouse/trackpad button drag panning (Lucid-style)
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      const pan = secondaryPanRef.current;
+      if (!pan) return;
+      const dx = e.clientX - pan.startX;
+      const dy = e.clientY - pan.startY;
+      if (!pan.isDragging && Math.hypot(dx, dy) < 1) return;
+      pan.isDragging = true;
+      suppressClickRef.current = true;
+      setIsPanning(true);
+      const inst = transformRef.current?.instance;
+      if (inst && !inst.isPanning) {
+        inst.setState(inst.state.scale, pan.startPosX + dx, pan.startPosY + dy);
+      }
+    };
+    const onMouseUp = () => {
+      if (!secondaryPanRef.current) return;
+      secondaryPanRef.current = null;
+      if (!transformRef.current?.instance?.isPanning) {
+        setIsPanning(false);
+      }
+    };
+    const onBlur = () => {
+      if (!secondaryPanRef.current) return;
+      secondaryPanRef.current = null;
+      setIsPanning(false);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('blur', onBlur);
     };
   }, []);
@@ -911,7 +956,7 @@ export default function DiagramViewer({
   // flowchart edge glows it (unlabeled edges are only selectable through
   // their invisible hit path — hover makes the target discoverable).
   const handleContainerMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (!editMode || isVisualLocked || presentation || dragRef.current?.isDragging) {
+    if (!editMode || isVisualLocked || presentation || isPanning || secondaryPanRef.current || dragRef.current?.isDragging) {
       if (hoverConnectHandle) setHoverConnectHandle(null);
       if (hoverNode) setHoverNode(null);
       if (hoverEdge) setHoverEdge(null);
@@ -1004,6 +1049,29 @@ export default function DiagramViewer({
     // mousedown, so the input would never blur (and thus never commit) on a
     // canvas click.
     if (labelEditRef.current) finishLabelEdit(true);
+    const isSecondaryPan = e.button === 2 || (e.button === 0 && e.ctrlKey);
+    const isPanGesture = isSecondaryPan || e.button === 1 || (e.button === 0 && isSpacePressed);
+    if (transformRef.current?.instance?.setup?.panning) {
+      transformRef.current.instance.setup.panning.excluded = isPanGesture ? [] : panExclusions;
+    }
+    if (isSecondaryPan) {
+      const inst = transformRef.current?.instance;
+      if (inst) {
+        secondaryPanRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          startPosX: inst.state.positionX,
+          startPosY: inst.state.positionY,
+          isDragging: false,
+        };
+      }
+      setIsPanning(true);
+      setHoverConnectHandle(null);
+      setHoverNode(null);
+      setHoverEdge(null);
+      setCursorHint(null);
+      return;
+    }
     if ((e.target as Element).closest('.sticky-note-card')) {
       return;
     }
@@ -1858,17 +1926,28 @@ export default function DiagramViewer({
       <div
         id="diagram-container"
         className={`w-full h-full select-none ${
-          editMode && !presentation
-            ? isVisualLocked
-              ? 'cursor-not-allowed'
-              : isSpacePressed
-                ? (isPanning ? 'cursor-grabbing' : 'cursor-grab')
-                : 'cursor-default'
-            : ''
+          isPanning
+            ? 'cursor-grabbing'
+            : editMode && !presentation
+              ? isVisualLocked
+                ? 'cursor-not-allowed'
+                : isSpacePressed
+                  ? 'cursor-grab'
+                  : 'cursor-default'
+              : ''
         }`}
-        style={cursorHint ? { cursor: cursorHint } : (isSpacePressed ? { cursor: isPanning ? 'grabbing' : 'grab' } : undefined)}
+        style={
+          isPanning
+            ? { cursor: 'grabbing' }
+            : cursorHint
+              ? { cursor: cursorHint }
+              : isSpacePressed
+                ? { cursor: 'grab' }
+                : undefined
+        }
         onClick={handleDiagramClick}
         onDoubleClick={handleDiagramDoubleClick}
+        onContextMenu={(e) => e.preventDefault()}
         onMouseDownCapture={handleMouseDownCapture}
         onMouseMove={handleContainerMouseMove}
         onMouseLeave={() => {
@@ -1880,10 +1959,13 @@ export default function DiagramViewer({
       >
         <TransformWrapper
           ref={transformRef}
+          limitToBounds={false}
           panning={{
             excluded: panExclusions,
             allowLeftClickPan: isSpacePressed || !editMode || presentation,
             allowMiddleClickPan: true,
+            allowRightClickPan: true,
+            velocityDisabled: true,
           }}
           minScale={MIN_ZOOM_SCALE}
           maxScale={MAX_ZOOM_SCALE}

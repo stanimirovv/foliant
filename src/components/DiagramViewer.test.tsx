@@ -2746,5 +2746,44 @@ describe('DiagramViewer — presentation mode (walkthrough player)', () => {
     fireEvent.keyUp(window, { code: 'Space', key: ' ' });
     expect(diagramContainer.className).not.toContain('cursor-grab');
   });
+
+  it('holding right (secondary) mouse/trackpad button and dragging pans the diagram (Lucid-style) and suppresses contextmenu', async () => {
+    const onSelect = vi.fn();
+    const { container } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        editMode={true}
+        onSelect={onSelect}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const diagramContainer = container.querySelector('#diagram-container')!;
+    const transformComp = container.querySelector('.react-transform-component') as HTMLElement;
+    const initialTransform = transformComp.style.transform;
+
+    // Context menu on right-click in the diagram container is suppressed
+    const ctxEvt = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
+    diagramContainer.dispatchEvent(ctxEvt);
+    expect(ctxEvt.defaultPrevented).toBe(true);
+
+    // Right-button drag starting over a participant (which has pan-exclude) still pans
+    const partA = container.querySelector('g[data-et="participant"][data-id="A"]')!;
+    fireEvent.mouseDown(partA, { button: 2, buttons: 2, clientX: 100, clientY: 100 });
+    expect(diagramContainer.className).toContain('cursor-grabbing');
+
+    fireEvent.mouseMove(window, { button: 2, buttons: 2, clientX: 220, clientY: 170 });
+    expect(document.querySelector('[data-testid="selection-marquee"]')).toBeNull();
+    expect(transformComp.style.transform).not.toBe(initialTransform);
+    expect(transformComp.style.transform).toContain('120px');
+    expect(transformComp.style.transform).toContain('70px');
+
+    fireEvent.mouseUp(window, { button: 2, buttons: 0, clientX: 220, clientY: 170 });
+    expect(diagramContainer.className).not.toContain('cursor-grabbing');
+    // Right-drag does not select the participant
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });
 

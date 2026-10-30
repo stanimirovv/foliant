@@ -1045,7 +1045,7 @@ sequenceDiagram
 ### Canvas Interactions
 | Action | How |
 |---|---|
-| Pan | Space + drag / middle-click / drag canvas (view mode) |
+| Pan | Right-click (secondary) + drag / Space + drag / middle-click / drag canvas (view mode) |
 | Area select | Drag canvas (edit mode) |
 | Zoom | Mouse wheel / pinch / zoom pill |
 | Fit to screen | Click "Fit" in zoom pill |
