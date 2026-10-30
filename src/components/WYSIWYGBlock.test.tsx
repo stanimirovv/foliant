@@ -327,23 +327,75 @@ describe('WYSIWYGBlock', () => {
     });
   });
 
-  describe('link clicks', () => {
-    it('opens external links in a new tab', () => {
+  describe('link clicks and edit mode rework', () => {
+    it('executes external links in current tab without window.open or target=_blank', () => {
       const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
       renderBlock(makeBlock({ source: '[Google](https://google.com)' }));
-      const link = screen.getByText('Google');
+      const link = screen.getByText('Google').closest('a')!;
+      expect(link).toBeTruthy();
+      expect(link.getAttribute('href')).toBe('https://google.com');
+      expect(link.getAttribute('target')).toBeNull();
+
+      let defaultPrevented = true;
+      const clickHandler = (e: MouseEvent) => {
+        defaultPrevented = e.defaultPrevented;
+        // Prevent jsdom "navigation to another Document" warning in test runner
+        e.preventDefault();
+      };
+      window.addEventListener('click', clickHandler);
       fireEvent.click(link);
-      expect(openSpy).toHaveBeenCalledWith('https://google.com', '_blank', 'noopener,noreferrer');
+      window.removeEventListener('click', clickHandler);
+
+      // Link was not opened in a new tab
+      expect(openSpy).not.toHaveBeenCalled();
+      // Default navigation was not prevented by the component
+      expect(defaultPrevented).toBe(false);
+      // Edit mode was not entered
+      expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
       openSpy.mockRestore();
     });
 
-    it('opens relative-path links in a new tab', () => {
+    it('executes relative-path links in current tab without opening in a new tab', () => {
       const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
       renderBlock(makeBlock({ source: '[Other](./other.md)' }));
-      const link = screen.getByText('Other');
+      const link = screen.getByText('Other').closest('a')!;
+      expect(link).toBeTruthy();
+      expect(link.getAttribute('href')).toBe('./other.md');
+      expect(link.getAttribute('target')).toBeNull();
+
+      let defaultPrevented = true;
+      const clickHandler = (e: MouseEvent) => {
+        defaultPrevented = e.defaultPrevented;
+        e.preventDefault();
+      };
+      window.addEventListener('click', clickHandler);
       fireEvent.click(link);
-      expect(openSpy).toHaveBeenCalledWith('./other.md', '_blank', 'noopener,noreferrer');
+      window.removeEventListener('click', clickHandler);
+
+      expect(openSpy).not.toHaveBeenCalled();
+      expect(defaultPrevented).toBe(false);
+      expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
       openSpy.mockRestore();
+    });
+
+    it('does not enter edit mode when clicking nested elements within a link', () => {
+      renderBlock(makeBlock({ source: '[**Bold link**](https://example.com)' }));
+      const boldText = screen.getByText('Bold link');
+      const clickHandler = (e: MouseEvent) => e.preventDefault();
+      window.addEventListener('click', clickHandler);
+      fireEvent.click(boldText);
+      window.removeEventListener('click', clickHandler);
+
+      expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
+    });
+
+    it('does not enter edit mode on right-click (contextmenu) on a link', () => {
+      renderBlock(makeBlock({ source: '[Google](https://google.com)' }));
+      const link = screen.getByText('Google');
+      fireEvent.contextMenu(link);
+
+      // Context menu right-click should not enter edit mode
+      expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
     });
 
     it('scrolls to the target heading for internal fragment links', () => {
@@ -377,14 +429,12 @@ describe('WYSIWYGBlock', () => {
       expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
     });
 
-    it('does not enter edit mode when a link is clicked', () => {
-      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-      renderBlock(makeBlock({ source: '[Google](https://google.com)' }));
-      const link = screen.getByText('Google');
+    it('does not enter edit mode when an internal link is clicked', () => {
+      renderBlock(makeBlock({ source: '[Section](#my-section)' }));
+      const link = screen.getByText('Section');
       fireEvent.click(link);
       // Still in read mode — no textarea appeared.
       expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
-      openSpy.mockRestore();
     });
 
     it('clicking non-link content still enters edit mode', () => {

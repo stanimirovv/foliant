@@ -187,16 +187,15 @@ export default function WYSIWYGBlock({
   };
 
   // Intercept clicks on rendered links: in-document fragment links scroll to
-  // the target heading (no page navigation); everything else opens in a new
-  // tab. stopPropagation keeps the block from entering edit mode on link click.
+  // the target heading (no page navigation). External/relative links execute
+  // natively in the current tab without opening in a new tab.
   const handleContentClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const anchor = (e.target as HTMLElement).closest('a');
     if (!anchor) return;
     const href = anchor.getAttribute('href');
     if (!href) return;
-    e.preventDefault();
-    e.stopPropagation();
     if (isInternalLink(href)) {
+      e.preventDefault();
       const id = href.slice(1);
       // Search within the markdown preview so we don't jump to an element
       // outside the document surface.
@@ -205,8 +204,19 @@ export default function WYSIWYGBlock({
         ? preview.querySelector(`[id="${CSS.escape(id)}"]`)
         : document.getElementById(id);
       target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } else {
-      window.open(href, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  // Click on the block switches to edit mode unless the user clicked on a link.
+  const handleBlockClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // The first check is if clicking on a link — if so, do not enter edit mode.
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('a')) {
+      return;
+    }
+    if (!isEditing) {
+      setDraft(block.source);
+      setIsEditing(true);
     }
   };
 
@@ -219,12 +229,7 @@ export default function WYSIWYGBlock({
       className={`wysiwyg-block group ${isEditing ? 'wysiwyg-active' : ''} ${
         isDark ? 'text-slate-100' : 'text-gray-900'
       }`}
-      onClick={() => {
-        if (!isEditing) {
-          setDraft(block.source);
-          setIsEditing(true);
-        }
-      }}
+      onClick={handleBlockClick}
     >
       {/* Toolbar (visible on hover, or always when editing) */}
       <div
