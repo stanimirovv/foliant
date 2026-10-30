@@ -1767,9 +1767,11 @@ export default function DiagramViewer({
     if (!labelEl) return;
     const rect = labelEl.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    // Match the on-screen text size (content font size × pan/zoom × viewBox).
+    // Keep the inline editor font size clean, readable, and bounded within [11, 16]
+    // so it never blows up or becomes hard to read regardless of zoom level.
     const computed = parseFloat(getComputedStyle(labelEl).fontSize);
-    const fontSize = Math.min(Math.max((Number.isFinite(computed) ? computed : 14) * contentScaleOf(ctx.svgRoot), 10), 64);
+    const baseFont = Number.isFinite(computed) && computed > 0 ? computed : 14;
+    const fontSize = Math.min(Math.max(Math.round(Math.min(baseFont, rect.height * 0.8)), 11), 16);
     const initial = el.kind === 'participant' ? (el.alias ?? '') : (el.label ?? '');
     labelEditDoneRef.current = false;
     setLabelEdit({

@@ -2337,6 +2337,32 @@ describe('DiagramViewer double-click inline label editing', () => {
     expect(editorOf(container)).toBeNull();
   });
 
+  it('actor inline label editor font size stays readable and does not grow excessively large at high zoom levels', async () => {
+    const onLabelEdit = vi.fn();
+    const { container } = render(
+      <DiagramViewer code={SEQ_CODE} searchQuery="" theme="default" editMode selection={null}
+        onSelect={vi.fn()} onLabelEdit={onLabelEdit} />
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    const transformComp = container.querySelector('.react-transform-component') as HTMLElement;
+    if (transformComp) {
+      transformComp.style.transform = 'translate(100px, 100px) scale(3)';
+    }
+
+    const actorText = actorTextOf(container, 'A');
+    expect(actorText).toBeTruthy();
+    mockRect(actorText, 10, 20, 80, 20);
+
+    fireEvent.doubleClick(actorText, { clientX: 50, clientY: 30 });
+
+    const editor = editorOf(container);
+    expect(editor).toBeTruthy();
+    const fontSize = parseFloat(editor!.style.fontSize);
+    expect(fontSize).toBeLessThanOrEqual(16);
+    expect(fontSize).toBeGreaterThanOrEqual(11);
+  });
+
   it('double-clicking a message text opens the editor prefilled; blur commits', async () => {
     const onLabelEdit = vi.fn();
     const { container } = render(
