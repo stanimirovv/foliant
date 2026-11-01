@@ -313,8 +313,19 @@ describe('A. Diagram editor — sequence walkthrough', () => {
     createDiagram('walk-seq-a9', SEQ_NUM).then(({ dir, name }) => {
       // A10: Visit with ?present=1 -> starts in presentation mode at 1/2
       cy.visit(appUrl(name, dir, { present: '1' }));
-      cy.get('#diagram-container svg').should('exist');
+      cy.get('#diagram-container svg').should('exist').and('have.css', 'overflow', 'visible');
       bar().should('have.text', 'Step 1/2');
+
+      // Green step box encloses the active message line, label, and autonumber badge without clipping
+      cy.get('#diagram-container .walkthrough-step-box').then(($box) => {
+        const boxRect = rectOf($box);
+        cy.get('#diagram-container text.sequenceNumber').first().then(($badge) => {
+          expect(rectWithin(rectOf($badge), boxRect)).to.equal(true);
+        });
+        cy.get('#diagram-container [data-et="message"]').first().then(($msg) => {
+          expect(rectWithin(rectOf($msg), boxRect)).to.equal(true);
+        });
+      });
 
       // Step to 2/2 and reload -> restarts at 1/2
       cy.get('[data-testid="walkthrough-next"]').click();

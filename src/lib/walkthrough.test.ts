@@ -661,4 +661,69 @@ describe('per-element personal highlight boxes (activeGroups & renderWalkthrough
     expect(renderWalkthroughStepBoxes(svg, [])).toEqual([]);
     expect(renderWalkthroughStepBoxes(svg, [[]])).toEqual([]);
   });
+
+  it('extends sequence step box bounds across shortened message lines, lifelines, and autonumber circle badges without clipping', () => {
+    // Mermaid shortens x1 (+6px for autonumber) and x2 (-10px for arrowhead + activation)
+    // relative to the participant lifelines at x=50 and x=250.
+    const shortenedSeqSvg = `<svg id="fx-seq-short" aria-roledescription="sequence" viewBox="-50 -10 450 453">
+      <g><line id="actor1" class="actor-line" data-et="life-line" data-id="B" x1="250" y1="50" x2="250" y2="300"></line></g>
+      <g><line id="actor0" class="actor-line" data-et="life-line" data-id="A" x1="50" y1="50" x2="50" y2="300"></line></g>
+      <text class="messageText" x="150" y="80">m1</text>
+      <line class="messageLine0" data-et="message" data-id="i1" data-from="A" data-to="B" x1="56" y1="95" x2="240" y2="95"></line>
+      <text class="sequenceNumber" x="50" y="99">1</text>
+      <text class="messageText" x="50" y="140">self</text>
+      <path class="messageLine0" data-et="message" data-id="i2" data-from="A" data-to="A" d="M 55,155 H 115 V 185 H 55"></path>
+      <text class="sequenceNumber" x="50" y="159">2</text>
+    </svg>`;
+    const code = `sequenceDiagram
+      autonumber
+      participant A
+      participant B
+      A->>+B: m1
+      A->>A: self`;
+    const svg = parseSvgRoot(shortenedSeqSvg);
+    const model = parseModel(code);
+    const plan = buildWalkthroughPlan(code, null)!;
+
+    // Step 0: includes sequenceNumber badge in active & activeGroups, and extends
+    // left of badge (50 - 9 - 10 = 31) and right of B's lifeline (250 + 10 = 260)
+    const step0 = dimTargetsForStep(svg, model, plan, 0);
+    expect(step0.active.some((el) => el.classList.contains('sequenceNumber') && el.textContent === '1')).toBe(true);
+    const bounds0 = computeActiveStepBounds(svg, step0.activeGroups[0])!;
+    expect(bounds0.x).toBeLessThanOrEqual(31);
+    expect(bounds0.x + bounds0.width).toBeGreaterThanOrEqual(260);
+    // Vertically covers below the sequenceNumber circle (95 + 9 + 10 = 114)
+    expect(bounds0.y + bounds0.height).toBeGreaterThanOrEqual(114);
+
+    // Step 1: self-message with H/V commands (H 115 V 185) and lifeline at x=50
+    const step1 = dimTargetsForStep(svg, model, plan, 1);
+    const bounds1 = computeActiveStepBounds(svg, step1.activeGroups[0])!;
+    expect(bounds1.x).toBeLessThanOrEqual(31);
+    expect(bounds1.x + bounds1.width).toBeGreaterThanOrEqual(125);
+    expect(bounds1.y + bounds1.height).toBeGreaterThanOrEqual(195);
+  });
+
+  it('includes arrow animation overlays in activeGroups so step boxes never cut barrier walls or X badges', () => {
+    const raw = `%% CONFIG: {"version":1,"arrows":[{"from":"A","to":"B","label":"m1","animation":"broken-sender"}]}
+${SEQ_CODE}`;
+    const config = parseViewsData(raw);
+    const baseSvg = SEQ_SVG.replace(
+      'data-id="i1" data-from="A" data-to="B"',
+      'data-id="i1" data-from="A" data-to="B" x1="50" y1="95" x2="150" y2="95"',
+    );
+    const styledSvg = applyStyles(baseSvg, SEQ_CODE, config, {}, raw);
+    const svg = parseSvgRoot(styledSvg);
+    const model = parseModel(SEQ_CODE);
+    const plan = buildWalkthroughPlan(SEQ_CODE, config)!;
+
+    const step0 = dimTargetsForStep(svg, model, plan, 0);
+    const group0 = step0.activeGroups[0];
+    expect(group0.some((el) => el.classList.contains('arrow-barrier-wall'))).toBe(true);
+    expect(group0.some((el) => el.classList.contains('arrow-shockwave-burst'))).toBe(true);
+    expect(group0.some((el) => el.classList.contains('arrow-x-mark'))).toBe(true);
+
+    // Barrier wall extends ±12px vertically around y=95 (83..107); with 10px padding, bottom >= 117
+    const bounds0 = computeActiveStepBounds(svg, group0)!;
+    expect(bounds0.y + bounds0.height).toBeGreaterThanOrEqual(117);
+  });
 });

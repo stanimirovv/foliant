@@ -53,6 +53,13 @@ path[data-et="edge"].edge-hover {
   user-select: none;
 }
 
+/* Allow presenter step boxes and arrow glow filters near diagram edges to render without SVG viewport clipping */
+#diagram-container svg,
+.markdown-body .md-mermaid-block svg,
+.markdown-body .md-mermaid-svg svg {
+  overflow: visible;
+}
+
 /* --- Mermaid Animated Arrows (6 styles) --- */
 @keyframes mermaid-arrow-flow {
   from { stroke-dashoffset: 28; }
@@ -134,7 +141,7 @@ path[data-et="edge"].edge-hover {
 .arrow-anim-pulse {
   stroke-dasharray: none !important;
   opacity: 0.65 !important;
-  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 7px currentColor);
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 7px currentColor) !important;
 }
 
 /* Happy Path 2: Traveling Neon Orb packet runner */
@@ -568,7 +575,7 @@ path[data-et="edge"].edge-hover {
   opacity: 1;
 }
 .walkthrough-active {
-  filter: none;
+  opacity: 1;
 }
 @keyframes walkthrough-step-dash {
   from {

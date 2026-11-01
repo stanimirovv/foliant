@@ -394,7 +394,10 @@ function extractMessageOriginCoords(
       }
     }
   }
-  const lifeline = svg.querySelector(`line.actor-line[data-id="${fromId}"]`);
+  const actorId = el.getAttribute('data-from') || fromId;
+  const lifeline = Array.from(svg.querySelectorAll('line.actor-line[data-id]')).find(
+    (l) => l.getAttribute('data-id') === actorId,
+  );
   if (lifeline) {
     const lx = parseFloat(lifeline.getAttribute('x1') ?? '');
     if (!Number.isNaN(lx)) x = lx;
@@ -485,15 +488,25 @@ export function dimTargetsForStep(
       if (msgIdxByKey.has(key)) {
         const idx = msgIdxByKey.get(key)!;
         const el = zip.messages[idx];
+        if (!el) continue;
         pushUnique(active, el);
-        // Include ALL wrapped label lines so the green step box encompasses
-        // the full multi-line label, not just the line nearest the arrow.
-        // The arrow and its label lines form the message's ONE personal box.
+        // Include ALL wrapped label lines, the autonumber sequence badge, and
+        // any arrow animation overlays so the green step box encompasses the
+        // full message visual without clipping its edges.
         const group: Element[] = [];
         pushUnique(group, el);
         for (const t of allMessageLabelElements(svg, model, key)) {
           pushUnique(group, t);
           pushUnique(active, t);
+        }
+        const badge = findSequenceNumberBadge(svg, el, messages[idx].from);
+        if (badge) {
+          pushUnique(group, badge);
+          pushUnique(active, badge);
+        }
+        for (const ov of collectArrowOverlays(el)) {
+          pushUnique(group, ov);
+          pushUnique(active, ov);
         }
         if (group.length > 0) activeGroups.push(group);
       }
@@ -560,11 +573,15 @@ export function dimTargetsForStep(
         if (!path) continue;
         pushUnique(active, path);
         const dataId = path.getAttribute('data-id');
-        // The edge path and its label form the edge's ONE personal box.
+        // The edge path, its label, and its arrow overlays form the edge's ONE personal box.
         const group: Element[] = [path];
         for (const lab of findEdgeLabelElements(dataId)) {
           pushUnique(group, lab);
           pushUnique(active, lab);
+        }
+        for (const ov of collectArrowOverlays(path)) {
+          pushUnique(group, ov);
+          pushUnique(active, ov);
         }
         activeGroups.push(group);
       }
@@ -616,39 +633,122 @@ function getElementLocalBounds(
     if ((el.textContent ?? '').trim() === '') return null;
   }
 
+  if (el.classList.contains('sequenceNumber')) {
+    const bx = parseFloat(el.getAttribute('x') ?? '');
+    const by = parseFloat(el.getAttribute('y') ?? '');
+    if (!Number.isNaN(bx) && !Number.isNaN(by)) {
+      // Mermaid places text.sequenceNumber at (autonumberX, lineY + 4) with
+      // text-anchor="middle" over a circular marker of radius ~9px centered
+      // at (autonumberX, lineY). SVG getBBox() omits the <marker> circle.
+      const cy = by - 4;
+      const r = 9;
+      return {
+        minX: bx - r,
+        minY: cy - r,
+        maxX: bx + r,
+        maxY: cy + r,
+      };
+    }
+  }
+
+  if (el.classList.contains('arrow-x-mark')) {
+    return { minX: -9, minY: -9, maxX: 9, maxY: 9 };
+  }
+
   const tag = el.tagName.toLowerCase();
+  if (tag === 'circle') {
+    const cx = parseFloat(el.getAttribute('cx') ?? '');
+    const cy = parseFloat(el.getAttribute('cy') ?? '');
+    const r = parseFloat(el.getAttribute('r') ?? '');
+    if (!Number.isNaN(cx) && !Number.isNaN(cy) && !Number.isNaN(r)) {
+      return {
+        minX: cx - r,
+        minY: cy - r,
+        maxX: cx + r,
+        maxY: cy + r,
+      };
+    }
+  }
+
   if (tag === 'line') {
     const x1 = parseFloat(el.getAttribute('x1') ?? '');
     const y1 = parseFloat(el.getAttribute('y1') ?? '');
     const x2 = parseFloat(el.getAttribute('x2') ?? '');
     const y2 = parseFloat(el.getAttribute('y2') ?? '');
     if (!Number.isNaN(x1) && !Number.isNaN(y1) && !Number.isNaN(x2) && !Number.isNaN(y2)) {
-      return {
-        minX: Math.min(x1, x2),
-        minY: Math.min(y1, y2),
-        maxX: Math.max(x1, x2),
-        maxY: Math.max(y1, y2),
-      };
+      let minX = Math.min(x1, x2);
+      const minY = Math.min(y1, y2);
+      let maxX = Math.max(x1, x2);
+      const maxY = Math.max(y1, y2);
+      // Mermaid shortens sequence message <line> endpoints inward from the
+      // participant lifelines to leave room for arrowhead markers, activation
+      // boxes, and autonumber circles. Extend minX/maxX to the sender/receiver
+      // lifelines so the step box padding is measured from the full arrow span.
+      if (el.getAttribute('data-et') === 'message') {
+        const svg = el.closest('svg');
+        if (svg) {
+          for (const attr of ['data-from', 'data-to']) {
+            const actorId = el.getAttribute(attr);
+            if (!actorId) continue;
+            const lifeline = Array.from(svg.querySelectorAll('line.actor-line[data-id]')).find(
+              (l) => l.getAttribute('data-id') === actorId,
+            );
+            const lx = parseFloat(lifeline?.getAttribute('x1') ?? '');
+            if (!Number.isNaN(lx)) {
+              if (lx < minX) minX = lx;
+              if (lx > maxX) maxX = lx;
+            }
+          }
+        }
+      }
+      return { minX, minY, maxX, maxY };
     }
   }
 
   if (tag === 'path') {
     const d = el.getAttribute('d');
     if (d) {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
       const pairs = Array.from(d.matchAll(/(-?\d+(?:\.\d+)?)[ ,]+(-?\d+(?:\.\d+)?)/g));
-      if (pairs.length > 0) {
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
-        for (const p of pairs) {
-          const px = parseFloat(p[1]);
-          const py = parseFloat(p[2]);
-          if (px < minX) minX = px;
-          if (px > maxX) maxX = px;
-          if (py < minY) minY = py;
-          if (py > maxY) maxY = py;
+      for (const p of pairs) {
+        const px = parseFloat(p[1]);
+        const py = parseFloat(p[2]);
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+      }
+      for (const h of d.matchAll(/H\s*(-?\d+(?:\.\d+)?)/g)) {
+        const hx = parseFloat(h[1]);
+        if (hx < minX) minX = hx;
+        if (hx > maxX) maxX = hx;
+      }
+      for (const v of d.matchAll(/V\s*(-?\d+(?:\.\d+)?)/g)) {
+        const vy = parseFloat(v[1]);
+        if (vy < minY) minY = vy;
+        if (vy > maxY) maxY = vy;
+      }
+      if (el.getAttribute('data-et') === 'message') {
+        const svg = el.closest('svg');
+        if (svg) {
+          for (const attr of ['data-from', 'data-to']) {
+            const actorId = el.getAttribute(attr);
+            if (!actorId) continue;
+            const lifeline = Array.from(svg.querySelectorAll('line.actor-line[data-id]')).find(
+              (l) => l.getAttribute('data-id') === actorId,
+            );
+            const lx = parseFloat(lifeline?.getAttribute('x1') ?? '');
+            if (!Number.isNaN(lx)) {
+              if (lx < minX) minX = lx;
+              if (lx > maxX) maxX = lx;
+            }
+          }
         }
+      }
+      if (Number.isFinite(minX) && Number.isFinite(minY)) {
         return { minX, minY, maxX, maxY };
       }
     }
