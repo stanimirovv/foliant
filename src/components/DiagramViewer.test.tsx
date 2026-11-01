@@ -2785,5 +2785,29 @@ describe('DiagramViewer — presentation mode (walkthrough player)', () => {
     // Right-drag does not select the participant
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it('pans/zooms to the requested element when focusRequest is provided', async () => {
+    const { container, rerender } = render(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        editMode={true}
+        focusRequest={null}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('#diagram-container svg')).toBeTruthy());
+
+    rerender(
+      <DiagramViewer
+        code={SEQ_CODE}
+        searchQuery=""
+        theme="default"
+        editMode={true}
+        focusRequest={{ key: 'p:1', seq: 1 }}
+      />,
+    );
+    expect(container.querySelector('g[data-et="participant"][data-id="B"]')).toBeTruthy();
+  });
 });
 

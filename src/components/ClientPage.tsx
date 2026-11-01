@@ -6,12 +6,14 @@ import DiagramViewer from './DiagramViewer';
 import EditorPanel from './EditorPanel';
 import MarkdownEditor from './MarkdownEditor';
 import SourceCodePanel from './SourceCodePanel';
+import CanvasContextToolbar from './CanvasContextToolbar';
+import CommandPalette from './CommandPalette';
 import { processMermaid, transformActors, buildActorRewriteMap, ActorTransformOptions, isPathHidden } from '@/lib/preprocessor';
 import { extractRegions, RegionNode } from '@/lib/parser';
-import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen, AlertTriangle, Globe } from 'lucide-react';
+import { Search, Moon, Sun, Folder, Save, Trash2, Play, Pencil, UserPlus, MessageSquarePlus, MessageSquareWarning, Undo2, Redo2, Plus, Copy, Check, StickyNote as StickyNoteIcon, Columns, Sliders, Code, Download, ArrowDownUp, ArrowLeft, ListOrdered, FileText, RotateCcw, PanelRightClose, PanelRightOpen, AlertTriangle, Globe, Command, Image as ImageIcon } from 'lucide-react';
 import { parseViewsData, updateViewsData, collectAvailableKeys, DiagramConfig, SavedView, ArrowKeyMode, ArrowAnimationType, addStickyNote, updateStickyNote, deleteStickyNote, StickyNote } from '@/lib/views';
 import { applyMarkdownViewState, DiagramViewSelection, parseMarkdownViewStates } from '@/lib/diagramView';
-import { parseModel, ModelElement, MessageElement, EdgeElement, NodeShape, ParticipantType, StickyNoteElement, NotePlacement, BlockType } from '@/lib/model';
+import { parseModel, ModelElement, ParticipantElement, NodeElement, MessageElement, EdgeElement, NodeShape, ParticipantType, StickyNoteElement, NotePlacement, BlockType } from '@/lib/model';
 import { computeLineDiff } from '@/lib/sourceDiff';
 import mermaid from 'mermaid';
 import {
@@ -29,7 +31,7 @@ import { formatRecentDir } from '@/lib/recentDirs';
 import { buildSelectionMap } from '@/lib/svgmap';
 import { buildSubgraphTagIndex } from '@/lib/subgraphTags';
 import { rewriteArrowStyles, ANIMATED_ARROW_PRESETS, ANIMATED_ARROW_COLORS } from '@/lib/styling';
-import { exportSvgToFile } from '@/lib/svgExport';
+import { exportSvgToFile, exportPngToFile, copyPngToClipboard } from '@/lib/svgExport';
 import { PendingDelete } from './EditorPanel';
 import type { MdDiagramMeta } from '@/lib/markdownTypes';
 import { createSerialQueue } from '@/lib/serialQueue';
@@ -1684,6 +1686,9 @@ export default function ClientPage() {
   }, [historyPast, historyFuture, rawCode, updateChangedLines]);
 
   const [copied, setCopied] = useState(false);
+  const [pngCopied, setPngCopied] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [focusRequest, setFocusRequest] = useState<{ key: string; seq: number } | null>(null);
 
   const handleCopyMermaid = async () => {
     const codeToCopy = isViewActive ? viewCode : rawCode;
@@ -1721,6 +1726,56 @@ export default function ClientPage() {
       fileName: currentFile,
     });
   }, [currentFile, visibleStickyNotes, showNotes, isDark]);
+
+  const handleExportPng = useCallback(async () => {
+    const container = document.getElementById('diagram-container');
+    if (!container) return;
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+
+    await exportPngToFile(svg, {
+      notes: visibleStickyNotes,
+      showNotes,
+      isDark,
+      fileName: currentFile,
+    });
+  }, [currentFile, visibleStickyNotes, showNotes, isDark]);
+
+  const handleCopyPng = useCallback(async () => {
+    const container = document.getElementById('diagram-container');
+    if (!container) return;
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+
+    const ok = await copyPngToClipboard(svg, {
+      notes: visibleStickyNotes,
+      showNotes,
+      isDark,
+      fileName: currentFile,
+    });
+    if (ok) {
+      setPngCopied(true);
+      setTimeout(() => setPngCopied(false), 2000);
+    }
+  }, [currentFile, visibleStickyNotes, showNotes, isDark]);
+
+  const handleJumpToElement = useCallback((rawKey: string) => {
+    setSelectedKeys([rawKey]);
+    const processedKey = rawToProcessed.get(rawKey) ?? rawKey;
+    setFocusRequest(prev => ({ key: processedKey, seq: (prev?.seq ?? 0) + 1 }));
+  }, [rawToProcessed]);
+
+  // Cmd+K / Ctrl+K opens or closes the Command Palette from anywhere.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Ctrl+Z / Ctrl+Y, plus the macOS-standard redo Cmd/Ctrl+Shift+Z
   // (Section 4.11). Inside text fields the native input undo wins; the
@@ -1762,6 +1817,10 @@ export default function ClientPage() {
   const selectedComponent = selectedRawElement && (selectedRawElement.kind === 'participant' || selectedRawElement.kind === 'node')
     ? selectedRawElement
     : null;
+  const selectedComponents = useMemo(
+    () => selectedRawElements.filter((e): e is ParticipantElement | NodeElement => e.kind === 'participant' || e.kind === 'node'),
+    [selectedRawElements]
+  );
   const selectedArrow = selectedRawElement && (selectedRawElement.kind === 'message' || selectedRawElement.kind === 'edge')
     ? selectedRawElement
     : null;
@@ -1869,6 +1928,19 @@ export default function ClientPage() {
 
     if (selectedComponent) {
       applyEditResult(setActorColor(rawCode, viewsData, selectedComponent.key, color));
+    } else if (selectedComponents.length > 0 && selectedArrows.length === 0) {
+      let currentCode = rawCode;
+      let currentConfig = viewsData;
+      for (const comp of selectedComponents) {
+        const res = setActorColor(currentCode, currentConfig, comp.key, color);
+        if (res.warning) {
+          setEditWarning(res.warning);
+          return;
+        }
+        currentCode = res.code;
+        currentConfig = res.config;
+      }
+      applyEditResult({ code: currentCode, config: currentConfig });
     } else if (selectedArrows.length > 0) {
       let currentCode = rawCode;
       let currentConfig = viewsData;
@@ -3178,8 +3250,33 @@ export default function ClientPage() {
               <Download size={14} />
               <span>Export SVG</span>
             </button>
+            <button
+              onClick={handleCopyPng}
+              disabled={!rawCode}
+              title="Copy high-DPI PNG to clipboard"
+              data-testid="copy-png-btn"
+              className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                isDark ? 'border-slate-700 text-slate-200' : 'border-gray-200'
+              } ${
+                !rawCode ? 'opacity-40 cursor-not-allowed' : (isDark ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
+              }`}
+            >
+              {pngCopied ? <Check size={14} className="text-green-500" /> : <ImageIcon size={14} />}
+              <span>{pngCopied ? 'PNG Copied' : 'Copy PNG'}</span>
+            </button>
             </>
             )}
+            <button
+              onClick={() => setIsCommandPaletteOpen(true)}
+              title="Command Palette (Cmd+K / Ctrl+K)"
+              data-testid="command-palette-trigger"
+              className={`flex items-center space-x-1 px-2 py-1 text-xs rounded border transition-colors ${
+                isDark ? 'border-slate-700 text-slate-200 hover:bg-slate-800' : 'border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              <Command size={13} />
+              <span>⌘K</span>
+            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-shrink-0 ml-auto">
             {isEmbeddedDiagram && diagramIndex !== null && (
@@ -3291,37 +3388,66 @@ export default function ClientPage() {
                 onDiagramScrolled={handleDiagramScrolled}
               />
             ) : (
-              <DiagramViewer
-                code={processedCode}
-                searchQuery={searchQuery}
-                theme={theme}
-                editMode={editMode}
-                isVisualLocked={isVisualLocked}
-                presentation={presentation}
-                onExitPresentation={() => {
-                  if (presentation) {
-                    const params = new URLSearchParams(searchParams.toString());
-                    params.delete('present');
-                    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-                  }
-                }}
-                arrowStyles={resolvedArrowStyles}
-                nodeColors={viewsData}
-                selection={processedSelection}
-                onSelect={handleSelect}
-                onMoveParticipant={handleMoveParticipant}
-                onCreateMessageDrag={handleCreateMessageDrag}
-                onMoveMessageEndpoint={handleMoveMessageEndpoint}
-                onMoveEdgeEndpoint={handleMoveEdgeEndpoint}
-                onMoveMessage={handleMoveMessage}
-                notes={visibleStickyNotes}
-                showNotes={showNotes}
-                selectedNoteIds={selectedNoteIds}
-                onSelectNote={handleSelectNote}
-                onUpdateNote={handleUpdateNote}
-                onDeleteNote={handleDeleteNote}
-                onLabelEdit={handleInlineLabelEdit}
-              />
+              <>
+                <DiagramViewer
+                  code={processedCode}
+                  searchQuery={searchQuery}
+                  theme={theme}
+                  editMode={editMode}
+                  isVisualLocked={isVisualLocked}
+                  presentation={presentation}
+                  onExitPresentation={() => {
+                    if (presentation) {
+                      const params = new URLSearchParams(searchParams.toString());
+                      params.delete('present');
+                      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                    }
+                  }}
+                  arrowStyles={resolvedArrowStyles}
+                  nodeColors={viewsData}
+                  selection={processedSelection}
+                  onSelect={handleSelect}
+                  onMoveParticipant={handleMoveParticipant}
+                  onCreateMessageDrag={handleCreateMessageDrag}
+                  onMoveMessageEndpoint={handleMoveMessageEndpoint}
+                  onMoveEdgeEndpoint={handleMoveEdgeEndpoint}
+                  onMoveMessage={handleMoveMessage}
+                  notes={visibleStickyNotes}
+                  showNotes={showNotes}
+                  selectedNoteIds={selectedNoteIds}
+                  onSelectNote={handleSelectNote}
+                  onUpdateNote={handleUpdateNote}
+                  onDeleteNote={handleDeleteNote}
+                  onLabelEdit={handleInlineLabelEdit}
+                  focusRequest={focusRequest}
+                />
+                {editMode && !isVisualLocked && !presentation && selectedRawElements.length > 0 && (
+                  <CanvasContextToolbar
+                    selectedElements={selectedRawElements}
+                    diagramType={rawModel.type}
+                    theme={theme}
+                    config={viewsData}
+                    arrowStyle={selectedArrowStyle}
+                    wrapChecks={wrapChecks}
+                    onSetColor={handleSetColor}
+                    onSetType={handleSetType}
+                    onSetDash={handleSetDash}
+                    onSetAnimation={handleSetAnimation}
+                    onSetParticipantKind={handleSetParticipantKind}
+                    onSetNodeShape={handleSetNodeShape}
+                    onAddSequenceNote={rawModel.type === 'sequence' ? handleAddSequenceNote : undefined}
+                    onSetNotePlacement={handleSetNotePlacement}
+                    onSetBlockType={handleSetBlockType}
+                    onUnwrapBlock={handleUnwrapBlock}
+                    onUpdateStickyNote={handleUpdateNote}
+                    onGroupParticipants={handleGroupParticipants}
+                    onGroupNodes={handleGroupNodes}
+                    onWrapInBlock={handleWrapInBlock}
+                    onWrapInRegion={handleWrapInRegion}
+                    onRequestDelete={handleRequestDelete}
+                  />
+                )}
+              </>
             )}
           </div>
           {editMode && isSidebarVisible && (
@@ -3541,6 +3667,98 @@ export default function ClientPage() {
           )}
         </div>
       </div>
+
+      <CommandPalette
+        open={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        theme={theme}
+        files={files}
+        markdownFiles={markdownFiles}
+        mdDiagrams={mdDiagrams}
+        currentFile={currentFile}
+        diagramIndex={diagramIndex}
+        elements={componentElements as (ParticipantElement | NodeElement)[]}
+        views={viewsData?.views ?? []}
+        activeViewName={selectedViewName}
+        isDefaultViewActive={isDefaultViewActive}
+        availableKeys={availableKeys}
+        hideKeys={hideKeys}
+        mergeKeys={mergeKeys}
+        isMarkdownDoc={isMarkdownDoc}
+        editMode={editMode}
+        isSidebarVisible={isSidebarVisible}
+        isSplitView={isSplitView}
+        presentation={presentation}
+        onSelectFile={(file, diagIdx) => {
+          if (typeof diagIdx === 'number') {
+            selectMarkdownDiagram(file, diagIdx);
+          } else if (/\.(md|markdown)$/i.test(file)) {
+            selectMarkdownFile(file);
+          } else {
+            const params = new URLSearchParams(searchParams.toString());
+            params.set('file', file);
+            params.delete('diagram');
+            router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+          }
+        }}
+        onJumpToElement={handleJumpToElement}
+        onSelectView={(view) => {
+          if (view === null) {
+            deselectView();
+          } else {
+            loadView(view);
+          }
+        }}
+        onSetTagState={(key, state) => setActorState(key, state)}
+        onCopyPng={handleCopyPng}
+        onExportPng={handleExportPng}
+        onExportSvg={handleExportSvg}
+        onCopyMermaid={handleCopyMermaid}
+        onToggleEditMode={toggleEditMode}
+        onToggleSidebar={toggleSidebarVisibility}
+        onToggleSplitView={() => setIsSplitView(prev => !prev)}
+        onToggleTheme={() => {
+          const params = new URLSearchParams(searchParams.toString());
+          params.set('theme', theme === 'dark' ? 'default' : 'dark');
+          router.replace(`${pathname}?${params.toString()}`);
+        }}
+        onTogglePresentation={() => {
+          const params = new URLSearchParams(searchParams.toString());
+          if (presentation) params.delete('present');
+          else params.set('present', '1');
+          router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+        }}
+        onAddParticipant={handleAddParticipant}
+        onAddStickyNote={handleAddNote}
+      />
+
+      {!isSidebarVisible && pendingDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          data-testid="delete-dialog"
+        >
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg shadow-xl p-4 w-80">
+            <h3 className="text-sm font-semibold mb-2">
+              Delete selected element?
+            </h3>
+            <div className="flex justify-end space-x-2">
+              <button
+                onClick={handleCancelDelete}
+                className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                data-testid="confirm-delete"
+                className="px-2 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700 font-medium"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pendingNew && (
         <NewDiagramDialog

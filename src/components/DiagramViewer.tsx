@@ -63,6 +63,9 @@ interface DiagramViewerProps {
   // Double-click inline label editing: reports the processed key of the
   // double-clicked participant/node/message/edge and the edited label.
   onLabelEdit?: (key: string, label: string) => void;
+  // Optional focus request (e.g. from Cmd+K Command Palette) to pan/center a
+  // processed element key on the canvas.
+  focusRequest?: { key: string; seq: number } | null;
 }
 
 // Minimum mouse movement (px) before a press becomes a drag.
@@ -429,6 +432,7 @@ export default function DiagramViewer({
   onUpdateNote,
   onDeleteNote,
   onLabelEdit,
+  focusRequest = null,
 }: DiagramViewerProps) {
   const [svgStr, setSvgStr] = useState<string>('');
   // Memoized so the object identity is stable across re-renders while svgStr
@@ -791,6 +795,19 @@ export default function DiagramViewer({
       return (prev + delta + searchMatches.length) % searchMatches.length;
     });
   };
+
+  // Focus/center an element on the canvas when requested (e.g. from Cmd+K).
+  useEffect(() => {
+    if (!focusRequest || !svgStr) return;
+    const container = document.getElementById('diagram-container');
+    const svgRoot = container?.querySelector('svg');
+    if (!svgRoot) return;
+    const model = parseModel(code);
+    const target = svgElementForKey(svgRoot, model, focusRequest.key);
+    if (!target) return;
+    const scale = Math.min(Math.max(zoomScaleRef.current, 1), MAX_ZOOM_SCALE);
+    transformRef.current?.zoomToElement(target as unknown as HTMLElement, { scale, animationTime: 250 });
+  }, [focusRequest, svgStr, code]);
 
   // Fit the whole diagram into the viewport: shrink it when it is larger than
   // the canvas (huge diagrams), but never zoom in past the default 100% view

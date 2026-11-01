@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { prepareSvgForExport, exportSvgToFile, STICKY_NOTE_HEX } from './svgExport';
+import {
+  prepareSvgForExport,
+  exportSvgToFile,
+  renderSvgToPngBlob,
+  exportPngToFile,
+  copyPngToClipboard,
+  STICKY_NOTE_HEX,
+} from './svgExport';
 import { StickyNote } from './views';
 
 describe('svgExport', () => {
@@ -334,6 +341,117 @@ describe('svgExport', () => {
       manLines.forEach((l) => {
         expect(l.getAttribute('stroke')).toBe('#28253D');
       });
+    });
+  });
+
+  describe('PNG export and clipboard copy', () => {
+    const origImage = globalThis.Image;
+    const origClipboardItem = globalThis.ClipboardItem;
+    let mockCtx: { scale: ReturnType<typeof vi.fn>; drawImage: ReturnType<typeof vi.fn> };
+    let createdCanvasWidth = 0;
+    let createdCanvasHeight = 0;
+
+    beforeEach(() => {
+      mockCtx = {
+        scale: vi.fn(),
+        drawImage: vi.fn(),
+      };
+      const origCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+        const el = origCreateElement(tagName, options);
+        if (tagName.toLowerCase() === 'canvas') {
+          const canvas = el as HTMLCanvasElement;
+          Object.defineProperty(canvas, 'getContext', {
+            value: vi.fn(() => mockCtx),
+          });
+          Object.defineProperty(canvas, 'toBlob', {
+            value: vi.fn((cb: (blob: Blob | null) => void) => {
+              createdCanvasWidth = canvas.width;
+              createdCanvasHeight = canvas.height;
+              cb(new Blob(['png-bytes'], { type: 'image/png' }));
+            }),
+          });
+        }
+        return el;
+      }) as typeof document.createElement);
+
+      class MockImage {
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        private _src = '';
+        get src() {
+          return this._src;
+        }
+        set src(val: string) {
+          this._src = val;
+          setTimeout(() => {
+            if (this.onload) this.onload();
+          }, 0);
+        }
+      }
+      globalThis.Image = MockImage as unknown as typeof Image;
+    });
+
+    afterEach(() => {
+      globalThis.Image = origImage;
+      globalThis.ClipboardItem = origClipboardItem;
+      vi.restoreAllMocks();
+    });
+
+    it('renderSvgToPngBlob rasterizes SVG at 2x default scale', async () => {
+      const svg = createSvgElement(); // viewBox="0 0 500 400"
+      const blob = await renderSvgToPngBlob(svg, { isDark: true });
+      expect(blob.type).toBe('image/png');
+      expect(createdCanvasWidth).toBe(1000);
+      expect(createdCanvasHeight).toBe(800);
+      expect(mockCtx.scale).toHaveBeenCalledWith(2, 2);
+      expect(mockCtx.drawImage).toHaveBeenCalledTimes(1);
+    });
+
+    it('exportPngToFile downloads a .png file with baseName', async () => {
+      const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:http://localhost/png');
+      const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      const svg = createSvgElement();
+      const ok = await exportPngToFile(svg, { fileName: 'checkout-flow.mmd', scale: 3 });
+      expect(ok).toBe(true);
+      expect(createdCanvasWidth).toBe(1500);
+      expect(createdCanvasHeight).toBe(1200);
+      expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURLSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('copyPngToClipboard writes a ClipboardItem with image/png blob', async () => {
+      const writeMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { write: writeMock },
+        configurable: true,
+      });
+      class MockClipboardItem {
+        items: Record<string, Blob>;
+        constructor(items: Record<string, Blob>) {
+          this.items = items;
+        }
+      }
+      globalThis.ClipboardItem = MockClipboardItem as unknown as typeof ClipboardItem;
+
+      const svg = createSvgElement();
+      const ok = await copyPngToClipboard(svg, { isDark: false });
+      expect(ok).toBe(true);
+      expect(writeMock).toHaveBeenCalledTimes(1);
+      const writtenItem = writeMock.mock.calls[0][0][0] as MockClipboardItem;
+      expect(writtenItem.items['image/png']).toBeInstanceOf(Blob);
+    });
+
+    it('copyPngToClipboard returns false gracefully when clipboard.write is unavailable', async () => {
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {},
+        configurable: true,
+      });
+      const svg = createSvgElement();
+      const ok = await copyPngToClipboard(svg);
+      expect(ok).toBe(false);
+      expect(errSpy).toHaveBeenCalled();
     });
   });
 });

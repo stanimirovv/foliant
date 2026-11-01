@@ -8,6 +8,7 @@ export interface SvgExportOptions {
   showNotes?: boolean;
   isDark?: boolean;
   fileName?: string | null;
+  scale?: number;
 }
 
 export const STICKY_NOTE_HEX: Record<StickyNoteColor, {
@@ -531,6 +532,123 @@ export function exportSvgToFile(svgElement: SVGElement, options: SvgExportOption
     return true;
   } catch (err) {
     console.error('Failed to export SVG:', err);
+    return false;
+  }
+}
+
+/**
+ * Rasterizes the exported SVG into a high-DPI PNG Blob (default 2x scale).
+ */
+export async function renderSvgToPngBlob(
+  svgElement: SVGElement,
+  options: SvgExportOptions = {},
+): Promise<Blob> {
+  const scale = options.scale && options.scale > 0 ? options.scale : 2;
+  const source = prepareSvgForExport(svgElement, options);
+
+  // Extract viewBox dimensions from the prepared SVG so the rasterized canvas
+  // has exact pixel dimensions even when Mermaid sets width="100%" on <svg>.
+  let width = 800;
+  let height = 600;
+  const vbMatch = source.match(/viewBox=["']([^"']+)["']/);
+  if (vbMatch) {
+    const parts = vbMatch[1].trim().split(/[\s,]+/).map(Number);
+    if (parts.length === 4 && parts.every((n) => Number.isFinite(n)) && parts[2] > 0 && parts[3] > 0) {
+      width = parts[2];
+      height = parts[3];
+    }
+  }
+
+  // Ensure the root <svg> element has explicit numeric width/height for Image decoding
+  const sizedSource = source.replace(/<svg\b([^>]*)>/, (_full, attrs: string) => {
+    const cleaned = attrs
+      .replace(/\s+width=["'][^"']*["']/g, '')
+      .replace(/\s+height=["'][^"']*["']/g, '')
+      .replace(/max-width:\s*[^;"']+;?/g, '');
+    return `<svg${cleaned} width="${width}" height="${height}">`;
+  });
+
+  const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sizedSource)}`;
+
+  return new Promise<Blob>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not acquire 2D canvas context for PNG export'));
+          return;
+        }
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Canvas toBlob returned null'));
+          }
+        }, 'image/png');
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+    img.onerror = () => {
+      reject(new Error('Failed to load serialized SVG into Image for PNG rasterization'));
+    };
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Triggers a browser download of the diagram as a high-DPI PNG file.
+ */
+export async function exportPngToFile(
+  svgElement: SVGElement,
+  options: SvgExportOptions = {},
+): Promise<boolean> {
+  try {
+    const blob = await renderSvgToPngBlob(svgElement, options);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const baseName = options.fileName ? options.fileName.replace(/\.[^/.]+$/, '') : 'diagram';
+    link.href = url;
+    link.download = `${baseName}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (err) {
+    console.error('Failed to export PNG:', err);
+    return false;
+  }
+}
+
+/**
+ * Copies the diagram as a high-DPI PNG image onto the system clipboard.
+ */
+export async function copyPngToClipboard(
+  svgElement: SVGElement,
+  options: SvgExportOptions = {},
+): Promise<boolean> {
+  try {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.clipboard ||
+      typeof navigator.clipboard.write !== 'function' ||
+      typeof ClipboardItem === 'undefined'
+    ) {
+      throw new Error('Clipboard image writing is not supported in this browser environment');
+    }
+    const blob = await renderSvgToPngBlob(svgElement, options);
+    const item = new ClipboardItem({ 'image/png': blob });
+    await navigator.clipboard.write([item]);
+    return true;
+  } catch (err) {
+    console.error('Failed to copy PNG to clipboard:', err);
     return false;
   }
 }

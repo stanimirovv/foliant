@@ -52,6 +52,7 @@ vi.mock('./DiagramViewer', () => ({
     onLabelEdit?: (key: string, label: string) => void;
     presentation?: boolean;
     onExitPresentation?: () => void;
+    focusRequest?: { key: string; seq: number } | null;
   }) => (
     <div
       data-testid="diagram-viewer"
@@ -61,6 +62,7 @@ vi.mock('./DiagramViewer', () => ({
       data-visual-locked={String(props.isVisualLocked ?? false)}
       data-presentation={String(props.presentation ?? false)}
       data-selection={Array.isArray(props.selection) ? props.selection.join(',') : (props.selection ?? '')}
+      data-focus-key={props.focusRequest?.key ?? ''}
     >
       <svg data-testid="mock-diagram-svg" viewBox="0 0 100 100"><text>Diagram</text></svg>
       <button data-testid="mock-exit-presentation" onClick={() => props.onExitPresentation?.()}>exit presentation</button>
@@ -4534,6 +4536,79 @@ describe('ClientPage — adding sticky note in visible screen section', () => {
       expect(screenTop).toBeGreaterThanOrEqual(80);
       expect(screenBottom).toBeLessThanOrEqual(680);
     });
+  });
+});
+
+describe('ClientPage — floating on-canvas context toolbar & Cmd+K command palette', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('shows floating context toolbar on element selection and applies quick actions even when sidebar is hidden', async () => {
+    currentMockParams = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    mockFetchWithFile('sequenceDiagram\n    participant A\n    participant B\n    A->>B: Ping\n    B-->>A: Pong');
+
+    render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => expect(viewer.getAttribute('data-code')).toContain('A->>B: Ping'));
+
+    // Hide the right properties sidebar via Tab
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(screen.queryByTestId('editor-sidebar')).toBeNull();
+
+    // Select participant p:0 -> floating context toolbar appears on the canvas
+    fireEvent.click(screen.getByTestId('select-p:0'));
+    const ctxToolbar = await screen.findByTestId('canvas-context-toolbar');
+    expect(ctxToolbar).toBeTruthy();
+    expect(screen.getByTestId('ctx-element-badge').textContent).toBe('A');
+
+    // Change participant kind to 'actor' from the floating toolbar
+    fireEvent.change(screen.getByTestId('ctx-participant-kind'), { target: { value: 'actor' } });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('actor A');
+    });
+
+    // Select arrow m:0 -> floating context toolbar switches to arrow controls
+    fireEvent.click(screen.getByTestId('select-m:0'));
+    expect(screen.getByTestId('ctx-arrow-operator')).toBeTruthy();
+    fireEvent.change(screen.getByTestId('ctx-arrow-operator'), { target: { value: '-->>' } });
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('A-->>B: Ping');
+    });
+
+    // Shift-select m:1 as well -> multi-select floating toolbar shows 2 selected + wrap buttons
+    fireEvent.click(screen.getByTestId('select-m:1'), { shiftKey: true });
+    expect(screen.getByTestId('ctx-multi-count').textContent).toBe('2 selected');
+    fireEvent.click(screen.getByTestId('ctx-wrap-block-loop'));
+    await waitFor(() => {
+      expect(viewer.getAttribute('data-code')).toContain('loop');
+    });
+  });
+
+  it('opens Command Palette with Cmd+K, filters commands, and jumps to a participant on Enter', async () => {
+    currentMockParams = { file: 'demo.mmd', edit: '1' };
+    mockGet.mockImplementation((key: string) => currentMockParams[key] ?? null);
+    mockFetchWithFile('sequenceDiagram\n    participant A as Alice\n    participant B as Bob\n    A->>B: Ping');
+
+    render(<ClientPage />);
+    const viewer = await screen.findByTestId('diagram-viewer');
+    await waitFor(() => expect(viewer.getAttribute('data-code')).toContain('Alice'));
+
+    // Press Cmd+K
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const palette = await screen.findByTestId('command-palette');
+    expect(palette).toBeTruthy();
+
+    const input = screen.getByTestId('command-palette-input');
+    fireEvent.change(input, { target: { value: 'Bob' } });
+    expect(screen.getByTestId('cmd-jump-B')).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    // Command palette closes, B (p:1) is selected and focusRequest is sent to DiagramViewer
+    expect(screen.queryByTestId('command-palette')).toBeNull();
+    expect(viewer.getAttribute('data-selection')).toBe('p:1');
+    expect(viewer.getAttribute('data-focus-key')).toBe('p:1');
   });
 });
 
