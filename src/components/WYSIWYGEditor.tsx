@@ -83,6 +83,7 @@ export default function WYSIWYGEditor({
   const handleInsertDiagram = useCallback((position: number, type: DiagramInsertType) => {
     const { code: newCode, diagramIndex } = insertMermaidBlock(code, position, type);
     setOpenInsertMenu(null);
+    setPendingInsert(null);
     onMarkdownEdit(newCode);
     onSelectDiagram(diagramIndex);
   }, [code, onMarkdownEdit, onSelectDiagram]);
@@ -99,9 +100,11 @@ export default function WYSIWYGEditor({
     setPendingInsert(null);
   }, []);
 
-  // Clicking the container background (not a block) dismisses a pending
-  // insert and closes any open insert menu.
-  const handleBackgroundClick = () => {
+  // Clicking the container background (not a block or insert row) dismisses a
+  // pending insert and closes any open insert menu.
+  const handleBackgroundClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest('.wysiwyg-block, .md-mermaid-block, .wysiwyg-insert-row')) return;
     setPendingInsert(null);
     setOpenInsertMenu(null);
   };
@@ -111,7 +114,7 @@ export default function WYSIWYGEditor({
     if (openInsertMenu === null) return;
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && target.closest('.wysiwyg-insert-menu, .wysiwyg-insert-btn')) return;
+      if (target && target.closest('.wysiwyg-insert-menu, .wysiwyg-insert-btn, .wysiwyg-insert-row')) return;
       setOpenInsertMenu(null);
     };
     const onKeyDown = (e: KeyboardEvent) => {
@@ -144,6 +147,7 @@ export default function WYSIWYGEditor({
       >
         {pendingInsert === 0 ? (
           <WYSIWYGBlock
+            key="pending-0"
             block={pendingBlock}
             blockIndex={0}
             theme={theme}
@@ -162,6 +166,7 @@ export default function WYSIWYGEditor({
             </div>
             <InsertButton
               position={0}
+              isEnd
               isDark={isDark}
               isOpen={openInsertMenu === 0}
               onToggle={() => setOpenInsertMenu(openInsertMenu === 0 ? null : 0)}
@@ -184,6 +189,7 @@ export default function WYSIWYGEditor({
       {/* Insert button (or pending block) before the first block */}
       {pendingInsert === 0 ? (
         <WYSIWYGBlock
+          key="pending-0"
           block={pendingBlock}
           blockIndex={0}
           theme={theme}
@@ -205,7 +211,7 @@ export default function WYSIWYGEditor({
       )}
 
       {blocks.map((block, i) => (
-        <div key={`block-wrapper-${i}-${block.startOffset}`}>
+        <div key={`block-wrapper-${i}-${block.startOffset}`} className="wysiwyg-block-group">
           {block.kind === 'text' ? (
             <WYSIWYGBlock
               key={`text-${i}-${block.startOffset}`}
@@ -237,6 +243,7 @@ export default function WYSIWYGEditor({
           {/* Insert button (or pending block) after each block */}
           {pendingInsert === i + 1 ? (
             <WYSIWYGBlock
+              key={`pending-${i + 1}`}
               block={pendingBlock}
               blockIndex={i + 1}
               theme={theme}
@@ -248,6 +255,7 @@ export default function WYSIWYGEditor({
           ) : (
             <InsertButton
               position={i + 1}
+              isEnd={i === blocks.length - 1}
               isDark={isDark}
               isOpen={openInsertMenu === i + 1}
               onToggle={() => setOpenInsertMenu(openInsertMenu === i + 1 ? null : i + 1)}
@@ -262,12 +270,14 @@ export default function WYSIWYGEditor({
   );
 }
 
-// The "+" button between blocks. Appears on hover of the gap area. Clicking
-// it opens a small menu with the block choices: a plain text block (edited
-// inline), or a scaffolded mermaid block (sequence diagram / flowchart) that
-// is inserted and opened in the diagram editor right away.
+// The "+" insert row between blocks and at the end of the document. Between
+// blocks it spans the full width with horizontal guide lines so hovering or
+// clicking anywhere along the gap reveals and toggles the insert menu. At the
+// end of the document (`isEnd`) it stays permanently visible with direct
+// one-click actions for adding a text block or diagram.
 function InsertButton({
   position,
+  isEnd = false,
   isDark,
   isOpen,
   onToggle,
@@ -276,6 +286,7 @@ function InsertButton({
   onInsertDiagram,
 }: {
   position: number;
+  isEnd?: boolean;
   isDark: boolean;
   isOpen: boolean;
   onToggle: () => void;
@@ -284,9 +295,24 @@ function InsertButton({
   onInsertDiagram: (position: number, type: DiagramInsertType) => void;
 }) {
   const itemClass = `wysiwyg-insert-menu-item ${isDark ? 'text-slate-200 hover:bg-slate-700' : 'text-gray-700 hover:bg-gray-100'}`;
+  const appendBtnClass = `wysiwyg-append-btn ${
+    isDark
+      ? 'text-slate-300 bg-slate-900/70 hover:bg-slate-800 hover:text-blue-400 hover:border-blue-500'
+      : 'text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-400'
+  }`;
+
   return (
-    <div className={`wysiwyg-insert-row group/insert${isOpen ? ' wysiwyg-insert-row-open' : ''}`}>
+    <div
+      data-testid={`wysiwyg-insert-row-${position}`}
+      className={`wysiwyg-insert-row group/insert${isEnd ? ' wysiwyg-insert-row-end' : ''}${isOpen ? ' wysiwyg-insert-row-open' : ''}`}
+      onClick={!isEnd ? (e) => {
+        e.stopPropagation();
+        onToggle();
+      } : undefined}
+    >
+      {!isEnd && <span className="wysiwyg-insert-line" aria-hidden="true" />}
       <button
+        type="button"
         data-testid={`wysiwyg-insert-${position}`}
         onClick={(e) => {
           e.stopPropagation();
@@ -294,10 +320,62 @@ function InsertButton({
         }}
         title="Insert block"
         aria-expanded={isOpen}
-        className={`wysiwyg-insert-btn ${isDark ? 'text-slate-500 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-400 hover:text-blue-600 hover:bg-gray-100'}`}
+        className={`wysiwyg-insert-btn ${
+          isDark
+            ? 'text-slate-400 hover:text-blue-400 bg-slate-900 hover:bg-slate-800'
+            : 'text-gray-500 hover:text-blue-600 bg-white hover:bg-gray-100'
+        }`}
       >
         <Plus size={14} />
+        {!isEnd && <span>Add</span>}
       </button>
+      {!isEnd && <span className="wysiwyg-insert-line" aria-hidden="true" />}
+      {isEnd && (
+        <>
+          <button
+            type="button"
+            data-testid="wysiwyg-append-text"
+            className={appendBtnClass}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+              onInsert(position);
+            }}
+          >
+            <Plus size={12} />
+            <Type size={12} />
+            <span>Text block</span>
+          </button>
+          <button
+            type="button"
+            data-testid="wysiwyg-append-sequence"
+            className={appendBtnClass}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+              onInsertDiagram(position, 'sequence');
+            }}
+          >
+            <Plus size={12} />
+            <ArrowRightLeft size={12} />
+            <span>Sequence Diagram</span>
+          </button>
+          <button
+            type="button"
+            data-testid="wysiwyg-append-flowchart"
+            className={appendBtnClass}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+              onInsertDiagram(position, 'flowchart');
+            }}
+          >
+            <Plus size={12} />
+            <Workflow size={12} />
+            <span>Flowchart</span>
+          </button>
+        </>
+      )}
       {isOpen && (
         <div
           data-testid={`wysiwyg-insert-menu-${position}`}
@@ -305,6 +383,7 @@ function InsertButton({
           onClick={(e) => e.stopPropagation()}
         >
           <button
+            type="button"
             data-testid={`wysiwyg-insert-text-${position}`}
             className={itemClass}
             onClick={() => {
@@ -316,6 +395,7 @@ function InsertButton({
             Text block
           </button>
           <button
+            type="button"
             data-testid={`wysiwyg-insert-diagram-sequence-${position}`}
             className={itemClass}
             onClick={() => {
@@ -327,6 +407,7 @@ function InsertButton({
             Sequence Diagram
           </button>
           <button
+            type="button"
             data-testid={`wysiwyg-insert-diagram-flowchart-${position}`}
             className={itemClass}
             onClick={() => {

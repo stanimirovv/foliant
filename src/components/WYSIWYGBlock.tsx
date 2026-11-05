@@ -103,8 +103,11 @@ export default function WYSIWYGBlock({
     if (isEditing && textareaRef.current) {
       textareaRef.current.focus();
       autoSize(textareaRef.current);
+      if (initialEditing && typeof blockRef.current?.scrollIntoView === 'function') {
+        blockRef.current.scrollIntoView({ block: 'nearest' });
+      }
     }
-  }, [isEditing]);
+  }, [isEditing, initialEditing]);
 
   const autoSize = (el: HTMLTextAreaElement) => {
     el.style.height = 'auto';
@@ -114,7 +117,7 @@ export default function WYSIWYGBlock({
   const handleSave = () => {
     // For a pending insert (onCancel provided), saving an empty draft is a
     // no-op — cancel instead so no empty block is inserted.
-    if (onCancel && !draft.trim()) {
+    if (onCancel && !convertBlockType(draft, 'paragraph').trim()) {
       onCancel();
       return;
     }
@@ -177,7 +180,26 @@ export default function WYSIWYGBlock({
 
   // Convert the block to a different type (source manipulation).
   const handleTypeChange = (newType: BlockType) => {
-    const converted = convertBlockType(draft, newType);
+    let converted = convertBlockType(draft, newType);
+    // When the draft has no text content yet (e.g. a newly inserted block),
+    // seed the prefix for the chosen block type so the user can immediately
+    // start typing in that format.
+    if (!converted) {
+      const emptyPrefix: Record<BlockType, string> = {
+        paragraph: '',
+        heading1: '# ',
+        heading2: '## ',
+        heading3: '### ',
+        heading4: '#### ',
+        heading5: '##### ',
+        heading6: '###### ',
+        bulletList: '- ',
+        numberedList: '1. ',
+        quote: '> ',
+        code: '```\n\n```',
+      };
+      converted = emptyPrefix[newType] ?? '';
+    }
     setDraft(converted);
     requestAnimationFrame(() => {
       if (textareaRef.current) {
@@ -263,7 +285,9 @@ export default function WYSIWYGBlock({
               <option value="code">Code</option>
             </select>
             <button
+              type="button"
               data-testid={`wysiwyg-block-save-${blockIndex}`}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={handleSave}
               title="Save (Cmd/Ctrl+Enter)"
               className={`wysiwyg-block-btn ${isDark ? 'hover:bg-slate-700 text-green-400' : 'hover:bg-gray-200 text-green-600'}`}
@@ -271,7 +295,9 @@ export default function WYSIWYGBlock({
               <Check size={14} />
             </button>
             <button
+              type="button"
               data-testid={`wysiwyg-block-cancel-${blockIndex}`}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={handleCancel}
               title="Cancel (Escape)"
               className={`wysiwyg-block-btn ${isDark ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-gray-200 text-gray-600'}`}

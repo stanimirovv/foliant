@@ -92,24 +92,34 @@ describe('WYSIWYG markdown editor (e2e)', () => {
         cy.get('[data-testid="wysiwyg-insert-1"]').click();
         cy.get('[data-testid="wysiwyg-insert-text-1"]').click();
 
-        // A pending block appears in edit mode
-        cy.get('[data-testid="wysiwyg-block-editor-1"]').should('be.visible').type('Inserted paragraph.');
+        // A pending block appears in edit mode; clicking inside it keeps it open
+        cy.get('[data-testid="wysiwyg-block-editor-1"]').should('be.visible').click().type('Inserted paragraph.');
         cy.get('[data-testid="wysiwyg-block-save-1"]').click();
 
         // The new block renders
         cy.get('[data-testid="wysiwyg-block-1"]').should('contain.text', 'Inserted paragraph.');
+
+        // Append a new text block at the end of the document using the always-visible end button
+        cy.get('[data-testid="wysiwyg-append-text"]').should('be.visible').click();
+        cy.get('[data-testid="wysiwyg-block-editor-6"]').should('be.visible').click().type('Appended end paragraph.');
+        cy.get('[data-testid="wysiwyg-block-save-6"]').click();
+        cy.get('[data-testid="wysiwyg-block-6"]').should('contain.text', 'Appended end paragraph.');
         wysiwygSaved();
       })
       .then(() => {
         return cy.request('GET', wysiwygFileApi('notes.md', dir)).then(res => {
           const md = res.body.content as string;
           expect(md).to.contain('Inserted paragraph.');
+          expect(md).to.contain('Appended end paragraph.');
           // It's between the heading and the intro prose
           const headingPos = md.indexOf('# Architecture Notes');
           const insertedPos = md.indexOf('Inserted paragraph.');
           const introPos = md.indexOf('Edited intro prose.') >= 0 ? md.indexOf('Edited intro prose.') : md.indexOf('Intro prose');
+          const trailingPos = md.indexOf('Trailing prose.');
+          const appendedPos = md.indexOf('Appended end paragraph.');
           expect(headingPos).to.be.lessThan(insertedPos);
           expect(insertedPos).to.be.lessThan(introPos);
+          expect(trailingPos).to.be.lessThan(appendedPos);
         });
       });
   });

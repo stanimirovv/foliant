@@ -767,16 +767,20 @@ path[data-et="edge"].edge-hover {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
 
-/* Insert "+" button between blocks. z-index keeps the (translated-up) button
-   and its menu above the neighbouring blocks, which are position: relative
-   and would otherwise cover the button's clickable area. */
+/* Insert "+" row between blocks and at the end of the document. Between blocks
+   the row is a full-width hover target with horizontal guide lines so the user
+   can hover or click anywhere in the gap between blocks. */
 .wysiwyg-insert-row {
   display: flex;
+  align-items: center;
   justify-content: center;
-  height: 0;
+  gap: 0.5em;
+  min-height: 1.5em;
+  margin: 0.1em 0;
   overflow: visible;
   position: relative;
   z-index: 5;
+  cursor: pointer;
 }
 
 /* The row whose menu is open must outrank the sibling rows below it — they
@@ -786,32 +790,112 @@ path[data-et="edge"].edge-hover {
   z-index: 30;
 }
 
+.wysiwyg-insert-line {
+  flex: 1;
+  height: 1px;
+  background: #cbd5e1;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+  pointer-events: none;
+}
+
+.theme-dark .wysiwyg-insert-line {
+  background: #334155;
+}
+
+.wysiwyg-insert-row:hover .wysiwyg-insert-line,
+.wysiwyg-insert-row-open .wysiwyg-insert-line {
+  opacity: 1;
+  background: #93c5fd;
+}
+
+.theme-dark .wysiwyg-insert-row:hover .wysiwyg-insert-line,
+.theme-dark .wysiwyg-insert-row-open .wysiwyg-insert-line {
+  background: #3b82f6;
+}
+
 .wysiwyg-insert-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.6em;
+  gap: 0.25em;
   height: 1.6em;
+  padding: 0 0.55em;
   border-radius: 9999px;
   border: 1px solid transparent;
   background: transparent;
+  font-size: 0.72rem;
+  font-weight: 500;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
-  transform: translateY(-0.3em);
+  transition: opacity 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.wysiwyg-block-group:hover .wysiwyg-insert-btn {
+  opacity: 0.55;
 }
 
 .wysiwyg-insert-row:hover .wysiwyg-insert-btn,
+.wysiwyg-insert-row-open .wysiwyg-insert-btn,
 .wysiwyg-insert-btn:focus-visible {
   opacity: 1;
-}
-
-.wysiwyg-insert-btn:hover {
   border-color: #93c5fd;
 }
 
-.theme-dark .wysiwyg-insert-btn:hover {
+.theme-dark .wysiwyg-insert-row:hover .wysiwyg-insert-btn,
+.theme-dark .wysiwyg-insert-row-open .wysiwyg-insert-btn,
+.theme-dark .wysiwyg-insert-btn:focus-visible {
   border-color: #3b82f6;
+}
+
+/* End-of-document insert bar: always visible so adding a new text block or
+   diagram at the bottom of the document never requires hunting for a hover target. */
+.wysiwyg-insert-row-end {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin-top: 0.75em;
+  padding: 0.5em 0.75em;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  cursor: default;
+}
+
+.theme-dark .wysiwyg-insert-row-end {
+  border-color: #334155;
+}
+
+.wysiwyg-insert-row-end .wysiwyg-insert-btn {
+  opacity: 1;
+  padding: 0 0.45em;
+  border-color: #cbd5e1;
+}
+
+.theme-dark .wysiwyg-insert-row-end .wysiwyg-insert-btn {
+  border-color: #334155;
+}
+
+.wysiwyg-insert-row-end .wysiwyg-insert-menu {
+  left: 0.75em;
+  transform: none;
+}
+
+.wysiwyg-append-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.25em 0.65em;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.theme-dark .wysiwyg-append-btn {
+  border-color: #334155;
 }
 
 /* Insert menu (text block / sequence diagram / flowchart), opened by the "+" button */

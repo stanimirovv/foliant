@@ -282,6 +282,30 @@ describe('WYSIWYGBlock', () => {
       const select = screen.getByTestId('wysiwyg-block-type-0') as HTMLSelectElement;
       expect(select.value).toBe('heading3');
     });
+
+    it('seeds the block prefix when changing type on an empty newly inserted block', () => {
+      const onCancel = vi.fn();
+      const { props } = renderBlock(makeBlock({ source: '' }), { initialEditing: true, onCancel });
+      fireEvent.change(screen.getByTestId('wysiwyg-block-type-0'), { target: { value: 'heading2' } });
+      const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
+      expect(textarea.value).toBe('## ');
+      expect((screen.getByTestId('wysiwyg-block-type-0') as HTMLSelectElement).value).toBe('heading2');
+
+      // Typing after the prefix and saving commits the heading
+      fireEvent.change(textarea, { target: { value: '## New Section' } });
+      fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
+      expect(props.onSave).toHaveBeenCalledWith(0, '## New Section');
+      expect(onCancel).not.toHaveBeenCalled();
+    });
+
+    it('cancels a pending empty block when saved with only an empty type prefix', () => {
+      const onCancel = vi.fn();
+      const { props } = renderBlock(makeBlock({ source: '' }), { initialEditing: true, onCancel });
+      fireEvent.change(screen.getByTestId('wysiwyg-block-type-0'), { target: { value: 'heading2' } });
+      fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
+      expect(props.onSave).not.toHaveBeenCalled();
+      expect(onCancel).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('keyboard shortcuts in the textarea', () => {

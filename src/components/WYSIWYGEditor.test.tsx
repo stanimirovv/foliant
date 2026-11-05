@@ -343,6 +343,65 @@ describe('WYSIWYGEditor', () => {
       const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
       expect(newCode).toContain('First content.');
     });
+
+    it('clicking inside a pending block textarea or container does not dismiss it', () => {
+      const { props } = renderEditor();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-1'));
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-text-1'));
+
+      const textarea = screen.getByTestId('wysiwyg-block-editor-1');
+      // Clicking the textarea or block container must not trigger background dismissal
+      fireEvent.click(textarea);
+      fireEvent.click(textarea.closest('.wysiwyg-block')!);
+      expect(screen.getByTestId('wysiwyg-block-editor-1')).toBeTruthy();
+
+      fireEvent.change(textarea, { target: { value: 'Survived click.' } });
+      fireEvent.click(screen.getByTestId('wysiwyg-block-save-1'));
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(props.onMarkdownEdit).mock.calls[0][0]).toContain('Survived click.');
+    });
+
+    it('clicking anywhere on a between-block insert row toggles its insert menu', () => {
+      renderEditor();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-row-2'));
+      expect(screen.getByTestId('wysiwyg-insert-menu-2')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('wysiwyg-insert-row-2'));
+      expect(screen.queryByTestId('wysiwyg-insert-menu-2')).toBeNull();
+    });
+
+    it('provides direct one-click buttons at the end of the document to append text or diagrams', () => {
+      const { props } = renderEditor();
+      // The end-of-document row (position 6) is marked with wysiwyg-insert-row-end
+      expect(screen.getByTestId('wysiwyg-insert-row-6').className).toContain('wysiwyg-insert-row-end');
+
+      // Direct "Text block" button at the end of the document opens a pending block at position 6
+      fireEvent.click(screen.getByTestId('wysiwyg-append-text'));
+      const textarea = screen.getByTestId('wysiwyg-block-editor-6');
+      fireEvent.click(textarea);
+      fireEvent.change(textarea, { target: { value: 'Appended via footer button.' } });
+      fireEvent.click(screen.getByTestId('wysiwyg-block-save-6'));
+
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      const newCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      expect(newCode.indexOf('Appended via footer button.')).toBeGreaterThan(newCode.indexOf('Trailing prose.'));
+    });
+
+    it('direct end-of-document diagram buttons append a diagram and open it in the diagram editor', () => {
+      const { props } = renderEditor();
+      fireEvent.click(screen.getByTestId('wysiwyg-append-sequence'));
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      const seqCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      expect(seqCode.lastIndexOf('sequenceDiagram')).toBeGreaterThan(seqCode.indexOf('Trailing prose.'));
+      // 2 existing diagrams in MD → new appended diagram is index 2
+      expect(props.onSelectDiagram).toHaveBeenCalledWith(2);
+
+      vi.clearAllMocks();
+      fireEvent.click(screen.getByTestId('wysiwyg-append-flowchart'));
+      expect(props.onMarkdownEdit).toHaveBeenCalledTimes(1);
+      const flowCode = vi.mocked(props.onMarkdownEdit).mock.calls[0][0] as string;
+      expect(flowCode.lastIndexOf('flowchart TD')).toBeGreaterThan(flowCode.indexOf('Trailing prose.'));
+      expect(props.onSelectDiagram).toHaveBeenCalledWith(2);
+    });
   });
 
   describe('insert menu behavior', () => {
