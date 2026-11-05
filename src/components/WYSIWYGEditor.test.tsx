@@ -141,10 +141,14 @@ describe('WYSIWYGEditor', () => {
   });
 
   describe('editing a text block', () => {
-    it('click → edit → save calls onMarkdownEdit with the updated full document', () => {
+    it('single-click does not enter edit mode; double-click → edit → save calls onMarkdownEdit with the updated full document', () => {
       const { props } = renderEditor();
-      // Click the first block (heading)
+      // Single click does not enter edit mode
       fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
+
+      // Double-click the first block (heading)
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: '# Edited Title' } });
       fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
@@ -161,7 +165,7 @@ describe('WYSIWYGEditor', () => {
 
     it('editing via blur saves', () => {
       const { props } = renderEditor();
-      fireEvent.click(screen.getByTestId('wysiwyg-block-1')); // Intro prose
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-1')); // Intro prose
       const textarea = screen.getByTestId('wysiwyg-block-editor-1');
       fireEvent.change(textarea, { target: { value: 'Edited prose.' } });
       fireEvent.blur(textarea);
@@ -174,7 +178,7 @@ describe('WYSIWYGEditor', () => {
 
     it('cancel does not call onMarkdownEdit', () => {
       const { props } = renderEditor();
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'Changed' } });
       fireEvent.click(screen.getByTestId('wysiwyg-block-cancel-0'));
@@ -499,7 +503,7 @@ describe('WYSIWYGEditor', () => {
     it('clears the active block when the code changes externally', () => {
       const { props, rerender } = renderEditor();
       // Activate a block
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       expect(screen.getByTestId('wysiwyg-block-editor-0')).toBeTruthy();
 
       // External change that removes the first block
@@ -517,7 +521,7 @@ describe('WYSIWYGEditor', () => {
       const { props, rerender } = renderEditor();
 
       // Edit block 0 (heading)
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       fireEvent.change(screen.getByTestId('wysiwyg-block-editor-0'), { target: { value: '# New Title' } });
       fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
 
@@ -525,7 +529,7 @@ describe('WYSIWYGEditor', () => {
       rerender(<WYSIWYGEditor {...props} code={code1} />);
 
       // Now edit block 1 (intro prose)
-      fireEvent.click(screen.getByTestId('wysiwyg-block-1'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-1'));
       fireEvent.change(screen.getByTestId('wysiwyg-block-editor-1'), { target: { value: 'New prose.' } });
       fireEvent.click(screen.getByTestId('wysiwyg-block-save-1'));
 

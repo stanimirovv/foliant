@@ -77,9 +77,15 @@ describe('WYSIWYGBlock', () => {
   });
 
   describe('edit mode', () => {
-    it('clicking the block switches to edit mode with a textarea', () => {
+    it('single-clicking the block does not switch to edit mode (allows selecting text freely)', () => {
       renderBlock(makeBlock({ source: 'Hello world' }));
       fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
+    });
+
+    it('double-clicking the block switches to edit mode with a textarea', () => {
+      renderBlock(makeBlock({ source: 'Hello world' }));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       expect(textarea).toBeTruthy();
       expect(textarea.value).toBe('Hello world');
@@ -87,7 +93,7 @@ describe('WYSIWYGBlock', () => {
 
     it('save button calls onSave with the edited source', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'Edited' } });
       fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
@@ -96,7 +102,7 @@ describe('WYSIWYGBlock', () => {
 
     it('Cmd/Ctrl+Enter saves', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'Edited' } });
       fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
@@ -105,7 +111,7 @@ describe('WYSIWYGBlock', () => {
 
     it('Meta+Enter (Cmd) saves', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'Edited' } });
       fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
@@ -114,7 +120,7 @@ describe('WYSIWYGBlock', () => {
 
     it('blur saves', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'Edited on blur' } });
       fireEvent.blur(textarea);
@@ -123,7 +129,7 @@ describe('WYSIWYGBlock', () => {
 
     it('blur to a toolbar control keeps edit mode without saving', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       const select = screen.getByTestId('wysiwyg-block-type-0');
       fireEvent.change(textarea, { target: { value: 'Edited' } });
@@ -138,7 +144,7 @@ describe('WYSIWYGBlock', () => {
 
     it('blur to outside the block saves', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'Edited outside' } });
       fireEvent.blur(textarea, { relatedTarget: document.body });
@@ -147,7 +153,7 @@ describe('WYSIWYGBlock', () => {
 
     it('cancel button reverts without calling onSave', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'Changed' } });
       fireEvent.click(screen.getByTestId('wysiwyg-block-cancel-0'));
@@ -159,7 +165,7 @@ describe('WYSIWYGBlock', () => {
 
     it('Escape cancels', () => {
       const { props } = renderBlock(makeBlock({ source: 'Original' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0');
       fireEvent.change(textarea, { target: { value: 'Changed' } });
       fireEvent.keyDown(textarea, { key: 'Escape' });
@@ -169,14 +175,14 @@ describe('WYSIWYGBlock', () => {
 
     it('save with unchanged source does not call onSave', () => {
       const { props } = renderBlock(makeBlock({ source: 'Same' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
       expect(props.onSave).not.toHaveBeenCalled();
     });
 
     it('shows save and cancel buttons (not delete) while editing', () => {
       renderBlock(makeBlock());
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       expect(screen.getByTestId('wysiwyg-block-save-0')).toBeTruthy();
       expect(screen.getByTestId('wysiwyg-block-cancel-0')).toBeTruthy();
       expect(screen.queryByTestId('wysiwyg-block-delete-0')).toBeNull();
@@ -215,7 +221,7 @@ describe('WYSIWYGBlock', () => {
   describe('block type switching', () => {
     it('shows a type selector in edit mode', () => {
       renderBlock(makeBlock({ source: 'Hello' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       expect(screen.getByTestId('wysiwyg-block-type-0')).toBeTruthy();
     });
 
@@ -226,7 +232,7 @@ describe('WYSIWYGBlock', () => {
 
     it('changing the type converts the draft source', () => {
       const { props } = renderBlock(makeBlock({ source: 'Hello world' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       fireEvent.change(screen.getByTestId('wysiwyg-block-type-0'), { target: { value: 'heading1' } });
       // The textarea now contains the converted source
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
@@ -238,7 +244,7 @@ describe('WYSIWYGBlock', () => {
 
     it('converts a heading to a paragraph', () => {
       const { props } = renderBlock(makeBlock({ nodeType: 'heading', headingDepth: 2, source: '## Title' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       fireEvent.change(screen.getByTestId('wysiwyg-block-type-0'), { target: { value: 'paragraph' } });
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       expect(textarea.value).toBe('Title');
@@ -248,7 +254,7 @@ describe('WYSIWYGBlock', () => {
 
     it('converts to a bullet list', () => {
       renderBlock(makeBlock({ source: 'Item' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       fireEvent.change(screen.getByTestId('wysiwyg-block-type-0'), { target: { value: 'bulletList' } });
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       expect(textarea.value).toBe('- Item');
@@ -256,7 +262,7 @@ describe('WYSIWYGBlock', () => {
 
     it('converts to a quote', () => {
       renderBlock(makeBlock({ source: 'Quoted' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       fireEvent.change(screen.getByTestId('wysiwyg-block-type-0'), { target: { value: 'quote' } });
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       expect(textarea.value).toBe('> Quoted');
@@ -264,7 +270,7 @@ describe('WYSIWYGBlock', () => {
 
     it('converts to a code block', () => {
       renderBlock(makeBlock({ source: 'const x = 1;' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       fireEvent.change(screen.getByTestId('wysiwyg-block-type-0'), { target: { value: 'code' } });
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       expect(textarea.value).toBe('```\nconst x = 1;\n```');
@@ -272,7 +278,7 @@ describe('WYSIWYGBlock', () => {
 
     it('detects the current type in the selector', () => {
       renderBlock(makeBlock({ nodeType: 'heading', headingDepth: 3, source: '### Sub' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const select = screen.getByTestId('wysiwyg-block-type-0') as HTMLSelectElement;
       expect(select.value).toBe('heading3');
     });
@@ -281,7 +287,7 @@ describe('WYSIWYGBlock', () => {
   describe('keyboard shortcuts in the textarea', () => {
     it('Cmd+B wraps the selection with **', () => {
       renderBlock(makeBlock({ source: 'Hello world' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       // Select "world"
       textarea.setSelectionRange(6, 11);
@@ -291,7 +297,7 @@ describe('WYSIWYGBlock', () => {
 
     it('Cmd+I wraps the selection with *', () => {
       renderBlock(makeBlock({ source: 'Hello world' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       textarea.setSelectionRange(6, 11);
       fireEvent.keyDown(textarea, { key: 'i', metaKey: true });
@@ -300,7 +306,7 @@ describe('WYSIWYGBlock', () => {
 
     it('Cmd+K wraps the selection with a link', () => {
       renderBlock(makeBlock({ source: 'Click here' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       textarea.setSelectionRange(0, 10);
       fireEvent.keyDown(textarea, { key: 'k', ctrlKey: true });
@@ -309,7 +315,7 @@ describe('WYSIWYGBlock', () => {
 
     it('Cmd+B unwraps already-bold text', () => {
       renderBlock(makeBlock({ source: 'Hello **world**' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       // Select "**world**" (including the markers)
       textarea.setSelectionRange(6, 15);
@@ -319,7 +325,7 @@ describe('WYSIWYGBlock', () => {
 
     it('Cmd+B with no selection inserts ** and places cursor in between', () => {
       renderBlock(makeBlock({ source: 'Hello' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       const textarea = screen.getByTestId('wysiwyg-block-editor-0') as HTMLTextAreaElement;
       textarea.setSelectionRange(5, 5); // cursor at end
       fireEvent.keyDown(textarea, { key: 'b', ctrlKey: true });
@@ -378,12 +384,13 @@ describe('WYSIWYGBlock', () => {
       openSpy.mockRestore();
     });
 
-    it('does not enter edit mode when clicking nested elements within a link', () => {
+    it('does not enter edit mode when clicking or double-clicking nested elements within a link', () => {
       renderBlock(makeBlock({ source: '[**Bold link**](https://example.com)' }));
       const boldText = screen.getByText('Bold link');
       const clickHandler = (e: MouseEvent) => e.preventDefault();
       window.addEventListener('click', clickHandler);
       fireEvent.click(boldText);
+      fireEvent.doubleClick(boldText);
       window.removeEventListener('click', clickHandler);
 
       expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
@@ -429,17 +436,18 @@ describe('WYSIWYGBlock', () => {
       expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
     });
 
-    it('does not enter edit mode when an internal link is clicked', () => {
+    it('does not enter edit mode when an internal link is clicked or double-clicked', () => {
       renderBlock(makeBlock({ source: '[Section](#my-section)' }));
       const link = screen.getByText('Section');
       fireEvent.click(link);
+      fireEvent.doubleClick(link);
       // Still in read mode — no textarea appeared.
       expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
     });
 
-    it('clicking non-link content still enters edit mode', () => {
+    it('double-clicking non-link content enters edit mode', () => {
       renderBlock(makeBlock({ source: 'Plain text' }));
-      fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
       expect(screen.getByTestId('wysiwyg-block-editor-0')).toBeTruthy();
     });
 

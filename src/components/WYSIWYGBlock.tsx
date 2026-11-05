@@ -78,10 +78,10 @@ function wrapSelection(
 }
 
 // Renders one text block of the WYSIWYG markdown editor. In read mode the
-// block shows its rendered HTML (via marked); clicking it swaps to an inline
-// textarea with the block's markdown source. Save (click, Cmd/Ctrl+Enter, or
-// blur) splices the edited source back into the full document through
-// onSave; Cancel (click or Escape) reverts without saving.
+// block shows its rendered HTML (via marked); double-clicking it swaps to an
+// inline textarea with the block's markdown source. Save (click,
+// Cmd/Ctrl+Enter, or blur) splices the edited source back into the full
+// document through onSave; Cancel (click or Escape) reverts without saving.
 export default function WYSIWYGBlock({
   block,
   blockIndex,
@@ -207,8 +207,8 @@ export default function WYSIWYGBlock({
     }
   };
 
-  // Click on the block switches to edit mode unless the user clicked on a link.
-  const handleBlockClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Double-click on the block switches to edit mode unless the user clicked on a link.
+  const handleBlockDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     // The first check is if clicking on a link — if so, do not enter edit mode.
     const target = e.target as HTMLElement | null;
     if (target?.closest('a')) {
@@ -229,7 +229,7 @@ export default function WYSIWYGBlock({
       className={`wysiwyg-block group ${isEditing ? 'wysiwyg-active' : ''} ${
         isDark ? 'text-slate-100' : 'text-gray-900'
       }`}
-      onClick={handleBlockClick}
+      onDoubleClick={handleBlockDoubleClick}
     >
       {/* Toolbar (visible on hover, or always when editing) */}
       <div
@@ -312,7 +312,7 @@ export default function WYSIWYGBlock({
           data-testid={`wysiwyg-block-empty-${blockIndex}`}
           className={`italic ${isDark ? 'text-slate-500' : 'text-gray-400'}`}
         >
-          Empty block — click to edit
+          Empty block — double-click to edit
         </div>
       ) : (
         <div

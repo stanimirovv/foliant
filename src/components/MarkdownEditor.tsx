@@ -172,7 +172,7 @@ export default function MarkdownEditor({
           <span
             className={`hidden md:inline ${isDark ? 'text-slate-500' : 'text-gray-400'}`}
           >
-            Click any block to edit it inline — mermaid diagrams open in the diagram editor.
+            Double-click any block to edit it inline — mermaid diagrams open in the diagram editor.
           </span>
         </div>
         <div className="flex items-center space-x-1 flex-shrink-0">

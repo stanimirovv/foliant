@@ -340,7 +340,7 @@ describe('MarkdownEditor', () => {
       assertAllRenderCallsAreDiagrams();
 
       // shift every offset after the intro prose by editing it (WYSIWYG save)
-      fireEvent.click(screen.getByTestId('wysiwyg-block-1'));
+      fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-1'));
       fireEvent.change(screen.getByTestId('wysiwyg-block-editor-1'), {
         target: { value: 'Edited intro prose, now much longer, shifting every offset after it.' },
       });
@@ -373,9 +373,11 @@ describe('MarkdownEditor', () => {
     expect(screen.getByTestId('wysiwyg-block-1').textContent).toContain('bold');
   });
 
-  it('clicking a text block in the preview switches it to edit mode', async () => {
+  it('double-clicking a text block in the preview switches it to edit mode, while single-clicking does not', async () => {
     renderEditor();
     fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+    expect(screen.queryByTestId('wysiwyg-block-editor-0')).toBeNull();
+    fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
     expect(screen.getByTestId('wysiwyg-block-editor-0')).toBeTruthy();
   });
 
@@ -383,7 +385,7 @@ describe('MarkdownEditor', () => {
     const onMarkdownEdit = vi.fn();
     renderEditor({ onMarkdownEdit });
 
-    fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+    fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
     fireEvent.change(screen.getByTestId('wysiwyg-block-editor-0'), { target: { value: '# Changed' } });
     fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
 
@@ -396,7 +398,7 @@ describe('MarkdownEditor', () => {
   it('falls back to onCodeChange when onMarkdownEdit is not provided', async () => {
     const { props } = renderEditor();
     // No onMarkdownEdit — WYSIWYG edits go through onCodeChange
-    fireEvent.click(screen.getByTestId('wysiwyg-block-0'));
+    fireEvent.doubleClick(screen.getByTestId('wysiwyg-block-0'));
     fireEvent.change(screen.getByTestId('wysiwyg-block-editor-0'), { target: { value: '# Fallback' } });
     fireEvent.click(screen.getByTestId('wysiwyg-block-save-0'));
 

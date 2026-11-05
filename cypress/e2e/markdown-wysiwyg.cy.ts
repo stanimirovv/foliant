@@ -46,8 +46,10 @@ describe('WYSIWYG markdown editor (e2e)', () => {
         // The WYSIWYG editor is visible
         cy.get('[data-testid="wysiwyg-editor"]', { timeout: 10000 }).should('be.visible');
 
-        // Block 1 is "Intro prose that must survive." — click to edit
+        // Block 1 is "Intro prose that must survive." — single-click does not edit, double-click to edit
         cy.get('[data-testid="wysiwyg-block-1"]').click();
+        cy.get('[data-testid="wysiwyg-block-editor-1"]').should('not.exist');
+        cy.get('[data-testid="wysiwyg-block-1"]').dblclick();
         cy.get('[data-testid="wysiwyg-block-editor-1"]').should('be.visible').clear().type('Edited intro prose.');
 
         // Save with Cmd/Ctrl+Enter
@@ -280,7 +282,7 @@ describe('WYSIWYG markdown editor (e2e)', () => {
         cy.get('[data-testid="wysiwyg-editor"]', { timeout: 10000 }).should('be.visible');
 
         // Edit block 1 (intro prose)
-        cy.get('[data-testid="wysiwyg-block-1"]').click();
+        cy.get('[data-testid="wysiwyg-block-1"]').dblclick();
         cy.get('[data-testid="wysiwyg-block-editor-1"]').clear().type('Edited once.');
         cy.get('[data-testid="wysiwyg-block-save-1"]').click();
         cy.get('[data-testid="wysiwyg-block-1"]').should('contain.text', 'Edited once.');
@@ -307,7 +309,7 @@ describe('WYSIWYG markdown editor (e2e)', () => {
         cy.get('[data-testid="wysiwyg-editor"]', { timeout: 10000 }).should('be.visible');
 
         // Edit block 1 (intro prose) and change its type to Heading 2
-        cy.get('[data-testid="wysiwyg-block-1"]').click();
+        cy.get('[data-testid="wysiwyg-block-1"]').dblclick();
         cy.get('[data-testid="wysiwyg-block-type-1"]').select('heading2');
         cy.get('[data-testid="wysiwyg-block-save-1"]').click();
 
@@ -362,7 +364,7 @@ describe('WYSIWYG markdown editor (e2e)', () => {
         cy.get('[data-testid="markdown-mode-split"]').should('not.exist');
 
         // Edit in WYSIWYG → auto-saves
-        cy.get('[data-testid="wysiwyg-block-1"]').click();
+        cy.get('[data-testid="wysiwyg-block-1"]').dblclick();
         cy.get('[data-testid="wysiwyg-block-editor-1"]').clear().type('SyncedEdit.');
         cy.get('[data-testid="wysiwyg-block-save-1"]').click();
         wysiwygSaved();
